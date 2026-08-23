@@ -2,7 +2,13 @@ import { createElement, useCallback, useMemo, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import type { NodeKind } from '../sim/types';
 import type { Preset } from '../sim/presets';
-import { ICON_BOX, ICON_STROKE, KIND_ICON, KIND_NAME, NODE_DND_MIME } from './nodeVisuals';
+import {
+  ICON_BOX,
+  ICON_STROKE,
+  KIND_ICON,
+  KIND_NAME,
+  NODE_DND_MIME,
+} from './nodeVisuals';
 import './Palette.css';
 
 /* ------------------------------------------------------------------ *
@@ -399,9 +405,7 @@ export function Palette({
                     <span className="pal-mark" aria-hidden="true" />
                     <span className="pal-preset-text">
                       <span className="pal-name">{preset.name}</span>
-                      {note ? (
-                        <span className="label pal-note">{note}</span>
-                      ) : null}
+                      {note ? <span className="label pal-note">{note}</span> : null}
                     </span>
                   </button>
                 </li>

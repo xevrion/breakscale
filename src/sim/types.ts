@@ -472,7 +472,6 @@ export interface NodeConfig {
    * high-priority traffic keeps being admitted. Defaults to 0.3.
    */
   priorityReserve?: number;
-
 }
 
 export interface SimNode {

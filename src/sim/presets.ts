@@ -618,7 +618,12 @@ const DEFAULT_LABEL: Record<NodeKind, string> = {
 
 let nodeCounter = 0;
 
-export function makeNode(kind: NodeKind, x: number, y: number, label?: string): SimNode {
+export function makeNode(
+  kind: NodeKind,
+  x: number,
+  y: number,
+  label?: string,
+): SimNode {
   nodeCounter += 1;
   return {
     id: `${kind}-${nodeCounter}`,
@@ -1214,7 +1219,10 @@ const fullStack: Topology = {
       hitRate: 0.7,
       queueLimit: 2048,
     }),
-    node('lb', 'lb', 'Load Balancer', COL(2), ROW(1), { capacity: 512, serviceMs: 0.5 }),
+    node('lb', 'lb', 'Load Balancer', COL(2), ROW(1), {
+      capacity: 512,
+      serviceMs: 0.5,
+    }),
     node('api1', 'service', 'API 1', COL(3), ROW(0), {
       capacity: 12,
       serviceMs: 8,
@@ -1302,7 +1310,10 @@ const specialisedStores: Topology = {
   nodes: [
     node('client', 'client', 'Client', COL(0), ROW(1), { rps: 240, timeoutMs: 3000 }),
     node('batch', 'client', 'Batch Jobs', COL(0), ROW(3), { rps: 6, timeoutMs: 2000 }),
-    node('lb', 'lb', 'Load Balancer', COL(1), ROW(1), { capacity: 512, serviceMs: 0.5 }),
+    node('lb', 'lb', 'Load Balancer', COL(1), ROW(1), {
+      capacity: 512,
+      serviceMs: 0.5,
+    }),
     node('archive-q', 'queue', 'Archive Queue', COL(1), ROW(3), {
       serviceMs: 1,
       serviceCv: 0.2,
@@ -2998,79 +3009,92 @@ export const PRESETS: Preset[] = [
   {
     id: 'single-server',
     name: 'Single Server',
-    description: 'One service in front of one database. Latency climbs sharply as the database fills up.',
+    description:
+      'One service in front of one database. Latency climbs sharply as the database fills up.',
     topology: singleServer,
   },
   {
     id: 'load-balanced',
     name: 'Load Balanced',
-    description: 'Three servers share the load, but they all still talk to the same database.',
+    description:
+      'Three servers share the load, but they all still talk to the same database.',
     topology: loadBalanced,
   },
   {
     id: 'cache-aside',
     name: 'Cache Aside',
-    description: 'The cache absorbs most reads. Lower the hit rate and the database takes the whole load.',
+    description:
+      'The cache absorbs most reads. Lower the hit rate and the database takes the whole load.',
     topology: cacheAside,
   },
   {
     id: 'async-workers',
     name: 'Async Workers',
-    description: 'Requests are acknowledged instantly and buffered. Watch the backlog grow when workers fall behind.',
+    description:
+      'Requests are acknowledged instantly and buffered. Watch the backlog grow when workers fall behind.',
     topology: asyncWorkers,
   },
   {
     id: 'retry-storm',
     name: 'Retry Storm',
-    description: 'A short timeout with retries in front of a small database. Retries multiply the load that caused them.',
+    description:
+      'A short timeout with retries in front of a small database. Retries multiply the load that caused them.',
     topology: retryStorm,
   },
   {
     id: 'cdn-origin',
     name: 'CDN + Origin',
-    description: 'The CDN answers most requests at the edge, so only a trickle reaches the origin. Drop the hit rate and watch the origin melt.',
+    description:
+      'The CDN answers most requests at the edge, so only a trickle reaches the origin. Drop the hit rate and watch the origin melt.',
     topology: cdnOrigin,
   },
   {
     id: 'rate-limited-api',
     name: 'Rate Limited API',
-    description: 'A limiter refuses excess traffic at the door. It serves slightly less, but what it does serve stays fast instead of queueing.',
+    description:
+      'A limiter refuses excess traffic at the door. It serves slightly less, but what it does serve stays fast instead of queueing.',
     topology: rateLimitedApi,
   },
   {
     id: 'circuit-breaker',
     name: 'Circuit Breaker',
-    description: 'A breaker watches a failing dependency and stops calling it. Break the payments API and watch the circuit trip, then recover.',
+    description:
+      'A breaker watches a failing dependency and stops calling it. Break the payments API and watch the circuit trip, then recover.',
     topology: circuitBreaker,
   },
   {
     id: 'read-replicas',
     name: 'Read Replicas',
-    description: 'Replicas scale reads but not writes, and a read can arrive before the write it should have seen.',
+    description:
+      'Replicas scale reads but not writes, and a read can arrive before the write it should have seen.',
     topology: readReplicas,
   },
   {
     id: 'sharded-database',
     name: 'Sharded Database',
-    description: 'Four partitions share the load evenly until one key gets hot, and then a single shard melts while the average still looks healthy.',
+    description:
+      'Four partitions share the load evenly until one key gets hot, and then a single shard melts while the average still looks healthy.',
     topology: shardedDatabase,
   },
   {
     id: 'autoscaling-service',
     name: 'Autoscaling Service',
-    description: 'Capacity chases the load, but new servers take time to boot, so requests fail in the gap between the two.',
+    description:
+      'Capacity chases the load, but new servers take time to boot, so requests fail in the gap between the two.',
     topology: autoscalingService,
   },
   {
     id: 'multi-region',
     name: 'Multi-Region Failover',
-    description: 'Two regions, one serving. Crash the active one and every request fails until failover lands.',
+    description:
+      'Two regions, one serving. Crash the active one and every request fails until failover lands.',
     topology: multiRegion,
   },
   {
     id: 'full-stack',
     name: 'Full Stack',
-    description: 'Every tier at once: edge cache, load balancer, services, cache, shards, and a queue of async work behind it all.',
+    description:
+      'Every tier at once: edge cache, load balancer, services, cache, shards, and a queue of async work behind it all.',
     topology: fullStack,
   },
   {
@@ -3140,7 +3164,7 @@ export const PRESETS: Preset[] = [
     id: 'whatsapp',
     name: 'WhatsApp: Store and Forward',
     description:
-      'A simplified reconstruction of WhatsApp from Rick Reed\'s Erlang scaling talks; numbers are illustrative. The chat core is deliberately tiny and nearly idle: one routing hop, then online recipients get pushed and offline ones park in the Mnesia store until they reconnect, so senders essentially cannot fail. At 4x undelivered messages pile up by the hundreds per second with zero errors, and the gateway runs out of held connections, not requests. Watch the queue depth, not the error rate.',
+      "A simplified reconstruction of WhatsApp from Rick Reed's Erlang scaling talks; numbers are illustrative. The chat core is deliberately tiny and nearly idle: one routing hop, then online recipients get pushed and offline ones park in the Mnesia store until they reconnect, so senders essentially cannot fail. At 4x undelivered messages pile up by the hundreds per second with zero errors, and the gateway runs out of held connections, not requests. Watch the queue depth, not the error rate.",
     topology: whatsapp,
   },
 ];

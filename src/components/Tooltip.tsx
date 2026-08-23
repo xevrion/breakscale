@@ -68,7 +68,10 @@ const CLOSE_DELAY_MS = 140;
 const VIEWPORT_MARGIN = 8;
 /** Gap between the trigger and the panel, leaving room for the arrow. */
 const OFFSET = 10;
-/** Half the arrow's diagonal; how far it pokes out of the panel edge. */
+/**
+ * Half the arrow square's side. Published to CSS as `--tip-arrow` so the
+ * stylesheet and the placement maths cannot drift apart.
+ */
 const ARROW = 6;
 /** The arrow never rides closer than this to a panel corner. */
 const ARROW_INSET = 16;
@@ -149,16 +152,30 @@ function clearTimers(): void {
   closeTimer = undefined;
 }
 
+/*
+ * The engaged state is written straight onto the trigger's DOM node rather
+ * than being derived from React state. That is what keeps <Term> stateless:
+ * marking the one open trigger must not re-render the other forty.
+ */
+function markTrigger(el: HTMLElement | undefined, on: boolean): void {
+  if (!el) return;
+  if (on) el.dataset.open = 'true';
+  else delete el.dataset.open;
+}
+
 function commitOpen(next: OpenState): void {
   clearTimers();
   if (state?.trigger === next.trigger && state.source === next.source) return;
+  markTrigger(state?.trigger, false);
   state = next;
+  markTrigger(next.trigger, true);
   emit();
 }
 
 function closeNow(): void {
   clearTimers();
   if (!state) return;
+  markTrigger(state.trigger, false);
   state = null;
   pointerInPanel = false;
   lastCloseAt = Date.now();
@@ -331,6 +348,13 @@ export function Term({ id, children, className, bare = false }: TermProps) {
   const entry = GLOSSARY_BY_ID.get(id);
   if (!entry) return <>{children}</>;
 
+  /*
+   * One shared description node per glossary id, rendered once by
+   * <TooltipLayer/> rather than once per <Term>. Several terms on a screen
+   * may share an id — p99 appears in the inspector and in the metrics strip
+   * — and duplicate element ids would be invalid. Pointing every instance at
+   * one node is both valid and cheaper.
+   */
   return (
     <span
       data-term={id}
@@ -338,14 +362,20 @@ export function Term({ id, children, className, bare = false }: TermProps) {
       tabIndex={0}
       /*
        * NOT role="button". A button announces "collapsed / expanded" and
-       * implies an action, when the only thing here is a description. The
-       * accessible name stays the visible text — critically, so a screen
-       * reader still reads the NUMBER a student is pointing at rather than
-       * having it replaced by a label. The explanation is attached with
-       * aria-describedby by the layer while it is open, which is exactly
-       * the relationship role="tooltip" describes.
+       * implies an action, when the only thing on offer is a description.
+       * The accessible NAME therefore stays the visible text — critically,
+       * so a screen reader still reads the number a student is pointing at
+       * instead of having it replaced by a label. The description node is a
+       * separate element outside this span, so it is never folded into the
+       * name and never read twice.
+       *
+       * It is also always present. Pointing aria-describedby at the floating
+       * panel instead would leave the reference dangling whenever the
+       * tooltip is shut, which is almost always — a screen reader user would
+       * then get no hint that an explanation exists at all, and
+       * discoverability is the entire point of the feature.
        */
-      aria-describedby={`tip-for-${id}`}
+      aria-describedby={descId(id)}
       onPointerEnter={onTriggerPointerEnter}
       onPointerLeave={onTriggerPointerLeave}
       onFocus={onTriggerFocus}
@@ -356,6 +386,11 @@ export function Term({ id, children, className, bare = false }: TermProps) {
       {children}
     </span>
   );
+}
+
+/** Id of the shared hidden description node for a glossary entry. */
+function descId(id: string): string {
+  return `term-desc-${id}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -423,9 +458,7 @@ function place(t: DOMRect, pw: number, ph: number): Placement {
   const along = side === 'top' || side === 'bottom' ? cx - left : cy - top;
   const span = side === 'top' || side === 'bottom' ? pw : ph;
   const arrowOffset =
-    along < ARROW_INSET || along > span - ARROW_INSET
-      ? -1
-      : Math.round(along);
+    along < ARROW_INSET || along > span - ARROW_INSET ? -1 : Math.round(along);
 
   return { left: Math.round(left), top: Math.round(top), side, arrowOffset };
 }
@@ -520,75 +553,108 @@ export function TooltipLayer() {
   /* Never leave a tooltip behind if the layer itself unmounts. */
   useEffect(() => () => clearTimers(), []);
 
-  if (!open) return null;
+  const entry = open?.entry;
+  const see = entry
+    ? (entry.see ?? [])
+        .map((sid) => GLOSSARY_BY_ID.get(sid))
+        .filter((e): e is GlossaryEntry => e !== undefined)
+    : [];
 
-  const { entry } = open;
-  const see = (entry.see ?? [])
-    .map((sid) => GLOSSARY_BY_ID.get(sid))
-    .filter((e): e is GlossaryEntry => e !== undefined);
-
-  return createPortal(
-    <div
-      ref={setPanel}
-      id={`tip-for-${entry.id}`}
-      role="tooltip"
-      className={`tip tip-${placement?.side ?? 'top'}`}
-      style={{
-        left: placement?.left ?? 0,
-        top: placement?.top ?? 0,
-        // Measured off-screen on the first pass, then revealed in place. The
-        // panel must be laid out at full width to be measured, so it cannot
-        // simply be display:none.
-        visibility: placement ? 'visible' : 'hidden',
-        maxWidth: PANEL_MAX_W,
-      }}
-      onPointerEnter={() => {
-        pointerInPanel = true;
-        clearTimers();
-      }}
-      onPointerLeave={() => {
-        pointerInPanel = false;
-        if (open.source === 'hover') scheduleClose();
-      }}
-    >
-      {placement && placement.arrowOffset >= 0 ? (
-        <span
-          className="tip-arrow"
-          aria-hidden="true"
-          style={
-            placement.side === 'top' || placement.side === 'bottom'
-              ? { left: placement.arrowOffset }
-              : { top: placement.arrowOffset }
-          }
-        />
-      ) : null}
-
-      <p className="tip-term">{entry.term}</p>
-      <p className="tip-short">{entry.short}</p>
-      <p className="tip-why">{entry.why}</p>
-
-      {see.length > 0 && navigateHandler ? (
-        <p className="tip-see">
-          <span className="tip-see-label">See also</span>
-          {see.map((other) => (
-            <button
-              key={other.id}
-              type="button"
-              className="tip-see-link"
-              onClick={() => {
-                const go = navigateHandler;
-                closeNow();
-                go?.(other.id);
+  return (
+    <>
+      <TermDescriptions />
+      {entry && open
+        ? createPortal(
+            <div
+              ref={setPanel}
+              role="tooltip"
+              className={`tip tip-${placement?.side ?? 'top'}`}
+              style={{
+                left: placement?.left ?? 0,
+                top: placement?.top ?? 0,
+                /* Laid out but not painted on the measuring pass, then
+                   revealed in place. It has to be in flow at full width to
+                   be measurable, so display:none is not an option. */
+                visibility: placement ? 'visible' : 'hidden',
+                maxWidth: PANEL_MAX_W,
+                ['--tip-arrow' as string]: `${ARROW}px`,
+              }}
+              onPointerEnter={() => {
+                pointerInPanel = true;
+                clearTimers();
+              }}
+              onPointerLeave={() => {
+                pointerInPanel = false;
+                if (open.source === 'hover') scheduleClose();
               }}
             >
-              {other.term}
-            </button>
-          ))}
-        </p>
-      ) : null}
-    </div>,
-    document.body,
+              {placement && placement.arrowOffset >= 0 ? (
+                <span
+                  className="tip-arrow"
+                  aria-hidden="true"
+                  style={
+                    placement.side === 'top' || placement.side === 'bottom'
+                      ? { left: placement.arrowOffset }
+                      : { top: placement.arrowOffset }
+                  }
+                />
+              ) : null}
+
+              <p className="tip-term">{entry.term}</p>
+              <p className="tip-short">{entry.short}</p>
+              <p className="tip-why">{entry.why}</p>
+
+              {see.length > 0 && navigateHandler ? (
+                <p className="tip-see">
+                  <span className="tip-see-label">See also</span>
+                  {see.map((other) => (
+                    <button
+                      key={other.id}
+                      type="button"
+                      className="tip-see-link"
+                      onClick={() => {
+                        const go = navigateHandler;
+                        closeNow();
+                        go?.(other.id);
+                      }}
+                    >
+                      {other.term}
+                    </button>
+                  ))}
+                </p>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * Shared description nodes
+ * ------------------------------------------------------------------ */
+
+/**
+ * One hidden description per glossary entry, rendered once for the whole
+ * app. Every <Term> with that id points its aria-describedby here.
+ *
+ * Static content, so it is memoised to a constant element and never
+ * re-renders — it costs one pass at mount and nothing thereafter, even while
+ * the layer above it opens and closes at speed.
+ */
+const DESCRIPTIONS = (
+  <div className="sr-only" aria-hidden="false">
+    {[...GLOSSARY_BY_ID.values()].map((e) => (
+      <span key={e.id} id={`term-desc-${e.id}`}>
+        {e.term}. {e.short}. Press Enter for the full explanation.
+      </span>
+    ))}
+  </div>
+);
+
+function TermDescriptions() {
+  return DESCRIPTIONS;
 }
 
 /* ------------------------------------------------------------------ *
@@ -598,11 +664,8 @@ export function TooltipLayer() {
 /**
  * Force any open tooltip shut. For the shell to call when it opens a dialog
  * or the glossary panel, so a tooltip is never left floating over a surface
- * that has taken over the screen.
+ * that has just taken over the screen.
  */
 export function closeTooltip(): void {
   closeNow();
 }
-
-/** Half the arrow square's side, exported so the CSS and the JS agree. */
-export const TOOLTIP_ARROW_HALF = ARROW;

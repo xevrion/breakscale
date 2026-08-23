@@ -3,6 +3,24 @@
 Thanks for taking the time. Breakscale is a teaching tool, so the bar for a change is not only
 "does it work" but "does it help someone understand distributed systems better".
 
+Do not worry if you get any of the process below wrong, or if you have not contributed to a
+project before. Say so and we will help. A lot of the people this tool is built for are students,
+and the same goes for the people building it.
+
+## Before you start
+
+**Found something small and obvious?** Send the pull request. No ceremony needed.
+
+**Want to add a component, a preset, or anything touching the engine?** Open an issue first and
+describe the approach. It takes a few minutes and it saves you writing something that then has to
+be rewritten.
+
+**Want to work on an existing issue?** Comment on it and it will be assigned to you, so two people
+do not build the same thing.
+
+Issues are triaged roughly weekly. If something sits longer than that, a nudge on the thread is
+welcome rather than annoying.
+
 ## Getting set up
 
 You need [Bun](https://bun.sh). Node 20 or newer also works if you prefer npm.
@@ -18,13 +36,13 @@ The app runs at http://localhost:5173.
 
 Useful commands:
 
-| Command | What it does |
-| --- | --- |
-| `bun dev` | Start the dev server |
-| `bun run build` | Typecheck and build for production |
-| `bun test` | Run the test suite |
-| `bun run lint` | Lint |
-| `bun run format` | Format with Prettier |
+| Command          | What it does                       |
+| ---------------- | ---------------------------------- |
+| `bun dev`        | Start the dev server               |
+| `bun run build`  | Typecheck and build for production |
+| `bun test`       | Run the test suite                 |
+| `bun run lint`   | Lint                               |
+| `bun run format` | Format with Prettier               |
 
 ## How the project is laid out
 

@@ -189,7 +189,8 @@ const METER_W = NODE_W - PAD_X * 2;
  * would be a second source of truth for the same number.
  */
 const WARN_AT = (() => {
-  for (let v = 0; v <= 1000; v++) if (healthOfLoad(v / 1000) === 'warn') return v / 1000;
+  for (let v = 0; v <= 1000; v++)
+    if (healthOfLoad(v / 1000) === 'warn') return v / 1000;
   return 0.7;
 })();
 
@@ -284,8 +285,7 @@ export interface CanvasProps {
  * ------------------------------------------------------------------ */
 
 const snap = (v: number) => Math.round(v / GRID) * GRID;
-const clamp = (v: number, lo: number, hi: number) =>
-  v < lo ? lo : v > hi ? hi : v;
+const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
 const inPort = (n: SimNode) => ({ x: n.x, y: n.y + PORT_CY });
 const outPort = (n: SimNode) => ({ x: n.x + NODE_W, y: n.y + PORT_CY });
@@ -700,10 +700,7 @@ function edgePath(ax: number, ay: number, bx: number, by: number): string {
   // Where the vertical leg sits. Keep a stub at both ends so each fillet has
   // room; when the target is BEHIND the source there is no room for a mid
   // route, so the leg goes just past the source and the path doubles back.
-  const mid =
-    dx > EDGE_STUB * 2
-      ? ax + Math.max(EDGE_STUB, dx / 2)
-      : ax + EDGE_STUB;
+  const mid = dx > EDGE_STUB * 2 ? ax + Math.max(EDGE_STUB, dx / 2) : ax + EDGE_STUB;
 
   // Corner radius must never exceed half of either leg it joins, or the two
   // arcs overlap and the path visibly kinks.
@@ -878,20 +875,10 @@ const EdgeView = memo(function EdgeView({
           data-* attributes are what the surface's pointerdown router reads;
           no handler is attached here, so nothing can be swallowed before the
           router sees it. */}
-      <path
-        d={d}
-        className="cv-edge-hit"
-        data-hit="edge"
-        data-id={edge.id}
-      />
+      <path d={d} className="cv-edge-hit" data-hit="edge" data-id={edge.id} />
       <path d={d} className="cv-edge-line" strokeWidth={width} />
       {active && (
-        <path
-          d={d}
-          className="cv-edge-flow"
-          strokeWidth={width * 0.75}
-          style={style}
-        />
+        <path d={d} className="cv-edge-flow" strokeWidth={width * 0.75} style={style} />
       )}
       {/* Arrowhead. Axis-aligned because every edge arrives horizontally. */}
       <path
@@ -1061,7 +1048,11 @@ const UnitStrip = memo(function UnitStrip({
         const fh = v > 0 ? Math.max(1, v * height) : 0;
         const cls = [
           'cv-cell-fill',
-          healthOfLoad(v) === 'danger' ? 'is-danger' : healthOfLoad(v) === 'warn' ? 'is-warn' : '',
+          healthOfLoad(v) === 'danger'
+            ? 'is-danger'
+            : healthOfLoad(v) === 'warn'
+              ? 'is-warn'
+              : '',
           i === leadIndex ? 'is-lead' : '',
         ]
           .filter(Boolean)
@@ -1130,14 +1121,34 @@ const QueueVessel = memo(function QueueVessel({
       transform={`translate(${x},${y})`}
       aria-hidden="true"
     >
-      <rect className="cv-vessel-track" x={0} y={0} width={width} height={height} rx={2} />
+      <rect
+        className="cv-vessel-track"
+        x={0}
+        y={0}
+        width={width}
+        height={height}
+        rx={2}
+      />
       {fw > 0 && (
-        <rect className="cv-vessel-fill" x={0} y={0} width={fw} height={height} rx={2} />
+        <rect
+          className="cv-vessel-fill"
+          x={0}
+          y={0}
+          width={fw}
+          height={height}
+          rx={2}
+        />
       )}
       {/* The limit wall. A vessel with no visible brim gives the fill nothing
           to be full AGAINST, so a backlog of 2478 and one of 80 look the same
           when both are drawn against their own scale. */}
-      <rect className="cv-vessel-brim" x={width - 1} y={-1} width={1.5} height={height + 2} />
+      <rect
+        className="cv-vessel-brim"
+        x={width - 1}
+        y={-1}
+        width={1.5}
+        height={height + 2}
+      />
     </g>
   );
 });
@@ -1272,37 +1283,35 @@ const NodeView = memo(function NodeView({
       transform={`translate(${node.x},${node.y})`}
       tabIndex={0}
       role="button"
-      aria-label={
-        [
-          // The kind is dropped when the user's own label already says it, so
-          // a node called "Database" is announced once, not as "Database,
-          // Database". Compared case-insensitively because the label is free
-          // text the student typed.
-          node.label.trim().toLowerCase() === KIND_NAME[node.kind].toLowerCase()
-            ? null
-            : KIND_NAME[node.kind],
-          node.label,
-          readout ? `${readout.primary.value} ${readout.primary.label}` : null,
-          /* The structure is announced, not just drawn. A stack of cards, a
+      aria-label={[
+        // The kind is dropped when the user's own label already says it, so
+        // a node called "Database" is announced once, not as "Database,
+        // Database". Compared case-insensitively because the label is free
+        // text the student typed.
+        node.label.trim().toLowerCase() === KIND_NAME[node.kind].toLowerCase()
+          ? null
+          : KIND_NAME[node.kind],
+        node.label,
+        readout ? `${readout.primary.value} ${readout.primary.label}` : null,
+        /* The structure is announced, not just drawn. A stack of cards, a
              strip of partitions and a filling vessel are all pure geometry —
              a screen-reader user has no access to any of them, and they are
              the whole point of this pass. Said in words rather than as a
              count alone: "4 partitions" beats "4x". */
-          badge
-            ? node.kind === 'shard'
-              ? `${stats?.instances} partitions`
-              : node.kind === 'replica'
-                ? `primary plus ${(stats?.instances ?? 1) - 1} read replicas`
-                : `${stats?.instances} instances`
-            : null,
-          pending > 0 ? `${pending} warming up` : null,
-          // The fault is announced, not just drawn: a screen-reader user has
-          // no access to the square mark in the corner.
-          fault ? `faulted: ${fault}` : null,
-        ]
-          .filter(Boolean)
-          .join(', ')
-      }
+        badge
+          ? node.kind === 'shard'
+            ? `${stats?.instances} partitions`
+            : node.kind === 'replica'
+              ? `primary plus ${(stats?.instances ?? 1) - 1} read replicas`
+              : `${stats?.instances} instances`
+          : null,
+        pending > 0 ? `${pending} warming up` : null,
+        // The fault is announced, not just drawn: a screen-reader user has
+        // no access to the square mark in the corner.
+        fault ? `faulted: ${fault}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ')}
       aria-pressed={selected}
       data-hit="node"
       data-id={node.id}
@@ -1425,13 +1434,29 @@ const NodeView = memo(function NodeView({
         before any colour is applied.
       */}
       {showHeader && fault && (
-        <rect className="cv-node-mark is-fault" x={NODE_W - PAD_X - 7} y={9} width={7} height={7} />
+        <rect
+          className="cv-node-mark is-fault"
+          x={NODE_W - PAD_X - 7}
+          y={9}
+          width={7}
+          height={7}
+        />
       )}
       {showHeader && !fault && health === 'danger' && (
-        <circle className="cv-node-mark is-danger" cx={NODE_W - PAD_X - 3.5} cy={12.5} r={3.5} />
+        <circle
+          className="cv-node-mark is-danger"
+          cx={NODE_W - PAD_X - 3.5}
+          cy={12.5}
+          r={3.5}
+        />
       )}
       {showHeader && !fault && health === 'warn' && (
-        <circle className="cv-node-mark is-warn" cx={NODE_W - PAD_X - 3.5} cy={12.5} r={3} />
+        <circle
+          className="cv-node-mark is-warn"
+          cx={NODE_W - PAD_X - 3.5}
+          cy={12.5}
+          r={3}
+        />
       )}
 
       {/*
@@ -1637,12 +1662,7 @@ const NodeView = memo(function NodeView({
         data-hit="port-out"
         data-id={node.id}
       />
-      <circle
-        className="cv-port cv-port-out"
-        cx={NODE_W}
-        cy={PORT_CY}
-        r={PORT_R}
-      />
+      <circle className="cv-port cv-port-out" cx={NODE_W} cy={PORT_CY} r={PORT_R} />
     </g>
   );
 });
@@ -2115,9 +2135,7 @@ export default function Canvas({
         // 5px port as the drop target is the single biggest reason linking
         // felt unreliable.
         const over = nodeAt(w.x, w.y);
-        setLink((cur) =>
-          cur ? { from: cur.from, x: w.x, y: w.y, over } : cur,
-        );
+        setLink((cur) => (cur ? { from: cur.from, x: w.x, y: w.y, over } : cur));
         return;
       }
 
@@ -2151,7 +2169,11 @@ export default function Canvas({
           const from = pendingLink;
           setPendingLink(null);
           let target: string | null = null;
-          if (p.hit.kind === 'node' || p.hit.kind === 'port-in' || p.hit.kind === 'port-out') {
+          if (
+            p.hit.kind === 'node' ||
+            p.hit.kind === 'port-in' ||
+            p.hit.kind === 'port-out'
+          ) {
             target = p.hit.id;
           } else {
             target = nodeAt(p.worldX, p.worldY);
@@ -2266,11 +2288,7 @@ export default function Canvas({
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         setView((v) => {
-          const k = clamp(
-            v.k * Math.exp(-e.deltaY * 0.0022),
-            MIN_ZOOM,
-            MAX_ZOOM,
-          );
+          const k = clamp(v.k * Math.exp(-e.deltaY * 0.0022), MIN_ZOOM, MAX_ZOOM);
           if (k === v.k) return v;
           // Keep the world point under the CURSOR pinned to the cursor.
           const px = e.clientX - r.left;
@@ -2451,10 +2469,7 @@ export default function Canvas({
     const bw = Math.max(1, maxX - minX);
     const bh = Math.max(1, maxY - minY);
     const k = clamp(
-      Math.min(
-        (r.width - FIT_MARGIN * 2) / bw,
-        (r.height - FIT_MARGIN * 2) / bh,
-      ),
+      Math.min((r.width - FIT_MARGIN * 2) / bw, (r.height - FIT_MARGIN * 2) / bh),
       FIT_MIN,
       FIT_MAX,
     );
@@ -2528,8 +2543,7 @@ export default function Canvas({
     return m;
   }, [topology.nodes]);
 
-  const detail: 0 | 1 | 2 =
-    view.k >= DETAIL_ZOOM ? 2 : view.k >= MINIMAL_ZOOM ? 1 : 0;
+  const detail: 0 | 1 | 2 = view.k >= DETAIL_ZOOM ? 2 : view.k >= MINIMAL_ZOOM ? 1 : 0;
   const showEdgeLabels = view.k >= 1;
 
   /**
@@ -2616,9 +2630,7 @@ export default function Canvas({
         m.set(n.id, 'source');
         continue;
       }
-      const dup = topology.edges.some(
-        (e) => e.from === linkFrom && e.to === n.id,
-      );
+      const dup = topology.edges.some((e) => e.from === linkFrom && e.to === n.id);
       m.set(n.id, dup ? 'invalid' : 'valid');
     }
     return m;
@@ -2773,9 +2785,7 @@ export default function Canvas({
       </div>
 
       {topology.nodes.length === 0 && (
-        <p className="cv-empty">
-          Drag a component here, or load an example system.
-        </p>
+        <p className="cv-empty">Drag a component here, or load an example system.</p>
       )}
 
       {/* Status ledger. A corner carrying a true number stops reading as

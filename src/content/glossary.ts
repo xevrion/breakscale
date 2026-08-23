@@ -18,12 +18,7 @@
  */
 
 export type GlossaryCategory =
-  | 'latency'
-  | 'throughput'
-  | 'failure'
-  | 'capacity'
-  | 'component'
-  | 'unit';
+  'latency' | 'throughput' | 'failure' | 'capacity' | 'component' | 'unit';
 
 export interface GlossaryEntry {
   /** Stable lookup key. Also the anchor id in the glossary panel. */
@@ -548,9 +543,7 @@ export function searchGlossary(query: string): GlossaryEntry[] {
   }
 
   scored.sort((a, b) =>
-    b.score !== a.score
-      ? b.score - a.score
-      : a.entry.term.localeCompare(b.entry.term),
+    b.score !== a.score ? b.score - a.score : a.entry.term.localeCompare(b.entry.term),
   );
   return scored.map((s) => s.entry);
 }

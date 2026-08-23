@@ -52,11 +52,7 @@ const SPARK_INTERVAL_MS = 1000;
  * chosen in Canvas's `readoutFor`, so the trend line under a number is a
  * trend line OF that number rather than of some unrelated quantity.
  */
-function sparkValue(
-  kind: NodeKind,
-  s: NodeStats,
-  queueLimit: number,
-): number {
+function sparkValue(kind: NodeKind, s: NodeStats, queueLimit: number): number {
   switch (kind) {
     case 'client':
       return s.throughput;
@@ -166,7 +162,12 @@ function isTopology(value: unknown): value is Topology {
 
   for (const raw of t.edges) {
     if (typeof raw !== 'object' || raw === null) return false;
-    const e = raw as Partial<{ id: unknown; from: unknown; to: unknown; weight: unknown }>;
+    const e = raw as Partial<{
+      id: unknown;
+      from: unknown;
+      to: unknown;
+      weight: unknown;
+    }>;
     if (typeof e.id !== 'string' || e.id === '') return false;
     if (typeof e.from !== 'string' || typeof e.to !== 'string') return false;
     // A dangling edge would make the engine route into nothing.
@@ -263,9 +264,7 @@ export default function App() {
    * the very first paint already shows the loaded system instead of an empty
    * canvas followed by a second render.
    */
-  const [snapshot, setSnapshot] = useState<SimSnapshot | null>(() =>
-    engine.snapshot(),
-  );
+  const [snapshot, setSnapshot] = useState<SimSnapshot | null>(() => engine.snapshot());
 
   /**
    * Live mirrors of the play/pause state. The rAF loop is started once and
@@ -452,9 +451,7 @@ export default function App() {
         edges: topology.edges.filter(
           (e) =>
             // Explicitly deleted, or orphaned by a node that just went away.
-            !dropEdges.has(e.id) &&
-            !dropNodes.has(e.from) &&
-            !dropNodes.has(e.to),
+            !dropEdges.has(e.id) && !dropNodes.has(e.from) && !dropNodes.has(e.to),
         ),
       });
       setSelectedIds((cur) => {

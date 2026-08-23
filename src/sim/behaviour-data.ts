@@ -261,18 +261,29 @@ function onReplicaDrained(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike)
 function pumpReplica(ctx: BehaviourCtx, state: NodeStateLike): void {
   const ext = replicaExt(state);
 
-  while (ext.writeBusy < writeCapacity(state) && ext.writeHead < ext.writeQueue.length) {
+  while (
+    ext.writeBusy < writeCapacity(state) &&
+    ext.writeHead < ext.writeQueue.length
+  ) {
     const req = ext.writeQueue[ext.writeHead];
     ext.writeQueue[ext.writeHead] = null as unknown as ReqLike;
     ext.writeHead++;
-    compact(ext.writeQueue, () => ext.writeHead, (v) => (ext.writeHead = v));
+    compact(
+      ext.writeQueue,
+      () => ext.writeHead,
+      (v) => (ext.writeHead = v),
+    );
     startReplicaService(ctx, state, req, true);
   }
   while (ext.readBusy < readCapacity(state) && ext.readHead < ext.readQueue.length) {
     const req = ext.readQueue[ext.readHead];
     ext.readQueue[ext.readHead] = null as unknown as ReqLike;
     ext.readHead++;
-    compact(ext.readQueue, () => ext.readHead, (v) => (ext.readHead = v));
+    compact(
+      ext.readQueue,
+      () => ext.readHead,
+      (v) => (ext.readHead = v),
+    );
     startReplicaService(ctx, state, req, false);
   }
 }
@@ -352,7 +363,12 @@ function ensureSized(state: NodeStateLike, ext: ShardExt): ShardExt {
 }
 
 /** Which shard owns this request: the hot key overrides the natural mapping. */
-function shardIndexFor(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike, count: number): number {
+function shardIndexFor(
+  ctx: BehaviourCtx,
+  state: NodeStateLike,
+  req: ReqLike,
+  count: number,
+): number {
   const hot = clamp01(state.config.hotKeyFraction);
   // A single RNG draw decides whether this request is part of the hot-key
   // traffic. Taken unconditionally so the draw sequence -- and therefore the
@@ -515,7 +531,11 @@ function onShardDrained(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): 
 const shardOf = new WeakMap<ReqLike, number>();
 
 /** Drop a queue's dead prefix once it is mostly consumed. */
-function compact(q: unknown[], getHead: () => number, setHead: (v: number) => void): void {
+function compact(
+  q: unknown[],
+  getHead: () => number,
+  setHead: (v: number) => void,
+): void {
   const head = getHead();
   if (head > 64 && head * 2 >= q.length) {
     q.splice(0, head);

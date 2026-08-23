@@ -224,7 +224,11 @@ export interface BehaviourCtx {
    * `pending` is units decided but not yet serving; pass 0 when the kind has
    * no such notion.
    */
-  reportInstances(state: NodeStateLike, perUnit: readonly number[], pending: number): void;
+  reportInstances(
+    state: NodeStateLike,
+    perUnit: readonly number[],
+    pending: number,
+  ): void;
 
   /**
    * Report true occupancy for a kind that runs its own slot discipline.

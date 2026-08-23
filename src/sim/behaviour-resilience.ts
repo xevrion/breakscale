@@ -417,7 +417,11 @@ function shedRefill(ctx: BehaviourCtx, state: NodeStateLike, b: ShedderState): v
 }
 
 /** The bucket as of now, without mutating it. Snapshot-side arithmetic only. */
-function shedProjected(ctx: BehaviourCtx, state: NodeStateLike, b: ShedderState): number {
+function shedProjected(
+  ctx: BehaviourCtx,
+  state: NodeStateLike,
+  b: ShedderState,
+): number {
   const burst = shedBurst(state);
   let tokens = b.tokens > burst ? burst : b.tokens;
   const rate = shedRate(state);
@@ -497,7 +501,9 @@ const loadshedder: ComponentBehaviour = {
     // The admission floor this request must find in the bucket. High
     // priority pays list price; low priority must also leave the reserve
     // untouched, which is the entire mechanism.
-    const floor = low ? 1 + clamp01(state.config.priorityReserve ?? 0.3) * shedBurst(state) : 1;
+    const floor = low
+      ? 1 + clamp01(state.config.priorityReserve ?? 0.3) * shedBurst(state)
+      : 1;
 
     if (b.tokens >= floor) {
       b.tokens -= 1;

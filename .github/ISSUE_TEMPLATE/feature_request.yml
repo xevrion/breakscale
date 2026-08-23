@@ -1,6 +1,6 @@
 name: Feature request
 description: Suggest a component, an example, or a change
-labels: ["enhancement"]
+labels: ['enhancement']
 body:
   - type: textarea
     id: problem

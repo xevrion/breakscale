@@ -140,8 +140,7 @@
    actually is — row padding + chip + gap — so it cannot drift out of
    alignment if any of the three changes. */
 .pal-group-title {
-  padding: var(--sp-2) var(--sp-4) var(--sp-1)
-    calc(var(--sp-4) + 22px + var(--sp-3));
+  padding: var(--sp-2) var(--sp-4) var(--sp-1) calc(var(--sp-4) + 22px + var(--sp-3));
   color: var(--text-faint);
 }
 

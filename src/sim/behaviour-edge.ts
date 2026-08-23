@@ -141,7 +141,11 @@ function refill(ctx: BehaviourCtx, state: NodeStateLike, b: BucketState): void {
  * engine may be snapshotted many times between two arrivals, and each of
  * those must be a pure read.
  */
-function projectedTokens(ctx: BehaviourCtx, state: NodeStateLike, b: BucketState): number {
+function projectedTokens(
+  ctx: BehaviourCtx,
+  state: NodeStateLike,
+  b: BucketState,
+): number {
   const burst = limitBurst(state);
   let tokens = b.tokens > burst ? burst : b.tokens;
   const rate = limitRate(state);
@@ -280,7 +284,12 @@ function bucketOf(now: number, windowMs: number): number {
  * however much traffic flows through it -- a breaker in front of a 10k rps
  * service must not accumulate 10k entries per second.
  */
-function recordOutcome(b: BreakerState, now: number, windowMs: number, ok: boolean): void {
+function recordOutcome(
+  b: BreakerState,
+  now: number,
+  windowMs: number,
+  ok: boolean,
+): void {
   const stamp = bucketOf(now, windowMs);
   const idx = ((stamp % BREAKER_BUCKETS) + BREAKER_BUCKETS) % BREAKER_BUCKETS;
   if (b.stamps[idx] !== stamp) {
@@ -295,7 +304,11 @@ function recordOutcome(b: BreakerState, now: number, windowMs: number, ok: boole
 }
 
 /** Failed/total over the trailing window, plus the total, for the trip test. */
-function windowStats(b: BreakerState, now: number, windowMs: number): { rate: number; total: number } {
+function windowStats(
+  b: BreakerState,
+  now: number,
+  windowMs: number,
+): { rate: number; total: number } {
   const current = bucketOf(now, windowMs);
   let total = 0;
   let failed = 0;
@@ -470,7 +483,9 @@ const breaker: ComponentBehaviour = {
     // Report the phase the breaker would act on if a request arrived right
     // now, so the UI never shows OPEN for a circuit whose timer has expired.
     const phase =
-      b.phase === 'open' && ctx.now - b.openedAtMs >= cfgOpenMs(state) ? 'half-open' : b.phase;
+      b.phase === 'open' && ctx.now - b.openedAtMs >= cfgOpenMs(state)
+        ? 'half-open'
+        : b.phase;
     stats.breakerState = phase;
     stats.breakerErrorRate = windowStats(b, ctx.now, cfgWindowMs(state)).rate;
     stats.rejectedRate = ctx.counterRate(state, 'rejected');

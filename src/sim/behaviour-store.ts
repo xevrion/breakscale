@@ -417,7 +417,7 @@ function vectorClassify(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): 
   const sizeK = Math.max(0, num(state.config.indexSizeK, 0));
   const recall = Math.min(0.99, Math.max(0, num(state.config.recallTarget, 0)));
   const base = Math.max(0, state.config.serviceMs);
-  const mult = (Math.log2(2 + sizeK) / (1 - recall));
+  const mult = Math.log2(2 + sizeK) / (1 - recall);
   if (mult > 1) ctx.addServiceDelay(req, base * (mult - 1));
 }
 

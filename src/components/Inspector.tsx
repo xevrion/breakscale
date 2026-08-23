@@ -243,7 +243,14 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   ],
   // No fleet knobs at all: the platform scales it. What you tune is the
   // cold-start economics and the concurrency ceiling.
-  lambda: ['coldStartMs', 'keepWarmMs', 'maxConcurrency', 'serviceMs', 'serviceCv', 'errorRate'],
+  lambda: [
+    'coldStartMs',
+    'keepWarmMs',
+    'maxConcurrency',
+    'serviceMs',
+    'serviceCv',
+    'errorRate',
+  ],
   // A schedule and a payload size. Everything else about a cron job is
   // what it does to the nodes downstream of it.
   cron: ['intervalMs', 'batchSize'],
@@ -340,8 +347,7 @@ const KIND_BLURB: Record<NodeKind, string> = {
     'A proxy beside one service. It charges its service time on every single request, and pays you back with retries, a per-attempt deadline, and ejecting the upstream after repeated failures. Put one at every hop and watch the taxes stack; that is a service mesh.',
   lambda:
     'Scales instantly with load, up to its concurrency cap, and there is no queue past it. The catch is the cold start: a request that finds no warm instance pays a large extra latency, so idle periods and bursts are exactly when it is slowest.',
-  cron:
-    'Fires on a schedule and dumps its whole batch at once. The database that handles the steady daytime load falls over at midnight not because traffic grew, but because this arrived all in the same instant.',
+  cron: 'Fires on a schedule and dumps its whole batch at once. The database that handles the steady daytime load falls over at midnight not because traffic grew, but because this arrived all in the same instant.',
   bulkhead:
     'Caps how many calls may be outstanding to the dependency behind it. When that dependency slows down, the pool fills within one round trip and the excess fails fast here, instead of queueing behind a sick service.',
   retryqueue:
@@ -732,7 +738,10 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     min: 1,
     max: 100000,
     step: 1,
-    display: (v) => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}M vectors` : `${Math.round(v)}K vectors`),
+    display: (v) =>
+      v >= 1000
+        ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}M vectors`
+        : `${Math.round(v)}K vectors`,
   },
   recallTarget: {
     control: 'slider',
@@ -1034,7 +1043,9 @@ function NumberRow({
 }) {
   const id = useId();
   return (
-    <div className={spec.hint ? 'ins-field-row ins-field-row--hinted' : 'ins-field-row'}>
+    <div
+      className={spec.hint ? 'ins-field-row ins-field-row--hinted' : 'ins-field-row'}
+    >
       <label className="row-k" htmlFor={id}>
         {spec.label}
       </label>
@@ -1052,10 +1063,7 @@ function NumberRow({
           onChange={(e) => {
             const raw = Number(e.currentTarget.value);
             if (!Number.isFinite(raw)) return;
-            const clamped = Math.min(
-              spec.max,
-              Math.max(spec.min, Math.round(raw)),
-            );
+            const clamped = Math.min(spec.max, Math.max(spec.min, Math.round(raw)));
             onChange(clamped);
           }}
         />
@@ -1235,14 +1243,12 @@ export function Inspector({
                   : `${selectedEdgeCount} connections selected.`}
               </p>
               <p className="ins-empty ins-empty-hint">
-                Connections have nothing to configure. Press Delete to remove
-                them.
+                Connections have nothing to configure. Press Delete to remove them.
               </p>
             </>
           ) : (
             <p className="ins-empty">
-              Select a component on the canvas and its settings will appear
-              here.
+              Select a component on the canvas and its settings will appear here.
             </p>
           )}
         </div>
@@ -1327,8 +1333,8 @@ function AutoscalerPanel({ stats }: { stats: NodeStats }) {
     return (
       <Section title="What it is doing">
         <p className="ins-blurb">
-          Not wired to anything yet. Draw a connection from this autoscaler to
-          the component it should scale, and it will start watching it.
+          Not wired to anything yet. Draw a connection from this autoscaler to the
+          component it should scale, and it will start watching it.
         </p>
       </Section>
     );
@@ -1347,12 +1353,16 @@ function AutoscalerPanel({ stats }: { stats: NodeStats }) {
           tone={toneClass(healthOfLoad(util))}
         />
         <StatRow label="Instances running" value={formatCount(have)} />
-        {want !== have && <StatRow label="Instances wanted" value={formatCount(want)} />}
+        {want !== have && (
+          <StatRow label="Instances wanted" value={formatCount(want)} />
+        )}
         {booting > 0 && (
           <StatRow label="Booting now" value={formatCount(booting)} tone="is-warn" />
         )}
       </div>
-      <p className={phase === 'warming' ? 'ins-hint is-warn' : 'ins-hint'}>{phaseText}</p>
+      <p className={phase === 'warming' ? 'ins-hint is-warn' : 'ins-hint'}>
+        {phaseText}
+      </p>
     </Section>
   );
 }
@@ -1391,9 +1401,8 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
         </div>
         {skewed && (
           <p className="ins-hint is-warn">
-            Badly uneven. One partition is doing most of the work while the
-            others sit idle — adding shards will not help until the keys
-            spread out.
+            Badly uneven. One partition is doing most of the work while the others sit
+            idle — adding shards will not help until the keys spread out.
           </p>
         )}
       </Section>
@@ -1405,9 +1414,7 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
     // read pool. Averaging them together is what hides a write bottleneck.
     const primary = per[0] ?? 0;
     const reads = per.slice(1);
-    const readAvg = reads.length
-      ? reads.reduce((a, b) => a + b, 0) / reads.length
-      : 0;
+    const readAvg = reads.length ? reads.reduce((a, b) => a + b, 0) / reads.length : 0;
     const writeBound = primary - readAvg > 0.4;
     return (
       <Section title="Across the set">
@@ -1433,15 +1440,14 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
         </div>
         {writeBound && (
           <p className="ins-hint is-warn">
-            The primary is the bottleneck, not the replicas. Adding more read
-            replicas will not help — every write still goes through the one
-            primary.
+            The primary is the bottleneck, not the replicas. Adding more read replicas
+            will not help — every write still goes through the one primary.
           </p>
         )}
         {stats.staleReadRate > 0 && (
           <p className="ins-hint">
-            Some reads are answered by a replica that has not caught up with
-            the latest write yet. Lower the replication lag to reduce this.
+            Some reads are answered by a replica that has not caught up with the latest
+            write yet. Lower the replication lag to reduce this.
           </p>
         )}
       </Section>
@@ -1461,8 +1467,8 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
       </div>
       {booting > 0 && (
         <p className="ins-hint is-warn">
-          These are not serving traffic yet. Requests can still fail while they
-          boot — that gap is why capacity always lags a spike.
+          These are not serving traffic yet. Requests can still fail while they boot —
+          that gap is why capacity always lags a spike.
         </p>
       )}
     </Section>
@@ -1496,13 +1502,13 @@ function QueuePanel({ stats }: { stats: NodeStats }) {
       </div>
       {shedding ? (
         <p className="ins-hint is-danger">
-          Full. It is turning away {formatRate(stats.shedRate)} — work arriving
-          now is being destroyed, not delayed. The consumers cannot keep up.
+          Full. It is turning away {formatRate(stats.shedRate)} — work arriving now is
+          being destroyed, not delayed. The consumers cannot keep up.
         </p>
       ) : depth > 0 ? (
         <p className="ins-hint">
-          Work is waiting here because the consumers are slower than the
-          producers. It drains once they catch up.
+          Work is waiting here because the consumers are slower than the producers. It
+          drains once they catch up.
         </p>
       ) : null}
     </Section>
@@ -1551,9 +1557,7 @@ function SingleInspector({
   // cannot keep up, which is why it is toned by the same load thresholds.
   const arrivals = stats?.arrivalRate ?? 0;
   const headroom =
-    showCeiling && arrivals > 0 && maxThroughput > 0
-      ? maxThroughput / arrivals
-      : null;
+    showCeiling && arrivals > 0 && maxThroughput > 0 ? maxThroughput / arrivals : null;
 
   const serviceMsLabel =
     cfg.serviceMs < 10 ? cfg.serviceMs.toFixed(1) : String(Math.round(cfg.serviceMs));
@@ -1686,7 +1690,10 @@ function SingleInspector({
               )}
               {node.kind === 'retryqueue' && (
                 <>
-                  <StatRow label="Redelivering" value={formatRate(stats.redeliveryRate ?? 0)} />
+                  <StatRow
+                    label="Redelivering"
+                    value={formatRate(stats.redeliveryRate ?? 0)}
+                  />
                   <StatRow
                     label="Dead letters, total"
                     value={formatCount(stats.deadLetters ?? 0)}
@@ -1695,7 +1702,10 @@ function SingleInspector({
                 </>
               )}
               {node.kind === 'writebehind' && (
-                <StatRow label="Dirty writes held" value={formatCount(stats.dirtyWrites ?? 0)} />
+                <StatRow
+                  label="Dirty writes held"
+                  value={formatCount(stats.dirtyWrites ?? 0)}
+                />
               )}
               {node.kind === 'edgecompute' && (
                 <StatRow
@@ -1742,11 +1752,17 @@ function SingleInspector({
                   tone="is-danger"
                 />
               )}
-              <StatRow label="Completed, total" value={formatCount(stats.totalCompleted)} />
+              <StatRow
+                label="Completed, total"
+                value={formatCount(stats.totalCompleted)}
+              />
               <StatRow label="Failed, total" value={formatCount(stats.totalFailed)} />
             </div>
           ) : (
-            <p className="ins-blurb">Nothing has reached this component yet. Press Play and it will start reporting.</p>
+            <p className="ins-blurb">
+              Nothing has reached this component yet. Press Play and it will start
+              reporting.
+            </p>
           )}
         </Section>
       </div>
@@ -1875,9 +1891,9 @@ function MultiInspector({
         {sameKind ? (
           <>
             <p className="ins-blurb">
-              Changing anything below applies it to all{' '}
-              {formatCount(nodes.length)} of these. Where they currently
-              disagree the value reads <em>mixed</em>, until you move it.
+              Changing anything below applies it to all {formatCount(nodes.length)} of
+              these. Where they currently disagree the value reads <em>mixed</em>, until
+              you move it.
             </p>
 
             {grouped.map((group) => (
@@ -1917,19 +1933,14 @@ function MultiInspector({
           </>
         ) : (
           <p className="ins-blurb">
-            These are different kinds of component, so they have no settings
-            in common. Select one on its own to configure it, or delete the
-            whole selection below.
+            These are different kinds of component, so they have no settings in common.
+            Select one on its own to configure it, or delete the whole selection below.
           </p>
         )}
       </div>
 
       <div className="ins-foot">
-        <button
-          type="button"
-          className="btn btn-danger ins-delete"
-          onClick={deleteAll}
-        >
+        <button type="button" className="btn btn-danger ins-delete" onClick={deleteAll}>
           Delete {formatCount(nodes.length)} selected
         </button>
       </div>

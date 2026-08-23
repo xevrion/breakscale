@@ -119,7 +119,12 @@ export interface ComponentBehaviour {
   /** Fan-out policy. Defaults to 'all'. */
   route?(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): RouteMode;
   /** Choose the single edge when route() returned 'one'. */
-  pickEdge?(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike, out: SimEdge[]): SimEdge | null;
+  pickEdge?(
+    ctx: BehaviourCtx,
+    state: NodeStateLike,
+    req: ReqLike,
+    out: SimEdge[],
+  ): SimEdge | null;
   /**
    * FailureReason to use when this kind's pickEdge() declines to choose an
    * edge. Declining is normally a wiring mistake ('no-route', the default),
@@ -158,7 +163,11 @@ export interface ComponentBehaviour {
    * Called after the node's own service time elapsed and its independent error
    * roll passed. Returning 'complete' answers the call here.
    */
-  onServiceComplete?(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): CompleteAction;
+  onServiceComplete?(
+    ctx: BehaviourCtx,
+    state: NodeStateLike,
+    req: ReqLike,
+  ): CompleteAction;
   /**
    * Autonomous per-tick work for kinds that act without a request arriving
    * (a future autoscaler or circuit breaker). Nothing uses it yet; the engine

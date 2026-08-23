@@ -129,7 +129,10 @@ function ticksFor(top: number): number[] {
  * waits until the observed max has stayed below half the current top for a
  * continuous 5 seconds.
  */
-function useStickyAxis(max: number, fallback: number): { top: number; ticks: number[] } {
+function useStickyAxis(
+  max: number,
+  fallback: number,
+): { top: number; ticks: number[] } {
   const [top, setTop] = useState(fallback);
   // When the value first dropped below half of `top`. null = not low.
   const lowSince = useRef<number | null>(null);
@@ -346,7 +349,13 @@ const Frame = memo(function Frame({
               x2={right}
               y2={y}
             />
-            <text className="mx-ytick num" x={PAD_L - 8} y={y} dy="0.32em" textAnchor="end">
+            <text
+              className="mx-ytick num"
+              x={PAD_L - 8}
+              y={y}
+              dy="0.32em"
+              textAnchor="end"
+            >
               {format(t)}
             </text>
           </g>
@@ -777,10 +786,7 @@ const FailureChart = memo(function FailureChart({
   /* Whether the window has ever carried a failure. This is what separates
      "healthy" from "no data": a chart with 60 clean samples is a REPORT,
      not an absence of one, and it should say so. */
-  const windowHadFailures = useMemo(
-    () => bands.length > 0,
-    [bands],
-  );
+  const windowHadFailures = useMemo(() => bands.length > 0, [bands]);
 
   const empty = samples.length === 0;
   const healthy = total <= 0;

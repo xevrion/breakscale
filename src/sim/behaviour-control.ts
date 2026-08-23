@@ -184,7 +184,8 @@ const autoscaler: ComponentBehaviour = {
       st.lastDecisionMs = -Infinity;
       // ...and starts a fresh observation window, because the new node's
       // smoothed utilisation is not a signal yet.
-      st.observeUntilMs = ctx.now + Math.max(0, state.config.cooldownMs ?? DEFAULT_COOLDOWN_MS);
+      st.observeUntilMs =
+        ctx.now + Math.max(0, state.config.cooldownMs ?? DEFAULT_COOLDOWN_MS);
     }
     if (watched === '') return;
 
@@ -241,7 +242,10 @@ const autoscaler: ComponentBehaviour = {
     // count. For every topology written before instances existed the two
     // readings coincide, because those nodes run exactly one instance.
     const minInst = Math.max(1, Math.floor(cfg.minCapacity ?? DEFAULT_MIN_INSTANCES));
-    const maxInst = Math.max(minInst, Math.floor(cfg.maxCapacity ?? DEFAULT_MAX_INSTANCES));
+    const maxInst = Math.max(
+      minInst,
+      Math.floor(cfg.maxCapacity ?? DEFAULT_MAX_INSTANCES),
+    );
     const target = clamp01(cfg.targetUtil ?? DEFAULT_TARGET_UTIL);
     const step = Math.max(0.01, cfg.scaleStepPct ?? DEFAULT_STEP_PCT);
     // An instance count is integral, so a step must move at least one machine:
@@ -261,12 +265,18 @@ const autoscaler: ComponentBehaviour = {
     // threads, which is why moving the controller onto instances changed the
     // unit without changing the control law.
     const busyInstances = util * st.targetInstances;
-    const idealInstances = Math.max(1, Math.ceil(busyInstances / (target > 0 ? target : 1)));
+    const idealInstances = Math.max(
+      1,
+      Math.ceil(busyInstances / (target > 0 ? target : 1)),
+    );
 
     let want = st.targetInstances;
     if (util > target) {
       // Scale up by a step, but never past what the setpoint actually needs.
-      want = Math.min(st.targetInstances + delta, Math.max(idealInstances, st.targetInstances + 1));
+      want = Math.min(
+        st.targetInstances + delta,
+        Math.max(idealInstances, st.targetInstances + 1),
+      );
     } else if (util < target - DEAD_BAND) {
       // Scale down by a step, but never below what the setpoint needs. The
       // asymmetry with scale-up is deliberate: shedding too much capacity
@@ -310,7 +320,7 @@ const autoscaler: ComponentBehaviour = {
     const st = asAutoscaler(state);
     if (!st) return;
     const scaling = st.warmupDueMs >= 0;
-    const live = st.watchedId ? ctx.scaleOf(st.watchedId) ?? 0 : 0;
+    const live = st.watchedId ? (ctx.scaleOf(st.watchedId) ?? 0) : 0;
     // While warming up, report the fleet size being BOOKED rather than the one
     // in force: paired with watchedInstances, the gap between the two numbers
     // is the visible form of the lag this component exists to teach.
@@ -321,7 +331,7 @@ const autoscaler: ComponentBehaviour = {
     stats.watchedInstances = live;
     stats.pendingInstances = scaling ? Math.max(0, wanted - live) : 0;
     stats.scaling = scaling;
-    stats.watchedUtil = st.watchedId ? ctx.utilizationOf(st.watchedId) ?? 0 : 0;
+    stats.watchedUtil = st.watchedId ? (ctx.utilizationOf(st.watchedId) ?? 0) : 0;
     stats.setpoint = clamp01(state.config.targetUtil ?? DEFAULT_TARGET_UTIL);
 
     // Which of the three waits it is in, and how much of it is left. Resolved
@@ -560,7 +570,11 @@ const region: ComponentBehaviour = {
  * region switch would silently do nothing whenever the UI happened to
  * snapshot first.
  */
-function liveRegionIndex(ctx: BehaviourCtx, state: NodeStateLike, st: RegionState): number {
+function liveRegionIndex(
+  ctx: BehaviourCtx,
+  state: NodeStateLike,
+  st: RegionState,
+): number {
   const count = regionCount(state);
 
   // A failover still inside its window: the node is dark, exactly as

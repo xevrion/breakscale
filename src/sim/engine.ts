@@ -259,10 +259,12 @@ class LatencyRing {
     // Walk newest-first and stop at the window edge. Sampling is capped: a
     // few hundred points give the same percentiles as several thousand, and
     // this keeps snapshot() cheap at 10Hz under heavy traffic.
-    const limit = this.count < PERCENTILE_SAMPLE_CAP ? this.count : PERCENTILE_SAMPLE_CAP;
-    const stride = this.count > PERCENTILE_SAMPLE_CAP
-      ? Math.floor(this.count / PERCENTILE_SAMPLE_CAP)
-      : 1;
+    const limit =
+      this.count < PERCENTILE_SAMPLE_CAP ? this.count : PERCENTILE_SAMPLE_CAP;
+    const stride =
+      this.count > PERCENTILE_SAMPLE_CAP
+        ? Math.floor(this.count / PERCENTILE_SAMPLE_CAP)
+        : 1;
     for (let i = 0, taken = 0; taken < limit && i < this.count; i += stride) {
       const idx = (this.head - 1 - i + LATENCY_RING * 2) % LATENCY_RING;
       if (this.times[idx] < cutoff) break;
@@ -831,7 +833,8 @@ export class Engine implements BehaviourCtx {
         this.finishInstances(state, entry);
       } else if (model === 'custom') {
         state.instancePending = 0;
-        if (state.behaviour.reportInstances) state.behaviour.reportInstances(this, state);
+        if (state.behaviour.reportInstances)
+          state.behaviour.reportInstances(this, state);
         this.finishInstances(state, entry);
       }
     }
@@ -1059,7 +1062,11 @@ export class Engine implements BehaviourCtx {
       if (!state.behaviour.pullsFromQueues) continue;
       for (const edge of state.out) {
         const target = next.get(edge.to);
-        if (target && target.behaviour.buffersForConsumers && !state.sources.includes(target.id)) {
+        if (
+          target &&
+          target.behaviour.buffersForConsumers &&
+          !state.sources.includes(target.id)
+        ) {
           state.sources.push(target.id);
         }
       }
@@ -1313,7 +1320,12 @@ export class Engine implements BehaviourCtx {
     return last;
   }
 
-  private sendChild(parentState: NodeState, parent: Req, edge: SimEdge, attempt: number): void {
+  private sendChild(
+    parentState: NodeState,
+    parent: Req,
+    edge: SimEdge,
+    attempt: number,
+  ): void {
     const target = this.nodes.get(edge.to);
     if (!target) {
       this.childResolved(parent, false, 'no-route', 0);
@@ -1755,7 +1767,12 @@ export class Engine implements BehaviourCtx {
    * Resolve one request. `latencyMs` is the latency this call contributes to
    * its parent (own service time plus the joined subtree).
    */
-  private resolve(req: Req, ok: boolean, reason: FailureReason, latencyMs: number): void {
+  private resolve(
+    req: Req,
+    ok: boolean,
+    reason: FailureReason,
+    latencyMs: number,
+  ): void {
     if (req.resolved) return;
     req.resolved = true;
 
@@ -1831,8 +1848,15 @@ export class Engine implements BehaviourCtx {
 
     if (!ok) {
       const parentState = this.nodes.get(parent.nodeId);
-      const retries = parentState ? Math.max(0, Math.floor(parentState.config.retries)) : 0;
-      if (parentState && child.attempt < retries && reason !== 'depth' && reason !== 'no-route') {
+      const retries = parentState
+        ? Math.max(0, Math.floor(parentState.config.retries))
+        : 0;
+      if (
+        parentState &&
+        child.attempt < retries &&
+        reason !== 'depth' &&
+        reason !== 'no-route'
+      ) {
         // Re-issue the same downstream call. This is real extra load.
         const edge = parentState.out.find((e) => e.id === child.retryTarget);
         if (edge) {
@@ -1876,7 +1900,8 @@ export class Engine implements BehaviourCtx {
 
     if (parent.childFailed) {
       // Same as above: resolve() books the client's failure itself.
-      if (parentState && parentState.behaviour.creditsJoinCompletion) parentState.totalFailed++;
+      if (parentState && parentState.behaviour.creditsJoinCompletion)
+        parentState.totalFailed++;
       this.resolve(parent, false, parent.childReason, total);
       return;
     }
@@ -1926,7 +1951,9 @@ export class Engine implements BehaviourCtx {
    * changes behaviour.
    */
   effectiveCapacity(state: NodeStateLike): number {
-    return Math.max(1, Math.floor(state.config.capacity)) * this.effectiveInstances(state);
+    return (
+      Math.max(1, Math.floor(state.config.capacity)) * this.effectiveInstances(state)
+    );
   }
 
   /**
@@ -2082,7 +2109,8 @@ export class Engine implements BehaviourCtx {
     req.enterMs = this.now;
     req.onDrained = onDrained;
     const ms =
-      this.rng.serviceTime(state.config.serviceMs, state.config.serviceCv) + req.extraServiceMs;
+      this.rng.serviceTime(state.config.serviceMs, state.config.serviceCv) +
+      req.extraServiceMs;
     req.extraServiceMs = 0;
     req.ownMs = ms;
     if (ms > 0) {
@@ -2159,7 +2187,11 @@ export class Engine implements BehaviourCtx {
    * finishInstances(), so a behaviour cannot force an allocation by calling
    * this more often than another kind does.
    */
-  reportInstances(stateLike: NodeStateLike, perUnit: readonly number[], pending: number): void {
+  reportInstances(
+    stateLike: NodeStateLike,
+    perUnit: readonly number[],
+    pending: number,
+  ): void {
     const state = stateLike as NodeState;
     const units = state.instanceUnits;
     units.length = perUnit.length;
@@ -2187,7 +2219,8 @@ export class Engine implements BehaviourCtx {
 
     // Utilisation can sit marginally above 1 when a node is oversubscribed;
     // the waterline is capped so no unit ever reports more than full.
-    const util = state.utilization > 1 ? 1 : state.utilization > 0 ? state.utilization : 0;
+    const util =
+      state.utilization > 1 ? 1 : state.utilization > 0 ? state.utilization : 0;
     let remaining = util * instances;
     for (let i = 0; i < instances; i++) {
       if (remaining >= 1) {
@@ -2325,7 +2358,13 @@ export class Engine implements BehaviourCtx {
 
   /* ---------------- pools ---------------- */
 
-  private push(time: number, kind: number, nodeId: string, req: Req | null, token: number): void {
+  private push(
+    time: number,
+    kind: number,
+    nodeId: string,
+    req: Req | null,
+    token: number,
+  ): void {
     const ev = this.freeEv.pop();
     if (ev) {
       ev.time = time;
