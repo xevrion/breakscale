@@ -1,0 +1,94 @@
+/* ==========================================================================
+   App shell. Fixed viewport, no page scroll — every region that can overflow
+   scrolls inside itself.
+   ========================================================================== */
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* --------------------------------------------------------------------------
+   Top bar
+   -------------------------------------------------------------------------- */
+
+.app-bar {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.app-title {
+  flex: none;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* The traffic control owns the rest of the bar. */
+.app-bar > .traffic {
+  flex: 1;
+  min-width: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Body: palette | stage | inspector
+   -------------------------------------------------------------------------- */
+
+.app-body {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-body > .pal {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+.app-body > .inspector {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Stage: canvas above, metrics strip pinned below.
+   The strip spans only the canvas so the inspector stays full height —
+   a selected node's knobs and its metrics stay visible together.
+   -------------------------------------------------------------------------- */
+
+.app-stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-stage > .mx {
+  height: 200px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* Below this the three-column layout stops being usable; the inspector
+   narrows first, then the palette. */
+@media (max-width: 1180px) {
+  .app-body {
+    grid-template-columns: 220px minmax(0, 1fr) 280px;
+  }
+}

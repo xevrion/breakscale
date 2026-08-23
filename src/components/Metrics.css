@@ -1,0 +1,330 @@
+/* ==========================================================================
+   Metrics strip — bottom-of-screen live charts.
+   Two time-series charts plus a failure breakdown, separated by whitespace
+   and one hairline rule. No nested cards: the strip's own panel is the only
+   boundary, everything inside is laid out on the same plane.
+   ========================================================================== */
+
+.mx {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(190px, 0.55fr);
+  gap: 24px;
+  align-items: start;
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+/* Vertical hairlines instead of boxing each chart. */
+.mx > * + * {
+  padding-left: 24px;
+  border-left: 1px solid var(--border);
+  /* No border-radius here on purpose — a rounded box with one side
+     bordered is the classic mistake. This is a plain separator. */
+}
+
+@media (max-width: 1000px) {
+  .mx {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .mx > * + * {
+    padding-left: 0;
+    padding-top: 16px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
+.mx-chart,
+.mx-fail {
+  min-width: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Chart header: title on the left, live readouts on the right.
+   -------------------------------------------------------------------------- */
+
+.mx-chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 18px;
+  margin-bottom: 6px;
+}
+
+.mx-title {
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.mx-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+
+.mx-read {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.mx-read-k {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+}
+
+.mx-read-v {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  color: var(--text-dim);
+}
+
+.mx-read-sub {
+  color: var(--text-faint);
+}
+
+/* p99 is the number that matters most in this strip: it is the only
+   readout at full text weight and full contrast. */
+.mx-read-p99 .mx-read-v {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mx-read-p99 .mx-read-k {
+  color: var(--text-dim);
+}
+
+.mx-read-dropped .mx-read-v {
+  color: var(--danger);
+}
+
+/* --------------------------------------------------------------------------
+   Plot box: two absolutely-positioned SVG layers sharing one frame.
+   The scaled layer stretches; the overlay stays 1:1 so text never skews.
+   -------------------------------------------------------------------------- */
+
+.mx-plot {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.mx-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* The stretched layer is inset to the plot area by inline styles. */
+.mx-layer-scaled {
+  inset: auto;
+}
+
+.mx-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  /* Sit on the device pixel rather than straddling two. */
+  shape-rendering: crispEdges;
+}
+
+.mx-ylabel,
+.mx-xlabel,
+.mx-unit {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: 9px;
+  fill: var(--text-faint);
+}
+
+.mx-unit {
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
+.mx-xlabel {
+  font-family: var(--sans);
+  font-size: 9px;
+}
+
+/* --------------------------------------------------------------------------
+   Lines. Separated by weight first, color second, so the chart still reads
+   correctly for a colorblind student.
+
+   vector-effect keeps stroke width uniform despite the non-uniform
+   viewBox scale — without it the lines would smear horizontally.
+   -------------------------------------------------------------------------- */
+
+.mx-line {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.mx-line-p50 {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+}
+
+.mx-line-p95 {
+  stroke: var(--text-dim);
+  stroke-width: 1.25;
+}
+
+.mx-line-p99 {
+  stroke: var(--danger);
+  stroke-width: 1.75;
+}
+
+.mx-read-p50 .mx-read-k {
+  color: var(--text-faint);
+}
+
+.mx-read-p95 .mx-read-k {
+  color: var(--text-faint);
+}
+
+/* Offered is the reference; goodput is what actually got served. */
+.mx-line-offered {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+
+.mx-line-goodput {
+  stroke: var(--accent);
+  stroke-width: 1.75;
+}
+
+/* The dropped-traffic band. Subtle enough to read as a region, strong
+   enough that a widening gap is the first thing you notice. */
+.mx-gap {
+  fill: var(--danger);
+  fill-opacity: 0.16;
+  stroke: none;
+}
+
+.mx-read-offered .mx-read-v {
+  color: var(--text-dim);
+}
+
+.mx-read-goodput .mx-read-v {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   Failure breakdown — one thin stacked bar plus a mono legend.
+   -------------------------------------------------------------------------- */
+
+.mx-fail-total {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.mx-fail-bar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.mx-fail-bar-empty {
+  background: var(--surface-2);
+}
+
+.mx-fail-seg {
+  display: block;
+  min-width: 2px;
+  flex-shrink: 1;
+  flex-basis: 0;
+}
+
+.mx-fail-none {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.mx-fail-legend {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mx-fail-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.mx-swatch {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+}
+
+.mx-fail-name {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.mx-fail-count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  color: var(--text-dim);
+}
+
+/* Reason colors. These are the one place several hues coexist, because
+   each maps to a distinct failure mode the student must tell apart.
+   Danger/warn carry the two that mean overload. */
+.mx-fail-error {
+  background: var(--danger);
+}
+
+.mx-fail-shed {
+  background: var(--warn);
+}
+
+.mx-fail-timeout {
+  background: var(--cat-violet);
+}
+
+.mx-fail-no-route {
+  background: var(--text-faint);
+}
+
+.mx-fail-depth {
+  background: var(--cat-blue);
+}

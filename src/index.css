@@ -1,0 +1,525 @@
+/* ==========================================================================
+   sys-sim design system
+   Dark, near-neutral UI. One accent hue. Status colors are semantic only:
+   they describe a metric's state, never decorate a surface.
+   ========================================================================== */
+
+:root {
+  /* Elevation ramp: each step is a small lightness lift, no hue shift beyond
+     a faint cool cast so status colors stay legible on top of it. */
+  --bg: #0c0d10;
+  --surface: #131519;
+  --surface-2: #1b1e24;
+  --border: #262a31;
+
+  /* Continuation of the same neutral ramp, above --border. Used by the canvas
+     for the dot grid, edge strokes and port outlines, which need to separate
+     from each other on the darkest surface without introducing a new hue. */
+  --grid-dot: #21252c;
+  --line: #333944;
+  --line-2: #3d4450;
+  --line-3: #4a5260;
+  --line-4: #59616f;
+  --line-5: #6d7686;
+  --track: #23272f;
+
+  /* Two extra categorical hues, used ONLY to distinguish failure reasons in
+     the metrics breakdown, where five causes must be told apart at a glance. */
+  --cat-violet: #b06fd8;
+  --cat-blue: #4a7fb5;
+
+  /* Text ramp. --text hits 15.8:1 on --bg, --text-dim 7.4:1,
+     --text-faint 4.8:1 — all above WCAG AA for their sizes. */
+  --text: #e8eaed;
+  --text-dim: #9ba1ac;
+  --text-faint: #7d838e;
+
+  /* Single accent hue, used for CTAs, selection and focus only. */
+  --accent: #4c8dff;
+  --accent-hover: #6ba0ff;
+  --accent-press: #3d7ae6;
+  --accent-fg: #06070a;
+
+  /* Semantic metric states. Reserved for numbers and status marks. */
+  --ok: #3fb950;
+  --warn: #d29922;
+  --danger: #f0553f;
+
+  --sans:
+    system-ui, -apple-system, 'Segoe UI', Inter, Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --mono:
+    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  color-scheme: dark;
+}
+
+/* --------------------------------------------------------------------------
+   Reset
+   -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  /* Fixed-viewport app: the page never scrolls, panels scroll internally. */
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Headings inherit body size by default; components set their own scale. */
+h1,
+h2,
+h3,
+h4 {
+  font-size: inherit;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* --------------------------------------------------------------------------
+   Focus
+   -------------------------------------------------------------------------- */
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   Primitives
+   -------------------------------------------------------------------------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+}
+
+.num,
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -0.01em;
+}
+
+/* Status modifiers. Apply to the number itself, not to its container. */
+.is-ok {
+  color: var(--ok);
+}
+
+.is-warn {
+  color: var(--warn);
+}
+
+.is-danger {
+  color: var(--danger);
+}
+
+/* --------------------------------------------------------------------------
+   Buttons
+   -------------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: #232730;
+  border-color: #333944;
+}
+
+.btn:active:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-primary:active:not(:disabled) {
+  background: var(--accent-press);
+  border-color: var(--accent-press);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.btn-ghost:active:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Pressed / selected state for toggles and segmented controls. */
+.btn[aria-pressed='true'],
+.btn[data-active='true'] {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* --------------------------------------------------------------------------
+   Slider — the app's primary control. Must feel precise.
+   -------------------------------------------------------------------------- */
+
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* Track — WebKit */
+.slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+/* Thumb — WebKit. Margin centers it on a 4px track + 1px borders. */
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--text);
+  border: none;
+  transition:
+    background-color 140ms ease,
+    transform 140ms ease;
+}
+
+.slider:hover::-webkit-slider-thumb {
+  background: #ffffff;
+}
+
+.slider:active::-webkit-slider-thumb {
+  background: var(--accent);
+  transform: scale(1.08);
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(76, 141, 255, 0.35);
+}
+
+/* Track — Firefox */
+.slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+/* Filled portion — Firefox only; WebKit has no equivalent pseudo-element,
+   so the fill is a progressive enhancement rather than load-bearing. */
+.slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  border: none;
+  transition:
+    background-color 140ms ease,
+    transform 140ms ease;
+}
+
+.slider:hover::-moz-range-thumb {
+  background: #ffffff;
+}
+
+.slider:active::-moz-range-thumb {
+  background: var(--accent);
+  transform: scale(1.08);
+}
+
+.slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px rgba(76, 141, 255, 0.35);
+}
+
+.slider:focus-visible {
+  outline: none;
+}
+
+.slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --------------------------------------------------------------------------
+   Inputs
+   -------------------------------------------------------------------------- */
+
+input[type='text'],
+input[type='number'],
+select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+input[type='number'] {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+select {
+  padding-right: 26px;
+  cursor: pointer;
+  /* Neutral chevron drawn inline so no network request is needed. */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239ba1ac' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+input[type='text']:hover,
+input[type='number']:hover,
+select:hover {
+  border-color: #333944;
+}
+
+input[type='text']:focus,
+input[type='number']:focus,
+select:focus {
+  border-color: var(--accent);
+}
+
+input[type='text']:focus-visible,
+input[type='number']:focus-visible,
+select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+input::placeholder {
+  color: var(--text-faint);
+}
+
+input:disabled,
+select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Hide number spinners — values are typed or dragged, not stepped. */
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Label + control row. */
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.field > .label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.field > input,
+.field > select {
+  flex: 0 0 84px;
+  width: 84px;
+}
+
+/* Full-width control below its label. */
+.field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-stack > input,
+.field-stack > select {
+  width: 100%;
+}
+
+/* --------------------------------------------------------------------------
+   Scrollbars — subtle, for internally scrolling panels.
+   -------------------------------------------------------------------------- */
+
+.scroll {
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #2f343d transparent;
+}
+
+.scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: #2f343d;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 5px;
+}
+
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: #3d434e;
+  background-clip: content-box;
+}
+
+.scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   Reduced motion
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  .slider:active::-webkit-slider-thumb,
+  .slider:active::-moz-range-thumb {
+    transform: none;
+  }
+}
