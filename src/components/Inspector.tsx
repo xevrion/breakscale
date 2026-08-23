@@ -306,12 +306,12 @@ const KIND_BLURB: Record<NodeKind, string> = {
   replica:
     'Reads scale with the replica count, but a read can arrive before the last write has propagated. Watch the stale rate as you raise the lag.',
   shard:
-    'Splits data across partitions by key, so capacity adds up — until one key gets hot and a single shard has to carry it alone.',
+    'Splits data across partitions by key, so capacity adds up, until one key gets hot and a single shard has to carry it alone.',
   autoscaler:
     'Watches one node and adds capacity when it runs hot. New capacity takes warmup time to arrive, so load always leads it.',
   region:
     'Sends traffic to one region at a time. If that region dies, failover costs you a full outage window before the next one takes over.',
-  cdn: 'An edge cache in front of everything. At a 0.9 hit rate your origin sees a tenth of the traffic — the cheapest capacity you will ever add.',
+  cdn: 'An edge cache in front of everything. At a 0.9 hit rate your origin sees a tenth of the traffic. It is the cheapest capacity you will ever add.',
   ratelimiter:
     'A token bucket. Refuses excess traffic instantly instead of queueing it, which is what stops a busy system turning into a dead one.',
   breaker:

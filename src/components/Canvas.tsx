@@ -1360,20 +1360,12 @@ const NodeView = memo(function NodeView({
         />
       )}
 
-      {/* Kind rule: a 1.5px bar inset from the rounded corners along the top
-          edge, carrying the component's own colour.
-
-          This used to be a third health channel. It is not any more: health
-          now lives on the meter, inside the node, so that the kind colour
-          (identity, on the border) and the health colour (state, inside)
-          never meet at an edge and fight. See the note in Canvas.css. */}
-      <rect
-        className="cv-node-rule"
-        x={NODE_R}
-        y={0}
-        width={NODE_W - NODE_R * 2}
-        height={1.5}
-      />
+      {/* No kind rule along the top edge. It used to sit at y=0, but the body
+          rect is stroked and a stroke straddles its own path, so half the
+          border already occupies that row. The bar landed on top of the inner
+          half and stopped flat where the corner radius curved away, which read
+          as a misaligned second border. The kind colour is on the border
+          itself, so the bar was saying the same thing twice anyway. */}
 
       {showHeader && (
         <>

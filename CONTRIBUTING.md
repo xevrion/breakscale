@@ -1,0 +1,133 @@
+# Contributing to Breakscale
+
+Thanks for taking the time. Breakscale is a teaching tool, so the bar for a change is not only
+"does it work" but "does it help someone understand distributed systems better".
+
+## Getting set up
+
+You need [Bun](https://bun.sh). Node 20 or newer also works if you prefer npm.
+
+```bash
+git clone https://github.com/xevrion/breakscale.git
+cd breakscale
+bun install
+bun dev
+```
+
+The app runs at http://localhost:5173.
+
+Useful commands:
+
+| Command | What it does |
+| --- | --- |
+| `bun dev` | Start the dev server |
+| `bun run build` | Typecheck and build for production |
+| `bun test` | Run the test suite |
+| `bun run lint` | Lint |
+| `bun run format` | Format with Prettier |
+
+## How the project is laid out
+
+```
+src/sim/         the simulation engine. No React, no DOM, no I/O
+src/components/  canvas, inspector, metrics, palette
+src/content/     glossary text
+src/App.tsx      shell: layout, the animation loop, persistence
+```
+
+The important boundary is that `src/sim` knows nothing about the UI. It is a pure discrete-event
+simulator you can drive from a script, which is what makes it testable.
+
+## The one rule that matters most
+
+**The numbers have to be true.**
+
+This is a simulator people learn from. If a student watches p99 climb as utilisation passes 80
+percent, that has to be because the simulation actually queued requests and measured their
+latency, not because something approximated a curve that looks about right.
+
+In practice that means:
+
+- Latency percentiles come from measured request latencies, never from a mean times a constant.
+- A component that has no meaningful value for a metric shows something else, or nothing. It does
+  not show a plausible looking number.
+- If you cannot verify a behaviour with a script that prints real output, it is not finished.
+
+There is a lot of scaffolding in the repo for this. Look at how existing components are verified
+before adding one.
+
+## Adding a component
+
+Components live in a registry, so the event loop has no per-kind branching. Adding one means:
+
+1. Add the kind to `NodeKind` in `src/sim/types.ts`.
+2. Add any config fields it genuinely needs, each with a doc comment stating meaning and units.
+3. Write a behaviour object in the matching `src/sim/behaviour-*.ts` file.
+4. Add a `defaultConfig` entry and a label.
+5. Give it a readout in `readoutFor` in `src/components/Canvas.tsx`. Show what an engineer would
+   actually watch for that component. Never show a field that is structurally always zero for it.
+6. Add a glossary entry in `src/content/glossary.ts` explaining what it is and why it matters.
+7. Write a test that proves it behaves differently from everything else.
+
+That last point is the real bar. A component that is just an existing one with different default
+numbers should not be added; it makes the palette longer without teaching anything new.
+
+## Adding a preset
+
+Presets are the main teaching surface, so they get held to a standard:
+
+- It must isolate **one** lesson, and the description should say what to watch.
+- It must be stable at its default load, with an error rate under about two percent.
+- It must visibly degrade at two to four times that load, and the bottleneck should be the one the
+  lesson is about.
+- No overlapping nodes. Check the current `NODE_W` and `NODE_H` and space accordingly.
+
+Do the arithmetic before tuning by feel: a node's ceiling is
+`capacity * instances * (1000 / serviceMs)` requests per second.
+
+## Writing for students
+
+The audience is a first-year CS student who has not taken a queueing theory course.
+
+- Plain language. "Requests waiting in line" beats `queueLimit`.
+- Sentence case for labels.
+- No abbreviations a beginner would not know, unless the glossary explains them.
+- Explain why something matters, not only what it is. A metric someone cannot act on is trivia.
+- No em dashes. Use a comma, a semicolon, or a second sentence.
+
+## Design constraints
+
+The interface follows a few rules that exist because breaking them made earlier versions look
+generated rather than designed:
+
+- No emoji in the interface.
+- No glassmorphism, gradient text, or glowing shadows.
+- Colour carries meaning. Component colours identify a kind; the status colours mean a metric is in
+  trouble. Neither is decoration.
+- Every number renders in the mono stack with tabular figures.
+- Interactive transitions only, 120 to 200 milliseconds. No entrance animations on content.
+- All colour comes from tokens in `src/index.css`. No hardcoded hex anywhere else.
+- Text must meet WCAG AA contrast. Compute the ratio rather than eyeballing it.
+
+## Pull requests
+
+- One logical change per pull request. If you find an unrelated bug, mention it in an issue.
+- Say what the change does and why. If it changes behaviour, include before and after numbers.
+- For anything visible, include a screenshot.
+- Run `bun run build` and `bun test` before opening.
+
+For a new feature or anything touching the engine's architecture, open an issue first and describe
+the approach. It saves you writing something that then needs rewriting.
+
+## Reporting bugs
+
+Include what you did, what you expected, and what happened. If it involves the simulation, the
+preset name and the load you were running at are usually enough to reproduce it.
+
+One thing worth knowing before reporting that the simulation has frozen: browsers suspend
+animation frames in background tabs, so an unfocused tab genuinely stops simulating and every
+number reads zero. Check the tab is focused first.
+
+## Code of conduct
+
+By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).

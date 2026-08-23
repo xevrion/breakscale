@@ -20,7 +20,7 @@ import './App.css';
  * Persistence
  * ------------------------------------------------------------------ */
 
-const STORAGE_KEY = 'sys-sim.session.v1';
+const STORAGE_KEY = 'breakscale.session.v1';
 
 /** Snapshot rate for React. The engine still advances every animation frame. */
 const SNAPSHOT_HZ = 10;
@@ -732,7 +732,7 @@ export default function App() {
             voice. Two words, sentence case, no abbreviation — a student
             opening this should be able to say what it is out loud. */}
         <div className="app-brand">
-          <h1 className="app-title">System design</h1>
+          <h1 className="app-title">Breakscale</h1>
           <p className="app-tagline">Build it, load it, watch it break</p>
         </div>
         <TrafficControl

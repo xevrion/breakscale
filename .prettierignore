@@ -1,0 +1,4 @@
+bun.lock
+dist
+node_modules
+public/__harness.js

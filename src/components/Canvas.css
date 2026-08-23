@@ -450,11 +450,6 @@
    stroke it sat directly against — two saturated hues meeting at a corner,
    which is exactly the fight the brief warns about. It is now a quiet seat
    for the kind's own colour, and health lives in one obvious place. */
-.cv-node-rule {
-  fill: var(--k-stroke);
-  fill-opacity: 0.5;
-}
-
 /* Hover deepens the node's OWN colour rather than swapping in a neutral. A
    grey hover on a coloured node reads as the colour being taken away. */
 .cv-node:hover .cv-node-body {

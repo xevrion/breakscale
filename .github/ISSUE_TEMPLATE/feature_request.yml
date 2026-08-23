@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a component, an example, or a change
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing
+      description: What can you not currently do, or not currently understand?
+    validations:
+      required: true
+
+  - type: textarea
+    id: teaches
+    attributes:
+      label: What would it teach
+      description: |
+        Breakscale is a teaching tool, so the strongest case for a feature is the
+        thing a student would understand afterwards that they did not before.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you already tried

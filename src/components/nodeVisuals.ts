@@ -78,7 +78,7 @@ import { __iconNode as icLoadshedder } from 'lucide-react/dist/esm/icons/funnel-
  */
 
 /** MIME type the palette sets on dragstart and the canvas checks for on drop. */
-export const NODE_DND_MIME = 'application/x-sys-sim-node';
+export const NODE_DND_MIME = 'application/x-breakscale-node';
 
 /**
  * One Lucide icon as its raw SVG primitives: [tagName, attributes] pairs.

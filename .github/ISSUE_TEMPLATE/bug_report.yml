@@ -1,0 +1,44 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: browsers suspend animation frames in background tabs, so an
+        unfocused tab genuinely stops simulating and every number reads zero. Please
+        check the tab was focused.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: input
+    id: preset
+    attributes:
+      label: Preset
+      description: Which example were you running, or was it a system you built yourself?
+      placeholder: Sharded Database
+
+  - type: input
+    id: load
+    attributes:
+      label: Load
+      description: What was the traffic slider set to?
+      placeholder: 2000 rps
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Browser and OS
+      placeholder: Firefox 121, Ubuntu 24.04
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots help a lot for visual problems. Console errors help for the rest.

@@ -153,6 +153,9 @@ const PRESET_NOTE: Record<string, string> = {
   'specialised-stores': 'The right store for each job, side by side',
   'event-driven': 'Lag, fan-out, cold starts and a cron burst',
   'resilient-delivery': 'Choosing what fails, and where failures go',
+  twitter: 'One tweet becoming a hundred thousand writes',
+  stripe: 'Refusing work rather than charging twice',
+  whatsapp: 'Messages that wait instead of failing',
 };
 
 /**
