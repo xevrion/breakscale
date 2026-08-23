@@ -1721,17 +1721,36 @@ export default function Canvas({
   const snapTarget =
     link && link.over && canLink(link.from, link.over) ? link.over : null;
 
-  // The preview's loose end jumps to the target's input port once a legal
-  // target is under the pointer, which is the visual promise that releasing
-  // now will connect these two.
-  let previewX = link ? link.x : 0;
-  let previewY = link ? link.y : 0;
-  if (link && snapTarget) {
-    const t = nodeById.get(snapTarget);
-    if (t) {
-      const q = inPort(t);
-      previewX = q.x;
-      previewY = q.y;
+  /**
+   * Loose end of the preview wire.
+   *
+   * While DRAGGING it follows the pointer, and jumps to the target's input
+   * port once a legal target is under it — the visual promise that releasing
+   * now connects these two.
+   *
+   * While ARMED by a click there is no pointer to follow, so the wire is a
+   * short stub leaving the source port. Without it, clicking a port produced
+   * a text hint and no mark on the diagram at all, which left the source of
+   * the pending connection completely unidentified.
+   */
+  const ARMED_STUB = 56;
+  let previewX = 0;
+  let previewY = 0;
+  if (previewPort) {
+    if (link) {
+      previewX = link.x;
+      previewY = link.y;
+      if (snapTarget) {
+        const t = nodeById.get(snapTarget);
+        if (t) {
+          const q = inPort(t);
+          previewX = q.x;
+          previewY = q.y;
+        }
+      }
+    } else {
+      previewX = previewPort.x + ARMED_STUB;
+      previewY = previewPort.y;
     }
   }
 
@@ -1787,7 +1806,7 @@ export default function Canvas({
               })}
             </g>
 
-            {previewPort && link && (
+            {previewPort && (
               <path
                 className={`cv-link-preview${snapTarget ? ' is-snapped' : ''}`}
                 d={edgePath(previewPort.x, previewPort.y, previewX, previewY)}
