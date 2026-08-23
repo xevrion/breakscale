@@ -1210,6 +1210,44 @@ const Spark = memo(function Spark({ data, unit }: SparkProps) {
 const GLYPH_PX = 18;
 const GLYPH_SCALE = GLYPH_PX / ICON_BOX;
 
+/* --------------------------------------------------------------------------
+   Header geometry — ONE definition, shared by every element on the line.
+
+   The glyph, the name, the status mark and the instance badge all sit on the
+   header row, and each used to compute its own position. They disagreed:
+   measured at design scale, the glyph's ink centre landed at y=13.0 while the
+   name's centre landed at 19.44, a 3.7px stagger that at 150% zoom read as
+   the icon floating above its own label. The marks disagreed too — the warn
+   ring spanned 9.5-15.5 where the danger disc and fault square both spanned
+   9-16, so the marker visibly changed size as a node degraded.
+
+   Everything below is derived from HEAD_CENTER_Y, so the row cannot drift
+   apart again.
+   -------------------------------------------------------------------------- */
+
+/** The optical centre line of the header row. Every element centres on this. */
+const HEAD_CENTER_Y = 15;
+/** Gap between the glyph and the name, and between the name and the badge. */
+const NAME_GAP = 8;
+/** Diameter of the status mark, so all three silhouettes match exactly. */
+const MARK_SIZE = 7;
+/** Horizontal room a status mark claims at the right edge, gap included. */
+const MARK_RESERVE = MARK_SIZE + NAME_GAP;
+/**
+ * Top-left of the glyph box, so the 24-unit icon grid centres on the header
+ * line.
+ *
+ * Centred by its BOX, deliberately, not by its measured ink. Lucide draws
+ * each icon on a shared 24x24 grid and lets the ink fill different amounts
+ * of it — a monitor is nearly full-height, a split arrow is not. Measured
+ * across the set, ink centres land between y=12.0 and y=13.0. Centring each
+ * icon on its own ink would put a full-height glyph and a short one on
+ * different lines, which is worse: the grid is the shared reference that
+ * makes thirty-three icons read as one family, so the grid is what gets
+ * aligned.
+ */
+const GLYPH_Y = HEAD_CENTER_Y - GLYPH_PX / 2;
+
 /**
  * Trim a node label to what actually fits on the node.
  *
@@ -2062,7 +2100,7 @@ const NodeView = memo(function NodeView({
 
           <g
             className="cv-node-icon"
-            transform={`translate(${PAD_X},6) scale(${GLYPH_SCALE})`}
+            transform={`translate(${PAD_X},${GLYPH_Y}) scale(${GLYPH_SCALE})`}
           >
             <Glyph kind={node.kind} />
           </g>
@@ -2085,8 +2123,8 @@ const NodeView = memo(function NodeView({
       */}
       <text
         className="cv-node-name"
-        x={showHeader ? PAD_X + GLYPH_PX + 8 : PAD_X}
-        y={showHeader ? 21 : 24}
+        x={showHeader ? PAD_X + GLYPH_PX + NAME_GAP : PAD_X}
+        y={showHeader ? HEAD_CENTER_Y : 24}
       >
         {shownName}
         {shownName !== node.label && <title>{node.label}</title>}
@@ -2108,26 +2146,26 @@ const NodeView = memo(function NodeView({
       {showHeader && fault && (
         <rect
           className="cv-node-mark is-fault"
-          x={NODE_W - PAD_X - 7}
-          y={9}
-          width={7}
-          height={7}
+          x={NODE_W - PAD_X - MARK_SIZE}
+          y={HEAD_CENTER_Y - MARK_SIZE / 2}
+          width={MARK_SIZE}
+          height={MARK_SIZE}
         />
       )}
       {showHeader && !fault && health === 'danger' && (
         <circle
           className="cv-node-mark is-danger"
-          cx={NODE_W - PAD_X - 3.5}
-          cy={12.5}
-          r={3.5}
+          cx={NODE_W - PAD_X - MARK_SIZE / 2}
+          cy={HEAD_CENTER_Y}
+          r={MARK_SIZE / 2}
         />
       )}
       {showHeader && !fault && health === 'warn' && (
         <circle
           className="cv-node-mark is-warn"
-          cx={NODE_W - PAD_X - 3.5}
-          cy={12.5}
-          r={3}
+          cx={NODE_W - PAD_X - MARK_SIZE / 2}
+          cy={HEAD_CENTER_Y}
+          r={MARK_SIZE / 2 - 1}
         />
       )}
 
@@ -2146,8 +2184,8 @@ const NodeView = memo(function NodeView({
       {showHeader && badgeText && (
         <text
           className={pending > 0 ? 'cv-node-badge is-warming' : 'cv-node-badge'}
-          x={NODE_W - PAD_X - (fault || health !== 'ok' ? 12 : 0)}
-          y={16}
+          x={NODE_W - PAD_X - (fault || health !== 'ok' ? MARK_RESERVE : 0)}
+          y={HEAD_CENTER_Y}
           textAnchor="end"
         >
           {badgeText}
@@ -3005,6 +3043,23 @@ export default function Canvas({
   // Attached natively (not via React's onWheel) because React attaches wheel
   // listeners as passive at the root, and ctrl+wheel must be preventable to
   // stop the browser's own page zoom on trackpad pinch.
+  /* Text measurements taken before the font stack settles are measured
+     against whatever face the browser had at the time, so every cached width
+     is wrong once the real one arrives. Drop the cache and repaint. */
+  const [, forceRemeasure] = useState(0);
+  useEffect(() => {
+    if (!document.fonts?.ready) return;
+    let live = true;
+    void document.fonts.ready.then(() => {
+      if (!live) return;
+      resetTextMetrics();
+      forceRemeasure((n) => n + 1);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   useEffect(() => {
     const el = surfaceRef.current;
     if (!el) return;

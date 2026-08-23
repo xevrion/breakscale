@@ -8,6 +8,7 @@ import {
   healthOfLatency,
   type Health,
 } from './format';
+import { Term } from './Tooltip';
 import './Metrics.css';
 
 /* ------------------------------------------------------------------ *
@@ -267,6 +268,14 @@ function useMeasuredWidth<T extends HTMLElement>() {
 interface ChartHeadProps {
   /** What the chart shows, e.g. "Latency". Sentence case, T1. */
   caption: string;
+  /**
+   * Glossary id for the caption. Every chart in the strip has one, so the
+   * eyebrow is a uniform affordance rather than an occasional one: a student
+   * who learns that "Latency" is explainable finds "Throughput" is too.
+   */
+  captionTerm: string;
+  /** Glossary id for the unit beside the figure, when the unit is a term. */
+  unitTerm?: string;
   /** The single T5 readout on the right. */
   value: string;
   /**

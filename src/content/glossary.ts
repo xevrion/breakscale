@@ -857,42 +857,6 @@ export const GLOSSARY: GlossaryEntry[] = [
     aliases: ['region-down'],
     see: ['region', 'crashed'],
   },
-  {
-    id: 'conn-refused',
-    term: 'Conn refused',
-    short: 'No connection slot was free to accept it',
-    why: 'A gateway that holds connections open runs out of slots, not out of speed. Once every slot is occupied there is nothing to accept a new arrival with, so it is turned away before any work is even attempted.',
-    category: 'failure',
-    aliases: ['connection refused', 'conn refused'],
-    see: ['websocket', 'connections-held', 'shed'],
-  },
-  {
-    id: 'unauthorized',
-    term: 'Unauthorized',
-    short: 'Refused at the door because the credentials failed',
-    why: 'Rejected by the gateway before it reached anything behind it, which is exactly where this should happen. It says nothing about capacity, so a rising count here is a client problem or an attack, not an overload.',
-    category: 'failure',
-    aliases: ['unauthorised', 'auth failure', '401', 'bad auth'],
-    see: ['apigateway', 'error-rate'],
-  },
-  {
-    id: 'bulkhead-full',
-    term: 'Bulkhead full',
-    short: 'The pool for that one dependency was already full',
-    why: 'A cap doing its job: the slow dependency has used its whole allowance, so further calls to it fail immediately rather than tying up capacity everything else needs. The failure is contained to that one feature.',
-    category: 'failure',
-    aliases: ['pool full', 'bulkhead rejected'],
-    see: ['bulkhead', 'shed'],
-  },
-  {
-    id: 'deprioritized',
-    term: 'Deprioritized',
-    short: 'Dropped for being the least important traffic',
-    why: 'A load shedder chose this request to sacrifice so higher-priority ones could still be served. Seeing these is the system degrading on purpose, which is a far better outcome than failing everything equally.',
-    category: 'failure',
-    aliases: ['deprioritised', 'low priority dropped'],
-    see: ['loadshedder', 'shed'],
-  },
 ];
 
 /** Fast lookup by id. */

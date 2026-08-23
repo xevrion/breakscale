@@ -90,6 +90,50 @@
 }
 
 /* --------------------------------------------------------------------------
+   Glossary button.
+
+   The plain .btn, not the primary one. This is a reference a student reaches
+   for when they are stuck, never the action the app wants them to take next,
+   and spending the accent on it would compete with Play for the one piece of
+   emphasis the bar is allowed.
+
+   flex:none so the traffic control gives up width first: the load slider can
+   usefully be narrower, whereas this button is already at its natural size
+   and clipping the word "Glossary" would destroy the only reason it beats an
+   icon.
+   -------------------------------------------------------------------------- */
+
+.app-glossary {
+  flex: none;
+}
+
+/* The shortcut, printed on the control that performs it, so it is learnable
+   without opening anything. --text-faint and no border: it is an annotation
+   on the label, not a second thing to read, and the surrounding button
+   already carries the frame that a standalone key cap would need. */
+.app-glossary-key {
+  margin-left: var(--sp-1);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-med);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Pressed state. The sheet is open and this is what closes it, so the button
+   reads as engaged rather than as an inert label beside its own panel. */
+.app-glossary[aria-expanded='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.app-glossary[aria-expanded='true'] .app-glossary-key {
+  color: var(--accent-ink);
+}
+
+/* --------------------------------------------------------------------------
    Body: palette | stage | inspector.
 
    The rails are FIXED. They hold a grouped component list and a config form;

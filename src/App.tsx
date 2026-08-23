@@ -7,6 +7,8 @@ import Canvas, { SPARK_LEN, readoutFor, sourceBacklogs } from './components/Canv
 import { Inspector, TrafficControl } from './components/Inspector';
 import { Metrics } from './components/Metrics';
 import { Palette } from './components/Palette';
+import { Glossary } from './components/Glossary';
+import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
 import './App.css';
 
 /* ------------------------------------------------------------------ *
@@ -227,6 +229,39 @@ export default function App() {
     () => new Set<string>(),
   );
   const [running, setRunning] = useState(true);
+
+  /**
+   * The glossary side sheet.
+   *
+   * `glossaryFocusId` is the entry to land on. It is cleared when the sheet
+   * closes so that reopening from the top bar starts at the top of the list
+   * rather than resuming wherever the last "see also" link happened to go.
+   */
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [glossaryFocusId, setGlossaryFocusId] = useState<string | undefined>(undefined);
+
+  const openGlossary = useCallback((id?: string) => {
+    setGlossaryFocusId(id);
+    setGlossaryOpen(true);
+  }, []);
+
+  const closeGlossary = useCallback(() => {
+    setGlossaryOpen(false);
+    setGlossaryFocusId(undefined);
+  }, []);
+
+  /**
+   * Where a tooltip's "see also" links go.
+   *
+   * Registered once with the tooltip module rather than threaded down as a
+   * prop, which is what lets <Term> stay a props-free wrapper at every one of
+   * its call sites. Unregistered on unmount so a stale closure can never
+   * outlive this shell.
+   */
+  useEffect(() => {
+    setGlossaryNavigate(openGlossary);
+    return () => setGlossaryNavigate(null);
+  }, [openGlossary]);
 
   /**
    * The engine is a mutable simulation owned outside React's render cycle.
@@ -599,6 +634,28 @@ export default function App() {
         return;
       }
 
+      /*
+       * The glossary. `?` is the long-standing convention for "show me the
+       * reference", and it collides with nothing here: Space is play/pause,
+       * S steps, Delete and Escape belong to the canvas. It is also inert
+       * inside a text field by the guard at the top of this handler, which
+       * matters because `?` is an ordinary character a student may well type
+       * into the node-name box or the glossary's own search.
+       *
+       * Matched on e.key rather than a code plus Shift, so it works on the
+       * keyboard layouts where `?` is not Shift+/ at all.
+       *
+       * It TOGGLES. A student who opened the panel with a key expects the
+       * same key to shut it, and hunting for the close button after that is
+       * exactly the small friction this whole feature exists to remove.
+       */
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        if (glossaryOpen) closeGlossary();
+        else openGlossary();
+        return;
+      }
+
       // Delete/Backspace, Escape and Ctrl/Cmd+A belong to the canvas, which
       // owns the selection and knows how to partition it. Handling them here
       // too would double-fire.
@@ -606,7 +663,7 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleStep]);
+  }, [handleStep, glossaryOpen, openGlossary, closeGlossary]);
 
   /* ---------------- derived ---------------- */
 
@@ -725,6 +782,49 @@ export default function App() {
           system={snapshot?.system ?? EMPTY_SYSTEM}
           lost={lostRps}
         />
+
+        {/*
+          THE WAY INTO THE GLOSSARY.
+
+          Labelled, not an icon. A lone question mark in a circle is the
+          weakest affordance in interface design: it could be help, support,
+          an about box or a tour, and a student who does not know what "p99"
+          means will not gamble a click to find out which. The word
+          "Glossary" says exactly what is behind it.
+
+          It lives in the top bar because that is the one region present on
+          every screen state, and at the far end because it is a reference,
+          not part of the run/pause loop the bar's other controls belong to.
+
+          `aria-expanded` because it discloses the sheet, and the shortcut is
+          printed rather than hidden in a tooltip so it is learnable by
+          someone who has never opened the panel.
+        */}
+        <button
+          type="button"
+          className="btn app-glossary"
+          aria-expanded={glossaryOpen}
+          onClick={() => (glossaryOpen ? closeGlossary() : openGlossary())}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+          </svg>
+          Glossary
+          <kbd className="app-glossary-key" aria-hidden="true">
+            ?
+          </kbd>
+        </button>
       </header>
 
       <div className="app-body">
@@ -762,6 +862,16 @@ export default function App() {
           onDeleteMany={handleDeleteMany}
         />
       </div>
+
+      {/*
+        Mounted ONCE for the whole app. Every <Term> anywhere in the tree is a
+        stateless trigger that this single layer renders the panel for, so the
+        cost of an explanation is paid per tooltip OPEN rather than per term
+        present. Both of these portal to <body>, so their position here is
+        about ownership, not stacking.
+      */}
+      <TooltipLayer />
+      <Glossary open={glossaryOpen} onClose={closeGlossary} focusId={glossaryFocusId} />
     </div>
   );
 }

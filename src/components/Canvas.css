@@ -398,7 +398,12 @@
   font-family: var(--sans);
   font-size: var(--fs-base);
   font-weight: var(--fw-body);
-  dominant-baseline: middle;
+  /* `central`, not `middle`. `middle` centres on the x-height, which put the
+     name's box centre at 13.63 against a header line of 15 — the name sat
+     low against a glyph centred on the grid. `central` centres on the em
+     box, which is the same geometric reference the icon grid uses, so the
+     two land on one line. */
+  dominant-baseline: central;
   pointer-events: none;
 }
 
@@ -703,8 +708,7 @@
 .cv-vessel,
 .cv-vessel-track,
 .cv-vessel-fill,
-.cv-vessel-brim,
-.cv-node-badge {
+.cv-vessel-brim {
   pointer-events: none;
 }
 
@@ -743,6 +747,11 @@
 /* The unit count. Tabular so the digits do not jitter as a fleet scales, and
    held in the kind's own ink so it belongs to the component. */
 .cv-node-badge {
+  /* Centred on HEAD_CENTER_Y, the same line the glyph, name and status mark
+     use — see the header geometry block in Canvas.tsx. `central` for the
+     same reason .cv-node-name uses it. */
+  dominant-baseline: central;
+  pointer-events: none;
   fill: var(--k-ink);
   /* A plate behind the glyphs, painted first (paint-order), so the count
      stays legible where the offset instance-stack card edges pass behind
