@@ -1,0 +1,150 @@
+/* --------------------------------------------------------------------------
+   Explanation tooltips.
+
+   Two competing needs. The affordance appears next to forty terms on one
+   screen, so it has to be quiet enough to ignore. But a student who does not
+   know what p99 means has to be able to SEE that an answer is available, or
+   the whole feature may as well not exist.
+
+   A dotted underline in a dimmed ink solves both: invisible until you look for
+   it, unmistakable once you do, and it never shifts layout.
+   -------------------------------------------------------------------------- */
+
+.term {
+  /* text-decoration rather than a border, so it hugs the glyphs and wraps
+     correctly across lines. */
+  text-decoration: underline dotted var(--border-strong);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  cursor: help;
+  border-radius: 3px;
+  transition:
+    text-decoration-color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+
+.term:hover,
+.term[aria-expanded='true'] {
+  text-decoration-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.term:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+  background: var(--accent-soft);
+}
+
+/* Used where the surrounding element already reads as a label and a second
+   underline would just be noise. Still focusable and still explains. */
+.term-bare {
+  text-decoration: none;
+}
+
+/* --------------------------------------------------------------------------
+   The panel.
+
+   Portalled to <body>, so it is never clipped by a panel with its own
+   overflow. Every side panel in this app scrolls internally, which would
+   otherwise cut a tooltip in half.
+   -------------------------------------------------------------------------- */
+
+.tip {
+  position: fixed;
+  z-index: 400;
+  width: max-content;
+  /* Wide enough for a real sentence, narrow enough to scan in one pass.
+     Around 60 characters a line, which is the comfortable reading measure. */
+  max-width: 300px;
+  padding: 10px 12px 11px;
+  background: var(--surface);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+}
+
+.tip-arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--surface);
+  border-right: var(--bw) solid var(--border-strong);
+  border-bottom: var(--bw) solid var(--border-strong);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.tip-top .tip-arrow {
+  bottom: -5px;
+}
+
+.tip-bottom .tip-arrow {
+  top: -5px;
+  transform: translateX(-50%) rotate(225deg);
+}
+
+.tip-term {
+  margin: 0 0 2px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-med);
+  color: var(--text);
+}
+
+.tip-short {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+/* The part that actually teaches, so it gets the readable treatment: full
+   contrast, generous leading, separated from the definition above it. */
+.tip-why {
+  margin: 8px 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.tip-see {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 9px 0 0;
+  padding-top: 8px;
+  border-top: var(--bw) solid var(--border);
+}
+
+.tip-see-label {
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+}
+
+.tip-see-link {
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--accent-ink);
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.tip-see-link:hover {
+  color: var(--accent);
+}
+
+.tip-see-link:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term {
+    transition: none;
+  }
+}
