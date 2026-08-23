@@ -437,26 +437,28 @@ export class Engine {
       const misses = state.misses.rate(now);
       const resolved = completions + errorsPerSec + shedRate;
 
-      let entry = nodeOut[state.id];
-      if (!entry) {
-        entry = {
-          inFlight: 0,
-          queued: 0,
-          throughput: 0,
-          arrivalRate: 0,
-          utilization: 0,
-          p50: 0,
-          p95: 0,
-          p99: 0,
-          errorRate: 0,
-          shedRate: 0,
-          timeoutRate: 0,
-          hitRate: 0,
-          totalCompleted: 0,
-          totalFailed: 0,
-        };
-        nodeOut[state.id] = entry;
-      }
+      // A fresh object per snapshot, deliberately. Mutating a reused entry in
+      // place makes every memoised consumer see an unchanged reference and
+      // skip its re-render, which silently freezes the canvas node readouts
+      // at zero while the rest of the UI updates. At 10Hz over a handful of
+      // nodes the allocation is irrelevant; the stale render is not.
+      const entry: NodeStats = {
+        inFlight: 0,
+        queued: 0,
+        throughput: 0,
+        arrivalRate: 0,
+        utilization: 0,
+        p50: 0,
+        p95: 0,
+        p99: 0,
+        errorRate: 0,
+        shedRate: 0,
+        timeoutRate: 0,
+        hitRate: 0,
+        totalCompleted: 0,
+        totalFailed: 0,
+      };
+      nodeOut[state.id] = entry;
 
       entry.inFlight = state.busy;
       entry.queued = state.waiting.length - state.waitHead;
