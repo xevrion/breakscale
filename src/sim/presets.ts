@@ -15,6 +15,11 @@ export interface Preset {
  * field to NodeConfig does not force an edit to all the existing cases.
  */
 const EXTRA_DEFAULTS = {
+  // Every scalable kind starts as a single machine. Present explicitly rather
+  // than left undefined so the Inspector has something to show and a student
+  // can see that "1" is a choice, not an absence -- the engine treats the two
+  // identically.
+  instances: 1,
   // replica: a 3-node read replica set, 50ms behind, mostly-read traffic.
   replicaCount: 3,
   replicationLagMs: 50,
@@ -192,11 +197,30 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         halfOpenProbes: 3,
       };
     case 'autoscaler':
-      // Holds its target at 70% utilisation, steps by half the current
-      // capacity, and waits 3s between decisions. The 10s warmup is the knob
-      // worth playing with: it is deliberately long enough that the lag
-      // between load arriving and capacity answering is visible on the graph
-      // rather than being something you have to take on faith.
+      // Adds and removes INSTANCES to hold its target at 70% utilisation,
+      // stepping by half the current fleet.
+      //
+      // THE TIMINGS, on a human scale. A student drags the load slider up and
+      // this is what they should see, measured rather than guessed:
+      //
+      //   t+0.0s  load arrives; utilisation climbs and pins at 1.0
+      //   t+~3s   cooldown expires, the controller decides and books machines
+      //           (phase 'cooldown' -> 'warming', ghost instances appear)
+      //   t+~7s   the machines boot and start serving (warmupMs=4000 later);
+      //           utilisation falls back toward the setpoint
+      //
+      // So: something visibly happens within about three seconds, and the
+      // whole arc completes in under ten. 4s of warmup is the balance point.
+      // Shorter and the lag stops being legible -- capacity looks like it
+      // answers instantly, which teaches the opposite of the truth. Much
+      // longer (the previous default was 10s) and a student watching a live
+      // graph concludes the component is broken before it ever acts.
+      //
+      // cooldownMs 3000 < warmupMs 4000 is deliberate and is the documented
+      // oscillation regime: the controller can want a second step while the
+      // first is still booting. It does not thrash, because a booked scale-up
+      // blocks further decisions, but the fleet does hunt around the setpoint
+      // rather than settling dead on it -- which is what real ones do.
       return {
         capacity: 1,
         serviceMs: 0,
@@ -208,11 +232,12 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         retries: 0,
         rps: 0,
         targetUtil: 0.7,
+        // In INSTANCES, not slots: between 1 and 12 machines.
         minCapacity: 1,
-        maxCapacity: 32,
+        maxCapacity: 12,
         cooldownMs: 3000,
         scaleStepPct: 0.5,
-        warmupMs: 10000,
+        warmupMs: 4000,
       };
     case 'region':
       // Two regions, serving from the first. The 5s failover is long enough
@@ -231,6 +256,314 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         regions: 2,
         activeRegion: 0,
         failoverMs: 5000,
+      };
+    case 'objectstore':
+      // Blob storage: every request pays a high flat latency, but the pool
+      // is wide. 64 slots / 90ms -> ~710 rps of ceiling at ~90ms each,
+      // which is "effectively unlimited" next to any database in this app.
+      return {
+        capacity: 64,
+        serviceMs: 90,
+        serviceCv: 0.4,
+        queueLimit: 1024,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+      };
+    case 'searchindex':
+      // Searches are cheap (8ms); a write pays +60ms of indexing on top and
+      // becomes searchable only 1.5s after it commits. At the default 90/10
+      // read mix the mean cost is ~14ms -> 12 slots gives ~850 rps.
+      return {
+        capacity: 12,
+        serviceMs: 8,
+        serviceCv: 0.5,
+        queueLimit: 128,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        indexMs: 60,
+        indexLagMs: 1500,
+      };
+    case 'timeseriesdb':
+      // Appends cost 1.5ms; a range query pays +120ms. At 5% range queries
+      // the mean is ~7.5ms -> 16 slots gives ~2100 rps of mixed traffic,
+      // which is the "metrics firehose" headroom the kind exists to show.
+      return {
+        capacity: 16,
+        serviceMs: 1.5,
+        serviceCv: 0.4,
+        queueLimit: 1024,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        rangeQueryFraction: 0.05,
+        rangeQueryMs: 120,
+      };
+    case 'graphdb':
+      // Depth 2 (friends-of-friends) costs 3x the base 6ms -> 18ms mean,
+      // 8 slots -> ~440 rps. Each extra hop of depth divides that by 3.
+      return {
+        capacity: 8,
+        serviceMs: 6,
+        serviceCv: 0.5,
+        queueLimit: 64,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        traversalDepth: 2,
+      };
+    case 'coldstorage':
+      // Archival: SECONDS per retrieval, deliberately few slots. 24 slots /
+      // 2.8s is ~8.5 rps -- fine for a trickle of restores, hopeless for
+      // anything shaped like online traffic. Callers need a long timeout.
+      return {
+        capacity: 24,
+        serviceMs: 2800,
+        serviceCv: 0.3,
+        queueLimit: 64,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+      };
+    case 'vectordb':
+      // Mean query cost is serviceMs * log2(2 + indexSizeK) / (1 - recall):
+      // 0.5ms * ~10 * 10 = ~50ms at one million vectors and 0.9 recall, so
+      // 16 slots gives ~320 rps. Pushing recall to 0.99 costs 10x that.
+      return {
+        capacity: 16,
+        serviceMs: 0.5,
+        serviceCv: 0.4,
+        queueLimit: 128,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        indexSizeK: 1000,
+        recallTarget: 0.9,
+      };
+    case 'streambroker':
+      // A partitioned log: 1ms producer ack, 4 partitions, and queueLimit is
+      // RETENTION in messages. Per consumer group the parallelism ceiling is
+      // the partition count, so throughput per group = 4 x (1000/consumerMs).
+      return {
+        capacity: 1,
+        serviceMs: 1,
+        serviceCv: 0.2,
+        queueLimit: 2000,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        partitions: 4,
+      };
+    case 'pubsub':
+      // A topic: near-instant ack, then one delivery per subscriber edge.
+      // No knobs of its own; the amplification comes from the wiring.
+      return {
+        capacity: 1,
+        serviceMs: 0.5,
+        serviceCv: 0.2,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+      };
+    case 'websocket':
+      // Capacity is CONNECTIONS HELD: 400 per instance, held ~30s each, so
+      // by Little's law it saturates at about 13 new connections/sec per
+      // instance. The 5ms serviceMs is only the handshake.
+      return {
+        capacity: 400,
+        serviceMs: 5,
+        serviceCv: 0.4,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        connectionMs: 30000,
+      };
+    case 'apigateway':
+      // The front door: 2ms of auth/routing work per request, a 300 rps
+      // token bucket with one second of burst headroom, and 1% bad auth.
+      return {
+        capacity: 64,
+        serviceMs: 2,
+        serviceCv: 0.3,
+        queueLimit: 256,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        rateLimitRps: 300,
+        burst: 300,
+        authFailRate: 0.01,
+      };
+    case 'sidecar':
+      // The proxy tax: 2ms on every request, in exchange for 2 retries, a
+      // 500ms per-attempt deadline, and outlier ejection after 5 straight
+      // downstream failures (3s ejection, matching the breaker's openMs).
+      return {
+        capacity: 32,
+        serviceMs: 2,
+        serviceCv: 0.2,
+        queueLimit: 64,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 500,
+        retries: 2,
+        rps: 0,
+        outlierAfter: 5,
+        openMs: 3000,
+      };
+    case 'lambda':
+      // Serverless: 25ms of work when warm, +350ms cold start, instances kept
+      // warm 12s, at most 40 running at once (beyond that the platform
+      // throttles; there is no queue). `capacity` is unused here.
+      return {
+        capacity: 1,
+        serviceMs: 25,
+        serviceCv: 0.5,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        coldStartMs: 350,
+        keepWarmMs: 12000,
+        maxConcurrency: 40,
+      };
+    case 'cron':
+      // A batch job: every 20s it dumps 50 requests down each outgoing edge
+      // at once. Not a request path; requests wired INTO it are refused.
+      return {
+        capacity: 1,
+        serviceMs: 0,
+        serviceCv: 0,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        intervalMs: 20000,
+        batchSize: 50,
+      };
+    case 'bulkhead':
+      // A pool of 8 concurrent calls. Refusing is free, so no slots, no
+      // queue, no service time: the pool count is the whole component.
+      return {
+        capacity: 1,
+        serviceMs: 0,
+        serviceCv: 0,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        bulkheadMax: 8,
+      };
+    case 'retryqueue':
+      // Delivery concurrency of 8 at ~3ms dispatch cost. Each failed
+      // delivery gets 2 redeliveries with backoff before it dead-letters;
+      // the 1s per-attempt deadline is what turns a hung consumer into a
+      // retryable failure instead of a stuck message.
+      return {
+        capacity: 8,
+        serviceMs: 3,
+        serviceCv: 0.3,
+        queueLimit: 2000,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 1000,
+        retries: 2,
+        rps: 0,
+      };
+    case 'transcoder':
+      // Batch regime: 1.2 SECONDS per job, two jobs per box. One instance
+      // is 2 * (1000/1200) = ~1.7 jobs/s; feed it from a queue and size the
+      // farm against the arrival rate, because a structural deficit grows
+      // the backlog forever.
+      return {
+        capacity: 2,
+        serviceMs: 1200,
+        serviceCv: 0.4,
+        queueLimit: 8,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+      };
+    case 'edgecompute':
+      // A PoP function: ~1ms, lots of concurrency, and it can fully answer
+      // 30% of requests without the origin ever hearing about them.
+      return {
+        capacity: 64,
+        serviceMs: 1,
+        serviceCv: 0.3,
+        queueLimit: 512,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        edgeShare: 0.3,
+      };
+    case 'writebehind':
+      // `capacity` is the dirty buffer (memory, not threads): up to 256
+      // acknowledged writes held at once. At the 200ms flush residence
+      // that supports ~1280 writes/s before the buffer itself fills.
+      // Every write in it is lost if this node crashes.
+      return {
+        capacity: 256,
+        serviceMs: 1,
+        serviceCv: 0.3,
+        queueLimit: 512,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        flushDelayMs: 200,
+      };
+    case 'loadshedder':
+      // Admits 300 rps sustained. 30% of the key space is best-effort
+      // traffic, and 30% of the bucket is reserved for the rest, so under
+      // saturation the best-effort tier is dropped first.
+      return {
+        capacity: 1,
+        serviceMs: 0,
+        serviceCv: 0,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        rateLimitRps: 300,
+        burst: 300,
+        lowPriorityShare: 0.3,
+        priorityReserve: 0.3,
       };
     default:
       return {
@@ -262,6 +595,25 @@ const DEFAULT_LABEL: Record<NodeKind, string> = {
   breaker: 'Circuit Breaker',
   autoscaler: 'Autoscaler',
   region: 'Region',
+  objectstore: 'Object Storage',
+  searchindex: 'Search Index',
+  timeseriesdb: 'Time-Series DB',
+  graphdb: 'Graph Database',
+  coldstorage: 'Cold Storage',
+  vectordb: 'Vector Database',
+  streambroker: 'Stream Broker',
+  pubsub: 'Pub/Sub Topic',
+  websocket: 'WebSocket Gateway',
+  apigateway: 'API Gateway',
+  sidecar: 'Sidecar Proxy',
+  lambda: 'Lambda',
+  cron: 'Cron Job',
+  bulkhead: 'Bulkhead',
+  retryqueue: 'Retry Queue',
+  transcoder: 'Transcoder',
+  edgecompute: 'Edge Compute',
+  writebehind: 'Write-Behind Cache',
+  loadshedder: 'Load Shedder',
 };
 
 let nodeCounter = 0;
@@ -302,6 +654,16 @@ function node(
 
 function edge(from: string, to: string, weight = 1): SimEdge {
   return { id: `${from}->${to}`, from, to, weight };
+}
+
+/**
+ * A CONTROL edge: "`from` acts on `to`". Carries no requests -- the engine
+ * leaves control edges out of every routing set -- and exists so a
+ * supervisory relationship is stated in the topology rather than inferred
+ * from a wire that looks exactly like a traffic path.
+ */
+function control(from: string, to: string): SimEdge {
+  return { id: `${from}->${to}`, from, to, weight: 1, control: true };
 }
 
 /* ------------------------------------------------------------------ *
@@ -696,29 +1058,42 @@ const shardedDatabase: Topology = {
 
 /* ------------------------------------------------------------------ *
  * 11. Autoscaling Service
- *     api: 9 slots / 25ms -> 360 rps, against 250 rps offered. That is 69%
- *     utilisation, which is deliberately the controller's own setpoint: at
- *     1x the autoscaler has already converged and holds the size steady, so
- *     the system is stable and the student sees a controller at rest.
+ *     api: 3 INSTANCES x 3 slots each = 9 slots / 25ms -> 360 rps, against
+ *     250 rps offered. That is 69% utilisation, which is deliberately the
+ *     controller's own setpoint: at 1x the autoscaler has already converged
+ *     and holds the fleet steady, so the system is stable and the student
+ *     sees a controller at rest.
+ *
+ *     RETUNED for the instance model. It used to be one node with `capacity:
+ *     9` and the controller moved that 9 up and down -- arithmetically the
+ *     same system, but the thing being added was a thread, which is invisible
+ *     and is not what "autoscaling" means to anyone. The fleet is now three
+ *     machines of three slots: same 9 slots, same 360 rps, same 69% at 1x,
+ *     but now the number the controller moves is a number of MACHINES and the
+ *     canvas can draw them appearing.
  *
  *     The lesson is what happens when you MOVE the load. Raise the client's
- *     rps and the capacity graph does not follow immediately: the controller
- *     waits out its 3s cooldown, decides, and then the new slots take a
- *     further 4s to warm up. Requests fail in that gap, and the gap is the
- *     whole point -- an autoscaler is a lagging controller, not a shield.
- *     Scale-DOWN is instant, as it is in reality, which is why the recovery
- *     looks nothing like the climb.
+ *     rps and capacity does not follow immediately: the controller waits out
+ *     its 3s cooldown, decides, and then the new machines take a further 4s
+ *     to boot. Requests fail in that gap, and the gap is the whole point --
+ *     an autoscaler is a lagging controller, not a shield. Scale-DOWN is
+ *     instant, as it is in reality, which is why the recovery looks nothing
+ *     like the climb.
  *
- *     maxCapacity 16 -> 640 rps ceiling, so 4x (1000 rps) outruns the
- *     autoscaler no matter how patient it is: past some point the answer is
- *     not more of the same box.
+ *     maxCapacity 5 instances -> 15 slots -> 600 rps ceiling, so 4x
+ *     (1000 rps) outruns the autoscaler no matter how patient it is: past
+ *     some point the answer is not more of the same box. (Under the old
+ *     slot-based reading this bound was `maxCapacity: 16` slots for the same
+ *     640 rps; the ceiling is what was preserved, not the integer.)
  * ------------------------------------------------------------------ */
 
 const autoscalingService: Topology = {
   nodes: [
     node('client', 'client', 'Client', COL(0), ROW(1), { rps: 250, timeoutMs: 3000 }),
     node('api', 'service', 'API Server', COL(1), ROW(1), {
-      capacity: 9,
+      // Three slots on one machine; three machines running right now.
+      capacity: 3,
+      instances: 3,
       serviceMs: 25,
       serviceCv: 0.5,
       queueLimit: 256,
@@ -729,19 +1104,22 @@ const autoscalingService: Topology = {
       serviceCv: 0.6,
       queueLimit: 128,
     }),
-    // The controller sits below the node it watches, wired to it by the edge
-    // that names its target. It is not in the request path: traffic sent INTO
-    // an autoscaler is refused, because a controller is not a hop.
+    // The controller sits below the node it scales, joined to it by a CONTROL
+    // edge. That edge names its target and carries no requests -- the engine
+    // keeps control edges out of routing entirely, so this is a supervisory
+    // relationship the topology states outright rather than something a
+    // student has to infer from a wire that looks like every other wire.
     node('scaler', 'autoscaler', 'Autoscaler', COL(1), ROW(2), {
       targetUtil: 0.7,
-      minCapacity: 4,
-      maxCapacity: 16,
+      // In INSTANCES: never fewer than 2 machines, never more than 5.
+      minCapacity: 2,
+      maxCapacity: 5,
       cooldownMs: 3000,
       scaleStepPct: 0.5,
       warmupMs: 4000,
     }),
   ],
-  edges: [edge('client', 'api'), edge('api', 'db'), edge('scaler', 'api')],
+  edges: [edge('client', 'api'), edge('api', 'db'), control('scaler', 'api')],
 };
 
 /* ------------------------------------------------------------------ *
@@ -891,6 +1269,357 @@ const fullStack: Topology = {
   ],
 };
 
+/* ------------------------------------------------------------------ *
+ * 14. Specialised Stores
+ *     Every request finds the store built for it, and the arithmetic of
+ *     WHY each store exists is visible in the meters.
+ *
+ *     240 rps offered, split three ways by the LB (~80 rps per API):
+ *       search-api -> searchindex   80 rps at a 90/10 search/write mix.
+ *                     Mean cost ~14ms against 12 slots -> ~850 rps ceiling.
+ *                     Writes pay +60ms of indexing and are searchable only
+ *                     1.5s after commit; the stale-search rate IS that lag.
+ *       recs-api   -> vectordb + graphdb. The vector index costs ~50ms per
+ *                     query at 1M vectors and 0.9 recall (16 slots ->
+ *                     320 rps ceiling: the knee of this preset), the graph
+ *                     runs friend-of-friend at depth 2 (~18ms -> 440 rps).
+ *       media-api  -> objectstore. 90ms flat, 64 slots -> ~710 rps: high
+ *                     latency, near-unlimited throughput. Not a database.
+ *       every api  -> timeseriesdb. All 240 rps of metrics appends land
+ *                     there and use ~11% of it; range queries are the only
+ *                     thing that can hurt it, and that is a slider.
+ *
+ *     A separate 6 rps batch client archives through a queue into cold
+ *     storage (24 slots / 2.8s -> ~8.5 rps ceiling, ~70% busy at 1x).
+ *
+ *     At 4x the two paths fail in character: the vector index saturates
+ *     LOUDLY (sheds, client errors) while the archive pipeline fails
+ *     QUIETLY -- the batch client is still acknowledged instantly while
+ *     cold storage sheds the restores behind the queue.
+ * ------------------------------------------------------------------ */
+
+const specialisedStores: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 240, timeoutMs: 3000 }),
+    node('batch', 'client', 'Batch Jobs', COL(0), ROW(3), { rps: 6, timeoutMs: 2000 }),
+    node('lb', 'lb', 'Load Balancer', COL(1), ROW(1), { capacity: 512, serviceMs: 0.5 }),
+    node('archive-q', 'queue', 'Archive Queue', COL(1), ROW(3), {
+      serviceMs: 1,
+      serviceCv: 0.2,
+      queueLimit: 5000,
+    }),
+    node('search-api', 'service', 'Search API', COL(2), ROW(0), {
+      capacity: 8,
+      serviceMs: 6,
+      serviceCv: 0.4,
+      queueLimit: 128,
+    }),
+    node('recs-api', 'service', 'Recs API', COL(2), ROW(1), {
+      capacity: 8,
+      serviceMs: 6,
+      serviceCv: 0.4,
+      queueLimit: 128,
+    }),
+    node('media-api', 'service', 'Media API', COL(2), ROW(2), {
+      capacity: 8,
+      serviceMs: 6,
+      serviceCv: 0.4,
+      queueLimit: 128,
+    }),
+    node('archiver', 'worker', 'Archiver', COL(2), ROW(3), {
+      capacity: 2,
+      serviceMs: 40,
+      serviceCv: 0.4,
+    }),
+    node('search', 'searchindex', 'Search Index', COL(3), ROW(0)),
+    // 12 slots at ~50ms per query is a 240 rps ceiling: a third used at 1x,
+    // and the first thing to saturate at 4x, which makes the vector index
+    // the knee of the whole preset.
+    node('vectors', 'vectordb', 'Vector Index', COL(3), ROW(1), { capacity: 12 }),
+    node('blobs', 'objectstore', 'Object Storage', COL(3), ROW(2)),
+    node('glacier', 'coldstorage', 'Cold Storage', COL(3), ROW(3)),
+    node('social', 'graphdb', 'Social Graph', COL(4), ROW(0)),
+    node('metrics', 'timeseriesdb', 'Metrics Store', COL(4), ROW(2)),
+  ],
+  edges: [
+    edge('client', 'lb'),
+    edge('lb', 'search-api'),
+    edge('lb', 'recs-api'),
+    edge('lb', 'media-api'),
+    // Each API talks to its own store AND emits a metric append; a service
+    // fans out to all its downstreams, so the metrics edge is taken for
+    // every request, which is exactly what instrumentation does.
+    edge('search-api', 'search'),
+    edge('search-api', 'metrics'),
+    edge('recs-api', 'vectors'),
+    edge('recs-api', 'social'),
+    edge('recs-api', 'metrics'),
+    edge('media-api', 'blobs'),
+    edge('media-api', 'metrics'),
+    // The archive path: acknowledged at the queue, drained at the
+    // archiver's pace, paid for in seconds at the cold tier.
+    edge('batch', 'archive-q'),
+    edge('archive-q', 'archiver'),
+    edge('archiver', 'glacier'),
+  ],
+};
+
+/* ------------------------------------------------------------------ *
+ * 15. Event-Driven Backend
+ *
+ * The messaging tier in one picture, with the arithmetic worked out:
+ *
+ *   client 60 rps -> apigateway (300 rps bucket, 1% bad auth, 2ms)
+ *     routes 3:1 -> api service (16 slots / 10ms = 1600 rps ceiling) ~44 rps
+ *                -> lambda (25ms warm, +350ms cold, 40 concurrent)   ~15 rps
+ *   api fans out to:
+ *     stream broker (4 partitions, retention 2000):
+ *       group A -> indexer  (4 slots / 55ms -> ~72/s; 4 partitions x
+ *                  1000/55 = ~72/s -- keeps up at 1x, lags visibly at 2x+)
+ *       group B -> billing  (4 slots / 12ms -> ~330/s; never behind)
+ *     pub/sub topic -> push, audit, metrics (1 publish = 3 deliveries;
+ *       audit is deliberately slow (2 slots / 40ms = 50/s) so at ~44 rps it
+ *       runs hot without touching the other subscribers)
+ *   chat client 30 conn/s -> websocket gateway (400 connection slots,
+ *       8s sessions -> ~240 held, 60% full at 1x; 4x offers 120 conn/s =
+ *       960 wanted and the gateway refuses everything past 400)
+ *       -> sidecar (2ms tax, 2 retries, eject after 5) -> chat service
+ *   cron: every 15s, 40 requests at once -> lambda -> shared db. The warm
+ *       pool (~1-2 instances) cannot cover a burst of 40, so nearly every
+ *       burst invocation pays the cold start, and the db (8 slots / 20ms =
+ *       400/s) absorbs a spike that shows up in interactive latency.
+ * ------------------------------------------------------------------ */
+
+const eventDriven: Topology = {
+  nodes: [
+    node('client', 'client', 'API Clients', 40, 140, { rps: 60, timeoutMs: 2500 }),
+    node('gw', 'apigateway', 'API Gateway', 250, 140, {
+      capacity: 64,
+      serviceMs: 2,
+      rateLimitRps: 300,
+      burst: 300,
+      authFailRate: 0.01,
+    }),
+    node('api', 'service', 'API Service', 470, 140, {
+      capacity: 16,
+      serviceMs: 10,
+      serviceCv: 0.5,
+      queueLimit: 128,
+    }),
+    node('broker', 'streambroker', 'Event Stream', 700, 60, {
+      serviceMs: 1,
+      partitions: 4,
+      queueLimit: 2000,
+    }),
+    node('indexer', 'service', 'Search Indexer', 930, 20, {
+      capacity: 4,
+      serviceMs: 55,
+      serviceCv: 0.6,
+      queueLimit: 32,
+    }),
+    node('billing', 'service', 'Billing', 930, 110, {
+      capacity: 4,
+      serviceMs: 12,
+      serviceCv: 0.5,
+      queueLimit: 32,
+    }),
+    node('topic', 'pubsub', 'Fan-out Topic', 700, 230, { serviceMs: 0.5 }),
+    node('push', 'service', 'Push Notifs', 930, 200, {
+      capacity: 4,
+      serviceMs: 8,
+      serviceCv: 0.5,
+      queueLimit: 32,
+    }),
+    node('audit', 'service', 'Audit Log', 930, 290, {
+      capacity: 2,
+      serviceMs: 40,
+      serviceCv: 0.6,
+      queueLimit: 24,
+    }),
+    node('metrics', 'service', 'Metrics', 930, 380, {
+      capacity: 4,
+      serviceMs: 5,
+      serviceCv: 0.4,
+      queueLimit: 32,
+    }),
+    node('chat', 'client', 'Chat Clients', 40, 420, { rps: 30, timeoutMs: 2000 }),
+    node('ws', 'websocket', 'WS Gateway', 250, 420, {
+      capacity: 400,
+      serviceMs: 5,
+      connectionMs: 8000,
+    }),
+    node('mesh', 'sidecar', 'Chat Sidecar', 470, 420, {
+      capacity: 32,
+      serviceMs: 2,
+      timeoutMs: 500,
+      retries: 2,
+      outlierAfter: 5,
+      openMs: 3000,
+    }),
+    node('chatsvc', 'service', 'Chat Service', 690, 420, {
+      capacity: 8,
+      serviceMs: 12,
+      serviceCv: 0.5,
+      queueLimit: 64,
+    }),
+    node('cron', 'cron', 'Nightly Report', 40, 560, {
+      intervalMs: 15000,
+      batchSize: 40,
+    }),
+    node('fn', 'lambda', 'Report Fn', 300, 560, {
+      serviceMs: 25,
+      serviceCv: 0.5,
+      coldStartMs: 350,
+      keepWarmMs: 10000,
+      maxConcurrency: 30,
+    }),
+    node('db', 'db', 'Database', 560, 560, {
+      capacity: 8,
+      serviceMs: 20,
+      serviceCv: 0.6,
+      queueLimit: 64,
+    }),
+  ],
+  edges: [
+    edge('client', 'gw'),
+    // The gateway's route table: 3 parts interactive API, 1 part function.
+    edge('gw', 'api', 3),
+    edge('gw', 'fn', 1),
+    edge('api', 'broker'),
+    edge('api', 'topic'),
+    // Each broker edge is an independent consumer group.
+    edge('broker', 'indexer'),
+    edge('broker', 'billing'),
+    // Each topic edge is one more delivery per publish.
+    edge('topic', 'push'),
+    edge('topic', 'audit'),
+    edge('topic', 'metrics'),
+    edge('chat', 'ws'),
+    edge('ws', 'mesh'),
+    edge('mesh', 'chatsvc'),
+    edge('cron', 'fn'),
+    edge('fn', 'db'),
+  ],
+};
+
+/* ------------------------------------------------------------------ *
+ * Resilient Delivery
+ *     The resilience tier in one picture: every way a system can fail
+ *     ON PURPOSE instead of by surprise.
+ *
+ *     Sync path, 240 rps offered:
+ *       shedder   admits 700 rps sustained; 30% of keys are best-effort.
+ *                 Invisible at 1x, and at 4x it drops the best-effort tier
+ *                 first while the important traffic keeps its tokens.
+ *       api       16 slots / 6ms -> 2600 rps, never the bottleneck.
+ *       bulkhead  6 concurrent calls around recommendations. At 240 rps a
+ *                 15ms dependency needs ~3.6 in flight, so the pool is
+ *                 half-empty; slow the dependency 5x (inject 'slow') and
+ *                 the pool fills within one round trip, after which the
+ *                 excess fails in microseconds instead of queueing.
+ *       recs      6 slots / 15ms -> 400 rps ceiling behind the bulkhead.
+ *       writebehind  acks every write in ~1ms and holds it dirty for
+ *                 200ms before the flush lands on the db: a standing
+ *                 population of ~50 acknowledged-but-unwritten rows.
+ *                 Crash it and watch exactly that many failures appear.
+ *       retryqueue -> notify   the notification service fails 15% of
+ *                 calls, so ~40/s are redelivered with backoff and only
+ *                 the 0.34% that fail three straight attempts dead-letter:
+ *                 failures with somewhere to go, counted on the shelf.
+ *
+ *     Batch path, 3 uploads/s:
+ *       encode queue -> transcoder farm, 2 boxes x 2 jobs / 1.2s = 3.3
+ *       jobs/s of drain against 3.0 offered. ~90% utilised at 1x; at 4x
+ *       the 12 jobs/s deficit grows the backlog by ~9 jobs every second,
+ *       and no amount of waiting drains it. Scale `instances` to fix it.
+ * ------------------------------------------------------------------ */
+
+const resilientDelivery: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 240, timeoutMs: 2500 }),
+    node('shedder', 'loadshedder', 'Load Shedder', COL(1), ROW(1), {
+      rateLimitRps: 700,
+      burst: 700,
+      lowPriorityShare: 0.3,
+      priorityReserve: 0.3,
+    }),
+    node('api', 'service', 'API Server', COL(2), ROW(1), {
+      capacity: 16,
+      serviceMs: 6,
+      serviceCv: 0.4,
+      queueLimit: 128,
+    }),
+    node('bulkhead', 'bulkhead', 'Recs Bulkhead', COL(3), ROW(0), {
+      bulkheadMax: 6,
+    }),
+    node('recs', 'service', 'Recommendations', COL(4), ROW(0), {
+      capacity: 6,
+      serviceMs: 15,
+      serviceCv: 0.5,
+      queueLimit: 32,
+    }),
+    node('writebuf', 'writebehind', 'Write-Behind Cache', COL(3), ROW(1), {
+      capacity: 256,
+      serviceMs: 1,
+      serviceCv: 0.3,
+      queueLimit: 512,
+      flushDelayMs: 200,
+    }),
+    node('db', 'db', 'Database', COL(4), ROW(1), {
+      capacity: 12,
+      serviceMs: 15,
+      serviceCv: 0.6,
+      queueLimit: 96,
+    }),
+    node('retryq', 'retryqueue', 'Notify Queue', COL(3), ROW(2), {
+      capacity: 8,
+      serviceMs: 3,
+      serviceCv: 0.3,
+      queueLimit: 2000,
+      timeoutMs: 1000,
+      retries: 2,
+    }),
+    node('notify', 'service', 'Notification Service', COL(4), ROW(2), {
+      capacity: 6,
+      serviceMs: 12,
+      serviceCv: 0.5,
+      errorRate: 0.15,
+      queueLimit: 48,
+    }),
+    node('uploader', 'client', 'Upload Client', COL(0), ROW(3), {
+      rps: 3,
+      timeoutMs: 4000,
+    }),
+    node('encodeq', 'queue', 'Encode Queue', COL(1), ROW(3), {
+      serviceMs: 1,
+      serviceCv: 0.2,
+      queueLimit: 5000,
+    }),
+    node('transcoder', 'transcoder', 'Transcoder Farm', COL(2), ROW(3), {
+      instances: 2,
+      capacity: 2,
+      serviceMs: 1200,
+      serviceCv: 0.3,
+    }),
+  ],
+  edges: [
+    edge('client', 'shedder'),
+    edge('shedder', 'api'),
+    // The api fans out to all three: recommendations behind their own
+    // bulkhead, writes into the write-behind buffer, and a notification
+    // job into the retry queue. Both delivery nodes ack instantly, so
+    // the client's fate rides on the recommendations path alone.
+    edge('api', 'bulkhead'),
+    edge('api', 'writebuf'),
+    edge('api', 'retryq'),
+    edge('bulkhead', 'recs'),
+    edge('writebuf', 'db'),
+    edge('retryq', 'notify'),
+    edge('uploader', 'encodeq'),
+    edge('encodeq', 'transcoder'),
+  ],
+};
+
 export const PRESETS: Preset[] = [
   {
     id: 'single-server',
@@ -969,5 +1698,26 @@ export const PRESETS: Preset[] = [
     name: 'Full Stack',
     description: 'Every tier at once: edge cache, load balancer, services, cache, shards, and a queue of async work behind it all.',
     topology: fullStack,
+  },
+  {
+    id: 'specialised-stores',
+    name: 'Specialised Stores',
+    description:
+      'Search, vectors, graph, blobs, metrics and an archive tier, each store built for one job. Watch which one saturates first, and which fails without a sound.',
+    topology: specialisedStores,
+  },
+  {
+    id: 'event-driven',
+    name: 'Event-Driven Backend',
+    description:
+      'A stream with two consumer groups, a fan-out topic, a websocket tier, a sidecar, a lambda and a cron burst. Watch consumer lag grow, cold starts spike on the quarter-minute, and connections, not requests, run out.',
+    topology: eventDriven,
+  },
+  {
+    id: 'resilient-delivery',
+    name: 'Resilient Delivery',
+    description:
+      'Failing on purpose: a shedder drops the traffic that matters least, a bulkhead contains a slow dependency, retried deliveries land on a dead letter shelf, and a write-behind buffer trades durability for speed.',
+    topology: resilientDelivery,
   },
 ];

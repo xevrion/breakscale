@@ -39,6 +39,7 @@ import './Inspector.css';
 
 type Field =
   | 'rps'
+  | 'instances'
   | 'capacity'
   | 'serviceMs'
   | 'serviceCv'
@@ -67,7 +68,28 @@ type Field =
   | 'errorThreshold'
   | 'windowMs'
   | 'openMs'
-  | 'halfOpenProbes';
+  | 'halfOpenProbes'
+  | 'indexMs'
+  | 'indexLagMs'
+  | 'rangeQueryFraction'
+  | 'rangeQueryMs'
+  | 'traversalDepth'
+  | 'indexSizeK'
+  | 'recallTarget'
+  | 'partitions'
+  | 'connectionMs'
+  | 'authFailRate'
+  | 'outlierAfter'
+  | 'coldStartMs'
+  | 'keepWarmMs'
+  | 'maxConcurrency'
+  | 'intervalMs'
+  | 'batchSize'
+  | 'bulkheadMax'
+  | 'flushDelayMs'
+  | 'edgeShare'
+  | 'lowPriorityShare'
+  | 'priorityReserve';
 
 const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   // The client generates load and decides how long to wait for an answer.
@@ -75,9 +97,10 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   client: ['rps', 'timeoutMs', 'retries'],
   // A load balancer forwards; its own service time is near-zero but its
   // connection pool and backlog are real and can saturate.
-  lb: ['capacity', 'serviceMs', 'queueLimit'],
+  lb: ['instances', 'capacity', 'serviceMs', 'queueLimit'],
   // The general workhorse: everything except cache hits and offered load.
   service: [
+    'instances',
     'capacity',
     'serviceMs',
     'serviceCv',
@@ -87,13 +110,13 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
     'retries',
   ],
   // Only the cache has a hit rate. That single knob is the interesting one.
-  cache: ['hitRate', 'capacity', 'serviceMs', 'serviceCv', 'queueLimit'],
+  cache: ['hitRate', 'instances', 'capacity', 'serviceMs', 'serviceCv', 'queueLimit'],
   // A database is slots and service time. It does not retry on your behalf.
-  db: ['capacity', 'serviceMs', 'serviceCv', 'queueLimit', 'errorRate'],
+  db: ['instances', 'capacity', 'serviceMs', 'serviceCv', 'queueLimit', 'errorRate'],
   // A queue is a buffer. Depth is the only thing that matters about it.
   queue: ['queueLimit', 'serviceMs'],
   // Workers drain a queue. No inbound queue limit of their own.
-  worker: ['capacity', 'serviceMs', 'serviceCv', 'errorRate'],
+  worker: ['instances', 'capacity', 'serviceMs', 'serviceCv', 'errorRate'],
   // The three knobs that trade read scale against staleness, plus the
   // per-replica service cost.
   replica: [
@@ -130,13 +153,118 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   // A CDN is a cache whose whole story is the hit rate: how much load never
   // reaches you. Capacity and service time are shown because a saturated
   // edge is still a real failure mode.
-  cdn: ['hitRate', 'capacity', 'serviceMs', 'queueLimit'],
+  cdn: ['hitRate', 'instances', 'capacity', 'serviceMs', 'queueLimit'],
   // A limiter has exactly two knobs, and the pair is the lesson: sustained
   // rate, and how much burst you forgive on top of it.
   ratelimiter: ['rateLimitRps', 'burst'],
   // The four knobs of a breaker are the four questions it answers: how bad,
   // measured over how long, shut for how long, and reopened on what evidence.
   breaker: ['errorThreshold', 'windowMs', 'openMs', 'halfOpenProbes'],
+  // Blob storage is slots and a high flat latency; nothing else about it is
+  // interesting, which is itself the lesson.
+  objectstore: ['capacity', 'serviceMs', 'serviceCv', 'queueLimit', 'errorRate'],
+  // The search trade: cheap queries, surcharged writes, and the refresh lag
+  // that decides how stale a search can be.
+  searchindex: [
+    'readFraction',
+    'indexMs',
+    'indexLagMs',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'serviceCv',
+    'queueLimit',
+  ],
+  // Appends are the base cost; the two range-query knobs are what turn a
+  // metrics firehose into a melted store.
+  timeseriesdb: [
+    'rangeQueryFraction',
+    'rangeQueryMs',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'serviceCv',
+    'queueLimit',
+  ],
+  // One knob carries the lesson: every extra hop of depth multiplies cost.
+  graphdb: [
+    'traversalDepth',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'serviceCv',
+    'queueLimit',
+  ],
+  // The archive tier is deliberately knob-poor: seconds per request and few
+  // slots ARE the component.
+  coldstorage: ['capacity', 'serviceMs', 'serviceCv', 'queueLimit'],
+  // Corpus size and recall target move query cost independently; the server
+  // knobs underneath decide how much of that cost the pool can absorb.
+  vectordb: [
+    'indexSizeK',
+    'recallTarget',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'serviceCv',
+    'queueLimit',
+  ],
+  // Partition count is the parallelism ceiling of every consumer group;
+  // queueLimit is the log's retention in messages.
+  streambroker: ['partitions', 'queueLimit', 'serviceMs'],
+  // A topic has no knobs of its own: amplification comes from the wiring,
+  // and the ack cost is the only thing to tune.
+  pubsub: ['serviceMs'],
+  // Capacity here is CONNECTIONS HELD per instance; connectionMs is how
+  // long each one is held. serviceMs is only the handshake.
+  websocket: ['connectionMs', 'instances', 'capacity', 'serviceMs', 'serviceCv'],
+  // The front door: its own processing cost, a token bucket, and the auth
+  // check, in one panel.
+  apigateway: [
+    'rateLimitRps',
+    'burst',
+    'authFailRate',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'queueLimit',
+  ],
+  // The tax (serviceMs), and what it buys: retries with a per-attempt
+  // deadline, and outlier ejection.
+  sidecar: [
+    'outlierAfter',
+    'openMs',
+    'retries',
+    'timeoutMs',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'queueLimit',
+  ],
+  // No fleet knobs at all: the platform scales it. What you tune is the
+  // cold-start economics and the concurrency ceiling.
+  lambda: ['coldStartMs', 'keepWarmMs', 'maxConcurrency', 'serviceMs', 'serviceCv', 'errorRate'],
+  // A schedule and a payload size. Everything else about a cron job is
+  // what it does to the nodes downstream of it.
+  cron: ['intervalMs', 'batchSize'],
+  // One knob, and it IS the component: how many calls may be outstanding
+  // to the dependency behind it. errorRate and retries are deliberately
+  // not offered here; both would make the pool count drift.
+  bulkhead: ['bulkheadMax'],
+  // Delivery concurrency, dispatch cost, buffer depth, and the redrive
+  // policy: attempts and the per-attempt deadline.
+  retryqueue: ['retries', 'timeoutMs', 'capacity', 'serviceMs', 'queueLimit'],
+  // The batch-regime worker: boxes, jobs per box, and seconds per job.
+  transcoder: ['instances', 'capacity', 'serviceMs', 'serviceCv', 'errorRate'],
+  // The share it can answer locally is the lesson; the rest is a fast,
+  // wide pool like any edge tier.
+  edgecompute: ['edgeShare', 'instances', 'capacity', 'serviceMs', 'queueLimit'],
+  // How long writes sit dirty, and how many may sit at once. `capacity`
+  // here is the buffer (memory), not threads.
+  writebehind: ['flushDelayMs', 'capacity', 'serviceMs', 'queueLimit'],
+  // The limiter's bucket plus the two priority knobs that turn it from
+  // fair refusal into deliberate triage.
+  loadshedder: ['rateLimitRps', 'burst', 'lowPriorityShare', 'priorityReserve'],
 };
 
 /** Kinds whose throughput ceiling is capacity x (1000 / serviceMs). */
@@ -146,6 +274,15 @@ const HAS_THROUGHPUT_CEILING: ReadonlySet<NodeKind> = new Set<NodeKind>([
   'cache',
   'db',
   'worker',
+  // Both serve on the engine's standard slot discipline with a flat mean
+  // service time, so capacity x (1000 / serviceMs) is exact for them too.
+  'objectstore',
+  'coldstorage',
+  // Same standard slot discipline: delivery slots for the retry queue,
+  // encode slots for the transcoder, PoP slots for edge compute.
+  'retryqueue',
+  'transcoder',
+  'edgecompute',
 ]);
 
 /**
@@ -158,7 +295,7 @@ const KIND_BLURB: Record<NodeKind, string> = {
     'Offers load and waits for an answer. Its timeout decides when a slow reply becomes a failure.',
   lb: 'Spreads requests across its targets. Its own pool and backlog can saturate before theirs do.',
   service:
-    'The workhorse. Capacity slots x service time sets the ceiling everything else queues behind.',
+    'The workhorse. How many it handles at once, divided by how long each takes, is the ceiling everything else queues behind.',
   cache:
     'Answers hits without touching downstream. The hit rate is the knob that matters here.',
   db: 'Slots and service time. It does not retry for you, so its queue is where pressure shows.',
@@ -179,6 +316,44 @@ const KIND_BLURB: Record<NodeKind, string> = {
     'A token bucket. Refuses excess traffic instantly instead of queueing it, which is what stops a busy system turning into a dead one.',
   breaker:
     'Watches its downstream and stops calling it once it is failing. Cutting the traffic to zero is what gives a struggling dependency room to recover.',
+  objectstore:
+    'Blob storage. Every request pays a high flat latency, but the pool is wide enough that saturating it takes deliberate effort. Not a database, and that is the point.',
+  searchindex:
+    'Searches are cheap; writes pay an indexing surcharge and only become searchable after the refresh lag. The stale-search rate is that lag made visible.',
+  timeseriesdb:
+    'Built to swallow appends by the thousand. A range query costs hundreds of appends, so a few percent of them dominates the store, which is why metrics do not live in your main database.',
+  graphdb:
+    'Stores relationships. Every extra hop of traversal depth multiplies the edges visited by three, so a friends-of-friends query costs triple and one more hop triples it again.',
+  coldstorage:
+    'The archive tier: cheap to keep, seconds to read. Fine for a trickle of restores behind a queue, hopeless for anything a user is waiting on.',
+  vectordb:
+    'Similarity search over embeddings. Cost grows with the log of the corpus and explodes as recall approaches perfect, so the recall slider is a latency slider read backwards.',
+  streambroker:
+    'A partitioned, replayable log. Producers are acked instantly; each outgoing edge is an independent consumer group whose lag grows when its consumers are slower than the producers. Partition count, not consumer count, caps how fast a group can drain.',
+  pubsub:
+    'One publish becomes one delivery per subscriber. A slow subscriber sheds at its own node without delaying the others, but the total load is multiplied by the fan-out, whether you noticed or not.',
+  websocket:
+    'Holds long-lived connections. Capacity is concurrent connections held, not requests per second: at 30 new connections a second held 8 seconds each, 240 slots are simply occupied. Chat systems run out of sockets long before they run out of CPU.',
+  apigateway:
+    'The front door: authenticates, rate limits, and routes each request to the backend its weights choose. Three components worth of refusals happen here so the backends only ever see traffic worth serving.',
+  sidecar:
+    'A proxy beside one service. It charges its service time on every single request, and pays you back with retries, a per-attempt deadline, and ejecting the upstream after repeated failures. Put one at every hop and watch the taxes stack; that is a service mesh.',
+  lambda:
+    'Scales instantly with load, up to its concurrency cap, and there is no queue past it. The catch is the cold start: a request that finds no warm instance pays a large extra latency, so idle periods and bursts are exactly when it is slowest.',
+  cron:
+    'Fires on a schedule and dumps its whole batch at once. The database that handles the steady daytime load falls over at midnight not because traffic grew, but because this arrived all in the same instant.',
+  bulkhead:
+    'Caps how many calls may be outstanding to the dependency behind it. When that dependency slows down, the pool fills within one round trip and the excess fails fast here, instead of queueing behind a sick service.',
+  retryqueue:
+    'Acks the sender instantly, delivers downstream itself, and redelivers failures with backoff. Messages that fail every attempt land on the dead letter shelf: counted, not vanished.',
+  transcoder:
+    'A batch farm: jobs take seconds, so throughput is boxes times jobs-per-box divided by job time. Feed it from a queue, and size it against arrivals, because a structural deficit grows the backlog forever.',
+  edgecompute:
+    'A small function running in the PoP. The share of requests it can fully answer never touches your origin; the rest pass through. Unlike a CDN hit rate, that share is a property of your code, not your traffic.',
+  writebehind:
+    'Acknowledges writes from memory and flushes them to the store later. The caller sees a one-millisecond write; the store sees the same load smoothed. Crash it, and every write still in the buffer is lost after being confirmed.',
+  loadshedder:
+    'A token bucket that refuses by priority: low-priority traffic must leave a reserve untouched, so under saturation it is dropped first while the traffic that matters keeps being admitted. Degradation as a policy, not an accident.',
 };
 
 /* ------------------------------------------------------------------ *
@@ -190,11 +365,27 @@ const KIND_BLURB: Record<NodeKind, string> = {
  * and the aria description use, so it is never absent.
  * ------------------------------------------------------------------ */
 
+/**
+ * One line of plain English disambiguating a knob whose NAME alone does not
+ * carry its meaning.
+ *
+ * Reserved for genuine ambiguity, not decoration. The test a field has to
+ * fail before it earns a hint: could a student who has never read the source
+ * confuse this with the field next to it? `shardCount` and `shardCapacity`
+ * fail it (one is a number of things, the other a rate per thing, and both
+ * read as "how much shard"). `instances` and `capacity` fail it in exactly
+ * the same way. `serviceMs` passes -- its label and unit already say
+ * everything -- and gets no hint, because a hint on every field is noise that
+ * teaches a student to stop reading them.
+ */
+type FieldHint = string;
+
 interface SliderSpec {
   control: 'slider';
   label: string;
   /** Stated for a11y and the multi-select summary; the display folds it in. */
   unit: string;
+  hint?: FieldHint;
   min: number;
   max: number;
   step: number;
@@ -206,6 +397,7 @@ interface NumberSpec {
   control: 'number';
   label: string;
   unit: string;
+  hint?: FieldHint;
   min: number;
   max: number;
   step: number;
@@ -223,10 +415,20 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     step: 1,
     display: (v) => formatRate(v),
   },
+  instances: {
+    control: 'number',
+    label: 'Instances',
+    unit: 'machines',
+    hint: 'How many copies of this component are running. This is what an autoscaler adds and removes.',
+    min: 1,
+    max: 512,
+    step: 1,
+  },
   capacity: {
     control: 'number',
-    label: 'Capacity',
-    unit: 'slots',
+    label: 'Slots per instance',
+    unit: 'at once, on one machine',
+    hint: 'How many requests ONE machine handles at a time. Total parallelism is instances x this.',
     min: 1,
     max: 4096,
     step: 1,
@@ -242,7 +444,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   serviceCv: {
     control: 'slider',
-    label: 'Service variance',
+    label: 'How uneven the work is',
     unit: 'coefficient of variation',
     min: 0,
     max: 2,
@@ -251,8 +453,8 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   queueLimit: {
     control: 'number',
-    label: 'Queue limit',
-    unit: 'reqs',
+    label: 'Requests waiting in line',
+    unit: 'at most',
     min: 0,
     max: 20000,
     step: 1,
@@ -287,15 +489,16 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   retries: {
     control: 'number',
     label: 'Retries',
-    unit: 'attempts',
+    unit: 'extra tries',
     min: 0,
     max: 10,
     step: 1,
   },
   replicaCount: {
     control: 'number',
-    label: 'Replicas',
-    unit: 'nodes',
+    label: 'Read replicas',
+    unit: 'copies, besides the primary',
+    hint: 'Read-only copies behind the primary. They add READ capacity only \u2014 every write still goes through the one primary.',
     min: 1,
     max: 64,
     step: 1,
@@ -311,7 +514,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   readFraction: {
     control: 'slider',
-    label: 'Read fraction',
+    label: 'Reads, as a share of traffic',
     unit: 'percent of traffic',
     min: 0,
     max: 1,
@@ -322,6 +525,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     control: 'number',
     label: 'Shards',
     unit: 'partitions',
+    hint: 'How many partitions the data is split across. A key goes to exactly one of them.',
     min: 1,
     max: 64,
     step: 1,
@@ -329,14 +533,15 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   shardCapacity: {
     control: 'number',
     label: 'Slots per shard',
-    unit: 'slots',
+    unit: 'at once, on one shard',
+    hint: 'How many requests ONE partition handles at a time. A hot key can only ever use its own shard\u2019s slots.',
     min: 1,
     max: 512,
     step: 1,
   },
   hotKeyFraction: {
     control: 'slider',
-    label: 'Hot key share',
+    label: 'Traffic hitting one hot key',
     unit: 'percent onto one shard',
     min: 0,
     max: 1,
@@ -345,7 +550,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   targetUtil: {
     control: 'slider',
-    label: 'Target utilisation',
+    label: 'Keep utilisation near',
     unit: 'percent',
     min: 0.1,
     max: 0.95,
@@ -354,23 +559,23 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   minCapacity: {
     control: 'number',
-    label: 'Min capacity',
-    unit: 'slots',
+    label: 'Never scale below',
+    unit: 'at once',
     min: 1,
     max: 512,
     step: 1,
   },
   maxCapacity: {
     control: 'number',
-    label: 'Max capacity',
-    unit: 'slots',
+    label: 'Never scale above',
+    unit: 'at once',
     min: 1,
     max: 512,
     step: 1,
   },
   cooldownMs: {
     control: 'slider',
-    label: 'Cooldown',
+    label: 'Wait between changes',
     unit: 'milliseconds',
     min: 0,
     max: 30000,
@@ -379,7 +584,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   scaleStepPct: {
     control: 'slider',
-    label: 'Scale step',
+    label: 'Change capacity by',
     unit: 'percent of capacity',
     min: 0.05,
     max: 1,
@@ -388,7 +593,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   warmupMs: {
     control: 'slider',
-    label: 'Warmup delay',
+    label: 'New capacity takes',
     unit: 'milliseconds',
     min: 0,
     max: 60000,
@@ -405,15 +610,15 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   activeRegion: {
     control: 'number',
-    label: 'Active region',
-    unit: 'index',
+    label: 'Serving from region',
+    unit: 'number',
     min: 0,
     max: 7,
     step: 1,
   },
   failoverMs: {
     control: 'slider',
-    label: 'Failover time',
+    label: 'Failover takes',
     unit: 'milliseconds',
     min: 0,
     max: 60000,
@@ -431,15 +636,15 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   burst: {
     control: 'number',
-    label: 'Burst',
-    unit: 'tokens',
+    label: 'Burst allowance',
+    unit: 'requests',
     min: 1,
     max: 5000,
     step: 1,
   },
   errorThreshold: {
     control: 'slider',
-    label: 'Error threshold',
+    label: 'Trip when errors reach',
     unit: 'percent',
     min: 0,
     max: 1,
@@ -448,7 +653,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   windowMs: {
     control: 'slider',
-    label: 'Error window',
+    label: 'Measured over',
     unit: 'milliseconds',
     min: 200,
     max: 30000,
@@ -457,7 +662,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   openMs: {
     control: 'slider',
-    label: 'Open for',
+    label: 'Stay open for',
     unit: 'milliseconds',
     min: 100,
     max: 60000,
@@ -466,11 +671,208 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   halfOpenProbes: {
     control: 'number',
-    label: 'Half-open probes',
+    label: 'Test requests before closing',
     unit: 'requests',
     min: 1,
     max: 50,
     step: 1,
+  },
+  indexMs: {
+    control: 'slider',
+    label: 'Indexing cost per write',
+    unit: 'extra milliseconds per write',
+    hint: 'What a write pays ON TOP of the service time, to update the index. Searches never pay it.',
+    min: 0,
+    max: 500,
+    step: 5,
+    display: (v) => (v === 0 ? 'free' : `+${formatMs(v)}`),
+  },
+  indexLagMs: {
+    control: 'slider',
+    label: 'Searchable after',
+    unit: 'milliseconds after a write commits',
+    hint: 'The refresh interval: how long after a write commits before searches can see it. Searches inside that window read the old index.',
+    min: 0,
+    max: 10000,
+    step: 100,
+    display: (v) => (v === 0 ? 'instantly' : formatMs(v)),
+  },
+  rangeQueryFraction: {
+    control: 'slider',
+    label: 'Traffic that is range queries',
+    unit: 'percent of traffic',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    display: (v) => (v === 0 ? 'appends only' : formatPct(v)),
+  },
+  rangeQueryMs: {
+    control: 'slider',
+    label: 'Range query costs',
+    unit: 'extra milliseconds per range query',
+    hint: 'What a range query pays ON TOP of the service time, to scan and aggregate. Appends never pay it.',
+    min: 0,
+    max: 2000,
+    step: 10,
+    display: (v) => (v === 0 ? 'free' : `+${formatMs(v)}`),
+  },
+  traversalDepth: {
+    control: 'number',
+    label: 'Traversal depth',
+    unit: 'hops',
+    hint: 'How many hops each query walks. Every extra hop multiplies the work by about 3, so depth 3 costs 9x depth 1.',
+    min: 1,
+    max: 6,
+    step: 1,
+  },
+  indexSizeK: {
+    control: 'slider',
+    label: 'Index size',
+    unit: 'thousands of vectors',
+    min: 1,
+    max: 100000,
+    step: 1,
+    display: (v) => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}M vectors` : `${Math.round(v)}K vectors`),
+  },
+  recallTarget: {
+    control: 'slider',
+    label: 'Recall target',
+    unit: 'fraction of true neighbours found',
+    hint: 'How close to perfect the search must be. Cost scales with 1 / (1 - recall): the last percent costs more than everything before it.',
+    min: 0.5,
+    max: 0.99,
+    step: 0.01,
+    display: (v) => formatPct(v),
+  },
+  partitions: {
+    control: 'number',
+    label: 'Partitions',
+    unit: 'partitions',
+    hint: 'A message lands in one partition by key, and a consumer group takes at most one message per partition at a time, so this is the most a group can do in parallel.',
+    min: 1,
+    max: 64,
+    step: 1,
+  },
+  connectionMs: {
+    control: 'slider',
+    label: 'Connection lifetime',
+    unit: 'milliseconds held',
+    hint: 'How long each accepted connection occupies a slot. Held connections settle at rate x lifetime, which is the number that actually saturates.',
+    min: 500,
+    max: 120000,
+    step: 500,
+    display: (v) => formatMs(v),
+  },
+  authFailRate: {
+    control: 'slider',
+    label: 'Failing auth',
+    unit: 'percent of requests',
+    min: 0,
+    max: 0.5,
+    step: 0.005,
+    display: (v) => formatPct(v),
+  },
+  outlierAfter: {
+    control: 'number',
+    label: 'Eject after',
+    unit: 'consecutive failures',
+    hint: 'Straight downstream failures before the proxy stops calling it for a while. Simpler than the breaker on purpose; this is how sidecar outlier detection actually works.',
+    min: 1,
+    max: 50,
+    step: 1,
+  },
+  coldStartMs: {
+    control: 'slider',
+    label: 'Cold start costs',
+    unit: 'extra milliseconds',
+    min: 0,
+    max: 5000,
+    step: 25,
+    display: (v) => (v === 0 ? 'free' : formatMs(v)),
+  },
+  keepWarmMs: {
+    control: 'slider',
+    label: 'Instances stay warm',
+    unit: 'milliseconds after finishing',
+    hint: 'How long a finished instance waits, warm, before the platform reclaims it. Shorter keep-warm means more cold starts on the next burst.',
+    min: 0,
+    max: 60000,
+    step: 500,
+    display: (v) => (v === 0 ? 'reclaim at once' : formatMs(v)),
+  },
+  maxConcurrency: {
+    control: 'number',
+    label: 'Concurrency cap',
+    unit: 'invocations at once',
+    hint: 'The platform limit. Past it requests are throttled immediately; a lambda has no queue to wait in.',
+    min: 1,
+    max: 1000,
+    step: 1,
+  },
+  intervalMs: {
+    control: 'slider',
+    label: 'Fires every',
+    unit: 'milliseconds',
+    min: 1000,
+    max: 120000,
+    step: 1000,
+    display: (v) => formatMs(v),
+  },
+  batchSize: {
+    control: 'number',
+    label: 'Requests per firing',
+    unit: 'per outgoing edge, at once',
+    min: 1,
+    max: 2000,
+    step: 1,
+  },
+  bulkheadMax: {
+    control: 'number',
+    label: 'Calls in flight, at most',
+    unit: 'to the dependency behind it',
+    hint: 'The pool. Roughly this divided by the dependency\u2019s latency in seconds is the admission ceiling.',
+    min: 1,
+    max: 512,
+    step: 1,
+  },
+  flushDelayMs: {
+    control: 'slider',
+    label: 'Writes sit dirty for',
+    unit: 'milliseconds',
+    hint: 'Time between the ack and the flush landing. Everything inside this window is lost if the node crashes.',
+    min: 0,
+    max: 10000,
+    step: 50,
+    display: (v) => (v === 0 ? 'instant flush' : formatMs(v)),
+  },
+  edgeShare: {
+    control: 'slider',
+    label: 'Answered at the edge',
+    unit: 'percent of requests',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    display: (v) => formatPct(v),
+  },
+  lowPriorityShare: {
+    control: 'slider',
+    label: 'Low-priority traffic',
+    unit: 'percent of traffic',
+    hint: 'Derived from the request key, so the same caller is always the same priority.',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    display: (v) => formatPct(v),
+  },
+  priorityReserve: {
+    control: 'slider',
+    label: 'Reserved for high priority',
+    unit: 'percent of the bucket',
+    hint: 'Low-priority requests must leave this share of tokens untouched, which is why they are dropped first.',
+    min: 0,
+    max: 0.9,
+    step: 0.05,
+    display: (v) => formatPct(v),
   },
 };
 
@@ -487,7 +889,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
 const FIELD_GROUPS: { title: string; fields: ReadonlySet<Field> }[] = [
   {
     // The knob that teaches this kind's lesson goes first, alone.
-    title: 'Behaviour',
+    title: 'What it does',
     fields: new Set<Field>([
       'rps',
       'hitRate',
@@ -512,14 +914,35 @@ const FIELD_GROUPS: { title: string; fields: ReadonlySet<Field> }[] = [
       'windowMs',
       'openMs',
       'halfOpenProbes',
+      'indexMs',
+      'indexLagMs',
+      'rangeQueryFraction',
+      'rangeQueryMs',
+      'traversalDepth',
+      'indexSizeK',
+      'recallTarget',
+      'partitions',
+      'connectionMs',
+      'authFailRate',
+      'outlierAfter',
+      'coldStartMs',
+      'keepWarmMs',
+      'maxConcurrency',
+      'intervalMs',
+      'batchSize',
+      'bulkheadMax',
+      'flushDelayMs',
+      'edgeShare',
+      'lowPriorityShare',
+      'priorityReserve',
     ]),
   },
   {
-    title: 'Capacity',
+    title: 'How much it can handle',
     fields: new Set<Field>(['capacity', 'serviceMs', 'serviceCv', 'queueLimit']),
   },
   {
-    title: 'Failure',
+    title: 'When things go wrong',
     fields: new Set<Field>(['errorRate', 'timeoutMs', 'retries']),
   },
 ];
@@ -527,6 +950,25 @@ const FIELD_GROUPS: { title: string; fields: ReadonlySet<Field> }[] = [
 /* ------------------------------------------------------------------ *
  * Controls
  * ------------------------------------------------------------------ */
+
+/**
+ * Fraction of a slider's travel that is filled, as a CSS percentage.
+ *
+ * The shared .slider primitive paints its WebKit fill from a `--fill-pct`
+ * custom property, because WebKit exposes no equivalent of Firefox's
+ * ::-moz-range-progress. Nothing was setting it, so on Chrome every slider
+ * in the app rendered an empty trough no matter where its thumb sat.
+ *
+ * The range is guarded: a spec whose min equals its max would divide by
+ * zero, and a non-finite value would reach CSS as `NaN%` and paint nothing.
+ */
+function fillPct(value: number, min: number, max: number): string {
+  const span = max - min;
+  if (!Number.isFinite(span) || span <= 0) return '0%';
+  const v = Number.isFinite(value) ? value : min;
+  const t = (v - min) / span;
+  return `${Math.max(0, Math.min(1, t)) * 100}%`;
+}
 
 function SliderRow({
   spec,
@@ -559,6 +1001,14 @@ function SliderRow({
         max={spec.max}
         step={spec.step}
         value={value}
+        /* A mixed selection has no single position to fill to, so the
+           track is left empty rather than showing one node's value as if
+           it were shared. */
+        style={
+          {
+            '--fill-pct': mixed ? '0%' : fillPct(value, spec.min, spec.max),
+          } as React.CSSProperties
+        }
         aria-describedby={`${id}-u`}
         aria-valuetext={mixed ? 'mixed' : spec.display(value)}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
@@ -566,6 +1016,7 @@ function SliderRow({
       <span id={`${id}-u`} className="sr-only">
         {spec.unit}
       </span>
+      {spec.hint ? <p className="ins-hint">{spec.hint}</p> : null}
     </div>
   );
 }
@@ -583,7 +1034,7 @@ function NumberRow({
 }) {
   const id = useId();
   return (
-    <div className="ins-field-row">
+    <div className={spec.hint ? 'ins-field-row ins-field-row--hinted' : 'ins-field-row'}>
       <label className="row-k" htmlFor={id}>
         {spec.label}
       </label>
@@ -610,6 +1061,7 @@ function NumberRow({
         />
         <span className="label ins-unit">{spec.unit}</span>
       </span>
+      {spec.hint ? <p className="ins-hint">{spec.hint}</p> : null}
     </div>
   );
 }
@@ -783,12 +1235,14 @@ export function Inspector({
                   : `${selectedEdgeCount} connections selected.`}
               </p>
               <p className="ins-empty ins-empty-hint">
-                Connections carry no settings yet. Press Delete to remove them.
+                Connections have nothing to configure. Press Delete to remove
+                them.
               </p>
             </>
           ) : (
             <p className="ins-empty">
-              Select a component on the canvas to configure it.
+              Select a component on the canvas and its settings will appear
+              here.
             </p>
           )}
         </div>
@@ -820,6 +1274,241 @@ export function Inspector({
   );
 }
 
+/* ================================================================== *
+ * STRUCTURE PANELS
+ *
+ * What a component is MADE OF, in the Inspector's own voice. The canvas draws
+ * this; these panels say it in words and give the exact numbers the drawing
+ * can only approximate — a stack caps at five cards, but "23 instances" is
+ * always precise here.
+ * ================================================================== */
+
+/**
+ * The autoscaler, as a sentence a student can read.
+ *
+ * This component was the origin of the whole complaint: it is a box wired to
+ * another box that silently mutates a number, and nothing anywhere said what
+ * it was doing. The engine exposes everything needed to narrate it —
+ * `watchedId`, `watchedUtil`, `setpoint`, `targetInstances`,
+ * `watchedInstances`, `pendingInstances`, `scalePhase`, `phaseRemainingMs` —
+ * and the whole point of this panel is that a student never has to infer the
+ * controller's state from a fleet size changing on its own.
+ *
+ * The phase line is the most important part, because it answers the question
+ * a student actually asks: "it is overloaded, why is the autoscaler not doing
+ * anything?" The honest answers are "it is still measuring", "it already
+ * acted and the machines are booting", and "it is waiting out its cooldown",
+ * and each of those is a real lesson about why real autoscalers lag.
+ */
+function AutoscalerPanel({ stats }: { stats: NodeStats }) {
+  const phase = stats.scalePhase;
+  if (!phase) return null;
+
+  const watching = stats.watchedId;
+  const have = stats.watchedInstances ?? 0;
+  const want = stats.targetInstances ?? have;
+  const booting = stats.pendingInstances ?? 0;
+  const util = stats.watchedUtil ?? 0;
+  const setpoint = stats.setpoint ?? 0;
+  const secs = Math.max(0, Math.round((stats.phaseRemainingMs ?? 0) / 100) / 10);
+
+  /* Each phase gets a plain-language line. Only 'steady' is silent about
+     time, because it is the only one that is not waiting for anything. */
+  const phaseText =
+    phase === 'observing'
+      ? `Still measuring. It will not act for another ${secs}s.`
+      : phase === 'warming'
+        ? `${formatCount(booting)} more booting. They start serving in ${secs}s.`
+        : phase === 'cooldown'
+          ? `Just acted. It will not act again for ${secs}s.`
+          : 'Holding steady. Load does not call for a change.';
+
+  if (!watching) {
+    return (
+      <Section title="What it is doing">
+        <p className="ins-blurb">
+          Not wired to anything yet. Draw a connection from this autoscaler to
+          the component it should scale, and it will start watching it.
+        </p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="What it is doing">
+      <p className="ins-blurb">
+        Watching <strong>{watching}</strong>, aiming to keep it at{' '}
+        <strong>{formatPct(setpoint)}</strong> busy.
+      </p>
+      <div className="ins-stats">
+        <StatRow
+          label="It is at"
+          value={formatPct(util)}
+          tone={toneClass(healthOfLoad(util))}
+        />
+        <StatRow label="Instances running" value={formatCount(have)} />
+        {want !== have && <StatRow label="Instances wanted" value={formatCount(want)} />}
+        {booting > 0 && (
+          <StatRow label="Booting now" value={formatCount(booting)} tone="is-warn" />
+        )}
+      </div>
+      <p className={phase === 'warming' ? 'ins-hint is-warn' : 'ins-hint'}>{phaseText}</p>
+    </Section>
+  );
+}
+
+/**
+ * Per-unit truth for the kinds that are genuinely several things.
+ *
+ * The headline is the SPREAD, not the mean, and for a shard that is the whole
+ * lesson: measured at hotKeyFraction 0.85 across 8 partitions, the hottest
+ * sat at 100% while the node mean read 17%. A student reading only the mean
+ * concludes there is plenty of headroom at the exact moment one partition is
+ * shedding. Printing hottest and coldest side by side makes the gap
+ * unmissable.
+ */
+function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
+  const per = stats.perInstance;
+  if (!per || per.length === 0) return null;
+
+  if (node.kind === 'shard') {
+    const hot = stats.maxShardUtilization;
+    const cold = stats.minShardUtilization;
+    // A hot key is not "one shard is busier"; it is one shard pinned while
+    // the rest idle. The gap is the signature, so it is named as one.
+    const skewed = hot - cold > 0.5;
+    return (
+      <Section title="Across the partitions">
+        <div className="ins-stats">
+          <StatRow label="Partitions" value={formatCount(per.length)} />
+          <StatRow
+            label="Busiest one"
+            value={formatPct(hot)}
+            tone={toneClass(healthOfLoad(hot))}
+          />
+          <StatRow label="Quietest one" value={formatPct(cold)} />
+          <StatRow label="Average" value={formatPct(stats.utilization)} />
+        </div>
+        {skewed && (
+          <p className="ins-hint is-warn">
+            Badly uneven. One partition is doing most of the work while the
+            others sit idle — adding shards will not help until the keys
+            spread out.
+          </p>
+        )}
+      </Section>
+    );
+  }
+
+  if (node.kind === 'replica') {
+    // Index 0 is the primary and reports the WRITE pool; the rest share the
+    // read pool. Averaging them together is what hides a write bottleneck.
+    const primary = per[0] ?? 0;
+    const reads = per.slice(1);
+    const readAvg = reads.length
+      ? reads.reduce((a, b) => a + b, 0) / reads.length
+      : 0;
+    const writeBound = primary - readAvg > 0.4;
+    return (
+      <Section title="Across the set">
+        <div className="ins-stats">
+          <StatRow
+            label="Primary (writes)"
+            value={formatPct(primary)}
+            tone={toneClass(healthOfLoad(primary))}
+          />
+          <StatRow label="Read replicas" value={formatCount(reads.length)} />
+          <StatRow
+            label="Read replicas, average"
+            value={formatPct(readAvg)}
+            tone={toneClass(healthOfLoad(readAvg))}
+          />
+          {stats.staleReadRate > 0 && (
+            <StatRow
+              label="Reads served stale"
+              value={formatPct(stats.staleReadRate)}
+              tone={toneClass(healthOfErr(stats.staleReadRate))}
+            />
+          )}
+        </div>
+        {writeBound && (
+          <p className="ins-hint is-warn">
+            The primary is the bottleneck, not the replicas. Adding more read
+            replicas will not help — every write still goes through the one
+            primary.
+          </p>
+        )}
+        {stats.staleReadRate > 0 && (
+          <p className="ins-hint">
+            Some reads are answered by a replica that has not caught up with
+            the latest write yet. Lower the replication lag to reduce this.
+          </p>
+        )}
+      </Section>
+    );
+  }
+
+  // service / worker / db / cache / lb / cdn: interchangeable machines.
+  const booting = stats.instancesPending ?? 0;
+  if (per.length <= 1 && booting === 0) return null;
+  return (
+    <Section title="The fleet">
+      <div className="ins-stats">
+        <StatRow label="Instances serving" value={formatCount(per.length)} />
+        {booting > 0 && (
+          <StatRow label="Booting now" value={formatCount(booting)} tone="is-warn" />
+        )}
+      </div>
+      {booting > 0 && (
+        <p className="ins-hint is-warn">
+          These are not serving traffic yet. Requests can still fail while they
+          boot — that gap is why capacity always lags a spike.
+        </p>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * A queue's backlog against the limit it sheds at.
+ *
+ * A queue reports zero utilisation by construction — it holds work, it does
+ * not serve it — so the standard busy-meter is pinned empty while the backlog
+ * runs away. Measured on async-workers at 2.5x: depth climbed 369 -> 946 ->
+ * 2478 with utilisation at 0.00 throughout. Depth against limit is the only
+ * reading that moves.
+ */
+function QueuePanel({ stats }: { stats: NodeStats }) {
+  const limit = stats.queueLimit > 0 ? stats.queueLimit : 1;
+  const depth = stats.queued;
+  const fill = Math.min(1, depth / limit);
+  const shedding = stats.shedRate > 0;
+  return (
+    <Section title="The backlog">
+      <div className="ins-util">
+        <div className="ins-util-head">
+          <span className="label">How full it is</span>
+          <span className="num num-md">
+            {formatCount(depth)} / {formatCount(limit)}
+          </span>
+        </div>
+        <Meter value={fill} tone={toneClass(healthOfLoad(fill))} />
+      </div>
+      {shedding ? (
+        <p className="ins-hint is-danger">
+          Full. It is turning away {formatRate(stats.shedRate)} — work arriving
+          now is being destroyed, not delayed. The consumers cannot keep up.
+        </p>
+      ) : depth > 0 ? (
+        <p className="ins-hint">
+          Work is waiting here because the consumers are slower than the
+          producers. It drains once they catch up.
+        </p>
+      ) : null}
+    </Section>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * Single-node view
  * ------------------------------------------------------------------ */
@@ -843,7 +1532,19 @@ function SingleInspector({
   // Derived ceiling: how many requests per second this node can finish if
   // every slot stays busy. Recomputed live as capacity/serviceMs move.
   const showCeiling = HAS_THROUGHPUT_CEILING.has(node.kind) && cfg.serviceMs > 0;
-  const maxThroughput = showCeiling ? cfg.capacity * (1000 / cfg.serviceMs) : 0;
+  /**
+   * The ceiling is `instances x capacity` slots, not `capacity` alone.
+   *
+   * `capacity` is slots on ONE machine; the fleet's real parallelism is that
+   * times the instance count, which is exactly what the engine's
+   * effectiveCapacity() computes and what the autoscaler moves. Reading
+   * capacity by itself reported a 5-instance service as having a fifth of the
+   * throughput it actually has, and — worse — the number never changed when
+   * the autoscaler scaled the fleet, which is the one moment a student is
+   * looking at it.
+   */
+  const fleet = Math.max(1, Math.floor(stats?.instances ?? cfg.instances ?? 1));
+  const maxThroughput = showCeiling ? fleet * cfg.capacity * (1000 / cfg.serviceMs) : 0;
 
   // Headroom answers "is this the bottleneck?" without reading a chart:
   // the ceiling divided by what is actually arriving. Below 1.0x the node
@@ -892,7 +1593,7 @@ function SingleInspector({
         {stats && node.kind !== 'client' ? (
           <div className="ins-util">
             <div className="ins-util-head">
-              <span className="label">Utilisation</span>
+              <span className="label">How busy it is</span>
               <span className={utilTone ? `num num-md ${utilTone}` : 'num num-md'}>
                 {formatPct(util)}
               </span>
@@ -900,6 +1601,18 @@ function SingleInspector({
             <Meter value={util} tone={utilTone} />
           </div>
         ) : null}
+
+        {/* WHAT THIS COMPONENT IS MADE OF.
+
+            Placed directly under the busy-meter and above the knobs, because
+            it is the reading that explains the meter. A shard's 17% average
+            means something completely different once you can see one
+            partition pinned at 100% underneath it. */}
+        {stats && node.kind === 'autoscaler' && <AutoscalerPanel stats={stats} />}
+        {stats && node.kind === 'queue' && <QueuePanel stats={stats} />}
+        {stats && node.kind !== 'queue' && node.kind !== 'autoscaler' && (
+          <UnitsPanel node={node} stats={stats} />
+        )}
 
         {grouped.map((group) => (
           <Section key={group.title} title={group.title}>
@@ -933,15 +1646,17 @@ function SingleInspector({
         ))}
 
         {showCeiling && (
-          <Section title="Derived">
+          <Section title="What that works out to">
             <div className="ins-stats">
-              <StatRow label="Max throughput" value={formatRate(maxThroughput)} />
+              <StatRow label="Most it can finish" value={formatRate(maxThroughput)} />
               <p className="ins-expr">
-                {formatCount(cfg.capacity)} slots x 1000/{serviceMsLabel}ms
+                {fleet > 1
+                  ? `${formatCount(fleet)} instances x ${formatCount(cfg.capacity)} slots ÷ ${serviceMsLabel}ms each`
+                  : `${formatCount(cfg.capacity)} at once ÷ ${serviceMsLabel}ms each`}
               </p>
               {headroom !== null && (
                 <StatRow
-                  label="Headroom"
+                  label="Spare capacity"
                   value={formatMultiple(headroom)}
                   tone={toneClass(healthOfLoad(arrivals / maxThroughput))}
                 />
@@ -950,18 +1665,56 @@ function SingleInspector({
           </Section>
         )}
 
-        <Section title="Live">
+        <Section title="Right now">
           {stats ? (
             <div className="ins-stats">
-              <StatRow label="In flight" value={formatCount(stats.inFlight)} />
+              <StatRow label="Being handled now" value={formatCount(stats.inFlight)} />
               <StatRow
-                label={node.kind === 'queue' ? 'Backlog' : 'Queued'}
+                label={node.kind === 'queue' ? 'Backlog' : 'Waiting in line'}
                 value={formatCount(stats.queued)}
               />
-              <StatRow label="Throughput" value={formatRate(stats.throughput)} />
-              <StatRow label="Arrivals" value={formatRate(stats.arrivalRate)} />
+              <StatRow label="Finishing" value={formatRate(stats.throughput)} />
+              <StatRow label="Arriving" value={formatRate(stats.arrivalRate)} />
               {(node.kind === 'cache' || node.kind === 'cdn') && (
-                <StatRow label="Observed hit rate" value={formatPct(stats.hitRate)} />
+                <StatRow label="Hit rate, measured" value={formatPct(stats.hitRate)} />
+              )}
+              {node.kind === 'bulkhead' && (
+                <StatRow
+                  label="Pool in use"
+                  value={`${formatCount(stats.bulkheadInFlight ?? 0)} of ${formatCount(stats.bulkheadLimit ?? 0)}`}
+                />
+              )}
+              {node.kind === 'retryqueue' && (
+                <>
+                  <StatRow label="Redelivering" value={formatRate(stats.redeliveryRate ?? 0)} />
+                  <StatRow
+                    label="Dead letters, total"
+                    value={formatCount(stats.deadLetters ?? 0)}
+                    tone={(stats.deadLetters ?? 0) > 0 ? 'is-warn' : undefined}
+                  />
+                </>
+              )}
+              {node.kind === 'writebehind' && (
+                <StatRow label="Dirty writes held" value={formatCount(stats.dirtyWrites ?? 0)} />
+              )}
+              {node.kind === 'edgecompute' && (
+                <StatRow
+                  label="Answered at the edge"
+                  value={formatRate(stats.edgeHandledRate ?? 0)}
+                />
+              )}
+              {node.kind === 'loadshedder' && (
+                <>
+                  <StatRow
+                    label="Low priority dropped"
+                    value={formatRate(stats.lowSheddedRate ?? 0)}
+                  />
+                  <StatRow
+                    label="High priority dropped"
+                    value={formatRate(stats.highSheddedRate ?? 0)}
+                    tone={(stats.highSheddedRate ?? 0) > 0.5 ? 'is-danger' : undefined}
+                  />
+                </>
               )}
               <StatRow label="p50" value={formatMs(stats.p50)} />
               <StatRow label="p95" value={formatMs(stats.p95)} />
@@ -977,7 +1730,7 @@ function SingleInspector({
               />
               {stats.shedRate > 0 && (
                 <StatRow
-                  label="Shed"
+                  label="Turned away"
                   value={formatRate(stats.shedRate)}
                   tone="is-danger"
                 />
@@ -989,11 +1742,11 @@ function SingleInspector({
                   tone="is-danger"
                 />
               )}
-              <StatRow label="Completed" value={formatCount(stats.totalCompleted)} />
-              <StatRow label="Failed" value={formatCount(stats.totalFailed)} />
+              <StatRow label="Completed, total" value={formatCount(stats.totalCompleted)} />
+              <StatRow label="Failed, total" value={formatCount(stats.totalFailed)} />
             </div>
           ) : (
-            <p className="ins-blurb">No traffic through this node yet.</p>
+            <p className="ins-blurb">Nothing has reached this component yet. Press Play and it will start reporting.</p>
           )}
         </Section>
       </div>
@@ -1122,9 +1875,9 @@ function MultiInspector({
         {sameKind ? (
           <>
             <p className="ins-blurb">
-              Editing a value below applies it to all{' '}
-              {formatCount(nodes.length)} selected. A knob these components
-              disagree on reads <em>mixed</em> until you move it.
+              Changing anything below applies it to all{' '}
+              {formatCount(nodes.length)} of these. Where they currently
+              disagree the value reads <em>mixed</em>, until you move it.
             </p>
 
             {grouped.map((group) => (
@@ -1164,9 +1917,9 @@ function MultiInspector({
           </>
         ) : (
           <p className="ins-blurb">
-            These components expose different settings, so there is nothing
-            common to edit. Select one at a time to configure it, or delete
-            the whole selection below.
+            These are different kinds of component, so they have no settings
+            in common. Select one on its own to configure it, or delete the
+            whole selection below.
           </p>
         )}
       </div>
@@ -1284,6 +2037,11 @@ export function TrafficControl({
             max={SLIDER_STEPS}
             step={1}
             value={rpsToPosition(rps)}
+            style={
+              {
+                '--fill-pct': fillPct(rpsToPosition(rps), 0, SLIDER_STEPS),
+              } as React.CSSProperties
+            }
             aria-valuetext={`${Math.round(rps)} requests per second`}
             onChange={(e) => onRpsChange(positionToRps(Number(e.currentTarget.value)))}
           />

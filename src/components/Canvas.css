@@ -290,107 +290,204 @@
 /* --------------------------------------------------------------------------
    Nodes
 
-   A node reads as a schematic component with a title block, not as a rounded
-   rectangle with text in it. That is what the 24px header band buys.
+   A node reads as a schematic component drawn in ITS OWN COLOUR. A student
+   should be able to pick the database out of a diagram from across the room
+   without reading a single word, and should carry that association between
+   diagrams: amber is always cache, blue is always database.
+
+   PER-KIND COLOUR PLUMBING.
+
+   Each kind resolves the three role tokens from index.css into three LOCAL
+   custom properties on the node group, exactly once:
+
+     --k-fill    body background
+     --k-stroke  body outline
+     --k-ink     glyph and name
+
+   Everything downstream — hover, selection, meter, ports, link states — is
+   then written against those locals and is completely kind-agnostic. That is
+   the whole point of doing it this way: there are fourteen kinds and roughly
+   a dozen states, and enumerating the cross-product would be 168 rules that
+   drift apart the first time anyone edits one. This is 14 + 12.
+
+   A kind is identified by [data-kind], set by NodeView. The fallback in each
+   var() is the neutral surface, so a kind that somehow arrives unmapped
+   renders as a plain grey node rather than as a transparent hole.
    -------------------------------------------------------------------------- */
 
 .cv-node {
+  --k-fill: var(--surface-2);
+  --k-stroke: var(--border-strong);
+  --k-ink: var(--text-dim);
   cursor: grab;
+}
+
+/* origin */
+.cv-node[data-kind='client'] {
+  --k-fill: var(--kind-client-fill);
+  --k-stroke: var(--kind-client-stroke);
+  --k-ink: var(--kind-client-ink);
+}
+
+/* compute */
+.cv-node[data-kind='lb'] {
+  --k-fill: var(--kind-lb-fill);
+  --k-stroke: var(--kind-lb-stroke);
+  --k-ink: var(--kind-lb-ink);
+}
+
+.cv-node[data-kind='service'] {
+  --k-fill: var(--kind-service-fill);
+  --k-stroke: var(--kind-service-stroke);
+  --k-ink: var(--kind-service-ink);
+}
+
+.cv-node[data-kind='worker'] {
+  --k-fill: var(--kind-worker-fill);
+  --k-stroke: var(--kind-worker-stroke);
+  --k-ink: var(--kind-worker-ink);
+}
+
+/* storage */
+.cv-node[data-kind='db'] {
+  --k-fill: var(--kind-db-fill);
+  --k-stroke: var(--kind-db-stroke);
+  --k-ink: var(--kind-db-ink);
+}
+
+.cv-node[data-kind='replica'] {
+  --k-fill: var(--kind-replica-fill);
+  --k-stroke: var(--kind-replica-stroke);
+  --k-ink: var(--kind-replica-ink);
+}
+
+.cv-node[data-kind='shard'] {
+  --k-fill: var(--kind-shard-fill);
+  --k-stroke: var(--kind-shard-stroke);
+  --k-ink: var(--kind-shard-ink);
+}
+
+.cv-node[data-kind='cache'] {
+  --k-fill: var(--kind-cache-fill);
+  --k-stroke: var(--kind-cache-stroke);
+  --k-ink: var(--kind-cache-ink);
+}
+
+/* flow */
+.cv-node[data-kind='queue'] {
+  --k-fill: var(--kind-queue-fill);
+  --k-stroke: var(--kind-queue-stroke);
+  --k-ink: var(--kind-queue-ink);
+}
+
+.cv-node[data-kind='region'] {
+  --k-fill: var(--kind-region-fill);
+  --k-stroke: var(--kind-region-stroke);
+  --k-ink: var(--kind-region-ink);
+}
+
+/* edge / protection */
+.cv-node[data-kind='cdn'] {
+  --k-fill: var(--kind-cdn-fill);
+  --k-stroke: var(--kind-cdn-stroke);
+  --k-ink: var(--kind-cdn-ink);
+}
+
+.cv-node[data-kind='ratelimiter'] {
+  --k-fill: var(--kind-ratelimiter-fill);
+  --k-stroke: var(--kind-ratelimiter-stroke);
+  --k-ink: var(--kind-ratelimiter-ink);
+}
+
+.cv-node[data-kind='breaker'] {
+  --k-fill: var(--kind-breaker-fill);
+  --k-stroke: var(--kind-breaker-stroke);
+  --k-ink: var(--kind-breaker-ink);
+}
+
+/* control */
+.cv-node[data-kind='autoscaler'] {
+  --k-fill: var(--kind-autoscaler-fill);
+  --k-stroke: var(--kind-autoscaler-stroke);
+  --k-ink: var(--kind-autoscaler-ink);
 }
 
 .cv-node:active {
   cursor: grabbing;
 }
 
+/* The body carries the kind identity: its own tint inside, its own colour on
+   the outline at 1.5px. Measured: --text on every one of the 14 fills is
+   13.69-13.94, and every fill's stroke is 3.49-3.95 on --bg (AA graphical). */
 .cv-node-body {
-  fill: var(--surface-2);
-  stroke: var(--border);
-  stroke-width: 1;
-  transition: stroke var(--dur-fast) var(--ease);
+  fill: var(--k-fill);
+  stroke: var(--k-stroke);
+  stroke-width: var(--bw-strong);
+  transition:
+    stroke var(--dur-fast) var(--ease),
+    fill var(--dur-fast) var(--ease);
 }
 
-.cv-node-head {
-  fill: var(--surface-3);
-}
-
+/* The hairline under the header is drawn in the kind's own stroke, held well
+   back with opacity. A neutral --border line across a tinted body reads as a
+   foreign object sitting on top of the colour; the same hue at low alpha
+   reads as part of the component. */
 .cv-node-hair {
-  stroke: var(--border);
+  stroke: var(--k-stroke);
+  stroke-opacity: 0.28;
   stroke-width: 1;
   shape-rendering: crispEdges;
 }
 
-/* Health rule along the top edge. Survives at low zoom, where the meter is
-   sub-pixel, and is one of three redundant channels for the same state.
+/* HEALTH vs IDENTITY — the rule that stops the two colour systems fighting.
 
-   At 'ok' it stays neutral. Painting six saturated green marks across a
-   healthy topology would spend the status palette on the state that needs no
-   attention, and leave --warn and --danger nothing to contrast against. A
-   healthy canvas is grey; color means look here. */
+   The node's border is IDENTITY (what this component is: permanent, learned).
+   Health is STATE (what is happening right now: transient, urgent) and is
+   therefore drawn INSIDE the node, on the meter, using the -mark tokens.
+
+   Consequently the top rule is NOT a health channel any more. It was a third
+   redundant copy of the same signal, and in colour it competed with the kind
+   stroke it sat directly against — two saturated hues meeting at a corner,
+   which is exactly the fight the brief warns about. It is now a quiet seat
+   for the kind's own colour, and health lives in one obvious place. */
 .cv-node-rule {
-  fill: var(--line-2);
-  fill-opacity: 0.9;
-  transition: fill var(--dur-slow) var(--ease);
+  fill: var(--k-stroke);
+  fill-opacity: 0.5;
 }
 
-.cv-node.is-warn .cv-node-rule {
-  fill: var(--warn);
-}
-
-.cv-node.is-danger .cv-node-rule {
-  fill: var(--danger);
-}
-
-.cv-node-dot {
-  fill: var(--line-2);
-  transition: fill var(--dur-slow) var(--ease);
-}
-
-.cv-node.is-warn .cv-node-dot {
-  fill: var(--warn);
-}
-
-.cv-node.is-danger .cv-node-dot {
-  fill: var(--danger);
-}
-
-/* Shown only while traffic is actually being lost. */
-.cv-node-loss {
-  fill: var(--danger);
-}
-
+/* Hover deepens the node's OWN colour rather than swapping in a neutral. A
+   grey hover on a coloured node reads as the colour being taken away. */
 .cv-node:hover .cv-node-body {
-  stroke: var(--line-2);
+  stroke-width: 2;
 }
 
-.cv-node.is-selected .cv-node-body {
-  stroke: var(--accent);
-  stroke-width: 1.5;
-}
+/* SELECTION.
 
+   Accent, 2px, on a 3px offset ring OUTSIDE the body, plus a lift. It must
+   read as unmistakably selected against all fourteen fills, including the
+   palest: --accent measures 5.42:1 against the lightest kind fill, so the
+   ring is never ambiguous. The body keeps its own kind stroke underneath —
+   selection frames the component, it does not repaint it. */
 .cv-node:focus {
   outline: none;
 }
 
-.cv-node:focus-visible .cv-node-body {
+.cv-node-ring {
+  fill: none;
   stroke: var(--accent);
-  stroke-width: 1.5;
+  stroke-width: 2;
+  pointer-events: none;
 }
 
-/* SVG cannot take outline-offset, so the focus ring is drawn as a second
-   stroke outside the body. Flat, single-color, no glow. */
+/* Keyboard focus gets the same ring treatment as mouse selection, so tabbing
+   through the canvas is never a second-class way to see where you are. */
 .cv-node:focus-visible .cv-node-body {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  stroke: var(--accent);
+  stroke-width: 2;
 }
 
 .cv-node-icon {
-  color: var(--text-faint);
-  transition: color var(--dur-fast) var(--ease);
-}
-
-.cv-node:hover .cv-node-icon,
-.cv-node.is-selected .cv-node-icon {
-  color: var(--text-dim);
+  color: var(--k-ink);
 }
 
 .cv-glyph {
@@ -444,9 +541,33 @@
   fill: var(--text-dim);
 }
 
-/* T1 — unit captions. Uppercase is what makes 10px read as a label. */
+/* Status mark, top right. Redundant with colour by SHAPE — ring at warn,
+   disc at danger, square at fault — so the states are told apart before any
+   colour is applied. These are marks, not text, so they take the -mark
+   tokens. They had no rule at all before this change and were painting SVG
+   default black on every warning node. */
+.cv-node-mark.is-warn {
+  fill: none;
+  stroke: var(--warn-mark);
+  stroke-width: 2;
+}
+
+.cv-node-mark.is-danger {
+  fill: var(--danger-mark);
+}
+
+.cv-node-mark.is-fault {
+  fill: var(--danger-mark);
+}
+
+/* T1 — unit captions. Uppercase is what makes 11px read as a label.
+
+   Drawn in the kind's ink rather than --text-faint. On a tinted body the
+   neutral faint grey is the one token that goes muddy: it is the lowest-
+   contrast text in the system landing on a surface it was not measured
+   against. --k-ink is measured at 6.91-7.40 on its own fill, all fourteen. */
 .cv-cap {
-  fill: var(--text-faint);
+  fill: var(--k-ink);
   font-family: var(--sans);
   font-size: var(--fs-label);
   font-weight: var(--fw-num);
@@ -468,35 +589,33 @@
   fill: var(--danger);
 }
 
-.cv-node-div {
-  stroke: var(--border);
-  stroke-width: 1;
-  shape-rendering: crispEdges;
-}
-
 /* --------------------------------------------------------------------------
    Sparkline — 60 samples at 1Hz, matching the 60s window of the charts.
    No fill, no dots, no axis: a trend, not a chart.
    -------------------------------------------------------------------------- */
 
+/* Drawn in the node's own ink, so the trace belongs to the component instead
+   of being a neutral grey line laid across it. */
 .cv-spark {
   fill: none;
-  stroke: var(--line-4);
+  stroke: var(--k-ink);
+  stroke-opacity: 0.75;
   stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
-  transition: stroke var(--dur-fast) var(--ease);
+  transition: stroke-opacity var(--dur-fast) var(--ease);
 }
 
 .cv-node:hover .cv-spark,
 .cv-node.is-selected .cv-spark {
-  stroke: var(--text-dim);
+  stroke-opacity: 1;
 }
 
 .cv-spark-base {
-  stroke: var(--border);
+  stroke: var(--k-stroke);
+  stroke-opacity: 0.25;
   stroke-width: 1;
   shape-rendering: crispEdges;
 }
@@ -506,26 +625,44 @@
    survives colorblindness because it encodes by length.
    -------------------------------------------------------------------------- */
 
+/* The meter is where HEALTH lives, and the only place it lives. Because it
+   sits inside the node, on the node's own tint, the -mark tokens are used
+   rather than the text tokens: these are fills, not type, and they are the
+   brighter, more saturated half of the split. Measured >= 3:1 on --bg and on
+   every kind fill.
+
+   The trough is the kind's colour at very low alpha rather than the neutral
+   --track. A grey trough on a tinted body is a visible grey rectangle; the
+   node's own hue at 12% just reads as a recess. */
 .cv-meter-track {
-  fill: var(--track);
+  fill: var(--k-stroke);
+  fill-opacity: 0.12;
 }
 
-/* At 'ok' the fill is neutral: load is already encoded by length, which is the
-   channel that survives colorblindness and low zoom. Hue is held in reserve
-   for the two states worth interrupting the student for. */
+/* At 'ok' the bar is the node's OWN colour: a healthy component is simply
+   itself, working. Load is already encoded by LENGTH, which is the channel
+   that survives colourblindness and low zoom, so hue is held in reserve for
+   the two states actually worth interrupting a student for. */
 .cv-meter-fill {
-  fill: var(--line-4);
+  fill: var(--k-stroke);
   transition:
     width var(--dur-slow) linear,
     fill var(--dur-slow) var(--ease);
 }
 
 .cv-node.is-warn .cv-meter-fill {
-  fill: var(--warn);
+  fill: var(--warn-mark);
 }
 
 .cv-node.is-danger .cv-meter-fill {
-  fill: var(--danger);
+  fill: var(--danger-mark);
+}
+
+/* The warn threshold tick, drawn in the kind's ink so it stays legible over
+   both the empty trough and the filled bar as the bar grows past it. */
+.cv-meter-tick {
+  fill: var(--k-ink);
+  fill-opacity: 0.45;
 }
 
 /* --------------------------------------------------------------------------
@@ -541,9 +678,11 @@
   stroke: none;
 }
 
+/* A white centre with the kind's own ring: the port reads as belonging to
+   this component, and stays visible against the tinted body. */
 .cv-port {
-  fill: var(--bg);
-  stroke: var(--line-2);
+  fill: var(--surface);
+  stroke: var(--k-stroke);
   stroke-width: 1.5;
   opacity: 0;
   pointer-events: none;
@@ -567,10 +706,8 @@
   cursor: crosshair;
 }
 
-.cv-node:hover .cv-port {
-  stroke: var(--text-faint);
-}
-
+/* Aiming at a port is a "you are about to act" moment, so it takes accent —
+   one of the four permitted accent uses. */
 .cv-port-hit:hover + .cv-port {
   fill: var(--accent);
   stroke: var(--accent);
@@ -580,36 +717,322 @@
    Link states.
 
    While a link is in flight the canvas answers one question for every node:
-   can this receive the wire? A legal target lifts to a full-strength border;
-   an illegal one (the source itself, or a node already fed by this source)
-   dims out of contention. Both are border/opacity changes only — no glow.
+   can this receive the wire? These states must out-shout the kind colour for
+   as long as the gesture lasts, because during a drag the question "where can
+   this go" completely displaces "what is this" — so they are the one place a
+   node's identity stroke is legitimately overridden.
    -------------------------------------------------------------------------- */
 
+/* The node the wire is coming FROM: accent, dashed, so it reads as active and
+   in-flight rather than merely selected. */
 .cv-node.is-link-source .cv-node-body {
   stroke: var(--accent);
-  stroke-width: 1.5;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
 }
 
+/* An illegal target recedes. Deliberately NOT red: nothing has gone wrong,
+   this node simply is not available, and spending the danger colour on a
+   non-error teaches a student to ignore it. */
 .cv-node.is-link-invalid {
   opacity: 0.4;
 }
 
+/* A legal target is affirmed in green — the only place --ok-mark appears as
+   an outline, and it means "you may drop here". */
 .cv-node.is-link-valid .cv-node-body {
-  stroke: var(--line-3);
-  stroke-dasharray: 3 3;
+  stroke: var(--ok-mark);
+  stroke-width: 2;
 }
 
-/* The one node the release will actually connect to. */
+/* The one node the release will actually connect to: same green, thicker,
+   plus its input port lit, so the commit point is never in doubt. */
 .cv-node.is-link-target .cv-node-body {
-  stroke: var(--accent);
-  stroke-width: 2;
-  stroke-dasharray: none;
+  stroke: var(--ok-mark);
+  stroke-width: 3;
 }
 
 .cv-node.is-link-target .cv-port-in {
   opacity: 1;
-  fill: var(--accent);
-  stroke: var(--accent);
+  fill: var(--ok-mark);
+  stroke: var(--ok-mark);
+}
+
+/* --------------------------------------------------------------------------
+   Faulted — an injected failure is in force on this node right now.
+
+   This is the one state that overrides identity while the canvas is at rest,
+   and it should: a crashed node's colour is no longer the useful fact about
+   it. Outline in --danger-mark and dash it, so a fault is distinguishable
+   from a merely overloaded node (solid outline, red meter) at a glance.
+   -------------------------------------------------------------------------- */
+
+.cv-node.is-faulted .cv-node-body {
+  stroke: var(--danger-mark);
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+}
+
+.cv-node.is-faulted .cv-meter-fill {
+  fill: var(--danger-mark);
+}
+
+/* --------------------------------------------------------------------------
+   STRUCTURE — what a node is made of
+
+   Everything in this block is INERT. The node group already carries the
+   `data-hit="node"` the pointer router reads, and the ports carry their own
+   15px hit discs. If a stack card or a shard cell could take a pointer it
+   would sit above those discs near the node's edges and eat link gestures, so
+   every element here is pointer-events:none without exception. This is the
+   same rule the meter and sparkline already follow.
+   -------------------------------------------------------------------------- */
+
+.cv-units,
+.cv-unit,
+.cv-strip,
+.cv-cell,
+.cv-cell-fill,
+.cv-vessel,
+.cv-vessel-track,
+.cv-vessel-fill,
+.cv-vessel-brim,
+.cv-node-badge {
+  pointer-events: none;
+}
+
+/* A card in the fleet behind the node body.
+
+   Same fill and outline as the body, so the stack reads as more of THE SAME
+   COMPONENT rather than as a shadow or a decorative offset. That is the whole
+   requirement: "several machines", not "one machine with a drop shadow". The
+   kind colour carries through, so a stack of databases is still blue. */
+.cv-unit {
+  fill: var(--k-fill);
+  stroke: var(--k-stroke);
+  stroke-width: var(--bw);
+  stroke-opacity: 0.55;
+  transition:
+    x var(--dur-fast) var(--ease-out),
+    y var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+
+/* A unit that has been DECIDED but is not serving yet.
+
+   The warm-up gap is the single most important thing the autoscaler teaches:
+   the controller already acted, and requests are still failing, because the
+   machines are not up. So a booting unit is drawn as an outline with no fill
+   — visibly a placeholder for a machine rather than a machine — and it is the
+   only dashed shape in the node vocabulary. When it lands it gains its fill
+   and slides forward in the stack, which is exactly the moment the queue
+   behind it starts to drain. */
+.cv-unit.is-pending {
+  fill: none;
+  stroke-dasharray: 3 3;
+  stroke-opacity: 0.75;
+}
+
+/* The unit count. Tabular so the digits do not jitter as a fleet scales, and
+   held in the kind's own ink so it belongs to the component. */
+.cv-node-badge {
+  fill: var(--k-ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-num);
+  letter-spacing: var(--tr-num);
+}
+
+/* While units are booting the badge says so in the warning colour, because
+   "5x" and "5x+3" are different facts about the system and the second one is
+   temporary. */
+.cv-node-badge.is-warming {
+  fill: var(--warn);
+}
+
+/* --- per-unit strip: shards and replica sets ---------------------------- */
+
+/* The empty cell. A trough, matching the meter's, so an idle partition reads
+   as an empty container rather than as a missing one. */
+.cv-cell {
+  fill: var(--track);
+}
+
+/* The fill is the partition's own load, growing from the bottom.
+
+   Default is the kind's own stroke colour: at a glance the strip is a bar
+   chart in the component's colour. Health only OVERRIDES it once a cell is
+   actually in trouble, so a healthy strip is calm and a hot cell is the only
+   loud thing in the node.
+
+   --k-stroke rather than the --kind-*-line tokens: only fill/stroke/ink are
+   mapped to locals on .cv-node, so --k-line does not resolve and the cells
+   would paint as nothing. Using the mapped local keeps every kind — including
+   ones added after this was written — correct without a fourth declaration in
+   each of the per-kind blocks. */
+.cv-cell-fill {
+  fill: var(--k-stroke);
+}
+
+.cv-cell-fill.is-warn {
+  fill: var(--warn-mark);
+}
+
+.cv-cell-fill.is-danger {
+  fill: var(--danger-mark);
+}
+
+/* The replica PRIMARY. Index 0 of a replica set is a different kind of thing
+   from the rest — it takes the writes — so it is separated by a rule down its
+   right edge rather than by a colour, which would collide with the health
+   channel the fills already use. */
+.cv-cell.is-lead {
+  stroke: var(--k-stroke);
+  stroke-opacity: 0.5;
+  stroke-width: var(--bw);
+}
+
+/* --- queue vessel ------------------------------------------------------- */
+
+.cv-vessel-track {
+  fill: var(--track);
+  stroke: var(--k-stroke);
+  stroke-opacity: 0.3;
+  stroke-width: var(--bw);
+}
+
+.cv-vessel-fill {
+  /* See .cv-cell-fill: --k-line is not a mapped local. */
+  fill: var(--k-stroke);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+/* The limit. A queue's brim is a hard wall — past it requests are destroyed,
+   not delayed — so it is drawn as a solid stop rather than a tick. */
+.cv-vessel-brim {
+  fill: var(--k-stroke);
+  fill-opacity: 0.65;
+}
+
+/* AT THE LIMIT the vessel is not full, it is OVERFLOWING: it is turning
+   traffic away. Full-strength danger on both the fill and the wall, because
+   this is the moment the component stops working and starts dropping
+   requests. */
+.cv-vessel.is-shedding .cv-vessel-fill {
+  fill: var(--danger-mark);
+}
+
+.cv-vessel.is-shedding .cv-vessel-brim {
+  fill: var(--danger);
+  fill-opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
+   EDGE STATE — whether a wire can carry traffic at all
+
+   `edgeFlow` cannot answer this and must not be asked to. An edge at 0 rps
+   because a breaker in front of it is OPEN and an edge at 0 rps because
+   nobody is calling look identical as numbers and mean opposite things. These
+   rules are keyed off the engine's own `edgeState`, which is a structural
+   assertion rather than an inference from a rate.
+   -------------------------------------------------------------------------- */
+
+/* CUT and BLOCKED: the wire is severed. Held back hard and given a dash
+   pattern so it reads as a broken connection even in a greyscale screenshot,
+   with the break mark below doing the decisive work. */
+.cv-edge.is-state-cut .cv-edge-line,
+.cv-edge.is-state-blocked .cv-edge-line {
+  stroke: var(--line);
+  stroke-opacity: 0.45;
+  stroke-dasharray: 5 5;
+}
+
+.cv-edge.is-state-cut .cv-edge-arrow,
+.cv-edge.is-state-blocked .cv-edge-arrow {
+  fill: var(--line);
+  fill-opacity: 0.4;
+}
+
+/* The break itself. The gap rect paints the page ground over the wire so the
+   line genuinely stops, and the two chevrons are the cut ends springing
+   apart. A severed wire must not be merely faint — it must be visibly
+   missing a piece. */
+.cv-edge-break {
+  pointer-events: none;
+}
+
+.cv-edge-break-gap {
+  fill: var(--bg);
+}
+
+.cv-edge-break-mark {
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A blocked wire is a component DOING ITS JOB — a breaker protecting a
+   failing downstream — so its break is drawn in the neutral line colour
+   rather than in danger. Only an injected cut is a fault. */
+.cv-edge.is-state-blocked .cv-edge-break-mark {
+  stroke: var(--line-3);
+}
+
+/* STANDBY: a region's non-active edge. Wired, healthy, deliberately unused.
+   This must NOT look like a dead link, so it keeps a continuous stroke and is
+   simply held back — the difference from `cut` is that nothing is missing
+   from it. */
+.cv-edge.is-state-standby .cv-edge-line {
+  stroke: var(--line);
+  stroke-opacity: 0.5;
+  stroke-dasharray: 2 4;
+}
+
+.cv-edge.is-state-standby .cv-edge-arrow {
+  fill: var(--line);
+  fill-opacity: 0.45;
+}
+
+/* --------------------------------------------------------------------------
+   CONTROL EDGES
+
+   An autoscaler's wire to its target is a supervisory relationship, not a
+   request path, and a student must never read it as traffic. Three channels
+   say so at once: a long dash, a HOLLOW arrowhead (every request edge has a
+   solid one), and the word "scales" on the wire.
+   -------------------------------------------------------------------------- */
+
+.cv-edge.is-control .cv-edge-line {
+  stroke: var(--kind-autoscaler-stroke);
+  stroke-opacity: 0.75;
+  stroke-dasharray: 6 4;
+}
+
+/* Hollow head. Painted in the page ground with a coloured rim, so it reads as
+   an open arrow against whatever it crosses. */
+.cv-edge.is-control .cv-edge-arrow {
+  fill: var(--bg);
+  fill-opacity: 1;
+  stroke: var(--kind-autoscaler-stroke);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+
+.cv-edge-label.is-control {
+  fill: var(--kind-autoscaler-stroke);
+  font-family: var(--sans);
+  font-weight: var(--fw-med);
+  letter-spacing: var(--tr-label);
+}
+
+/* A control edge is never "active": no request crosses it, so it never gets
+   the moving pulses even if some future engine reports a rate on it. */
+.cv-edge.is-control .cv-edge-flow {
+  display: none;
 }
 
 /* --------------------------------------------------------------------------
@@ -649,16 +1072,16 @@
   bottom: var(--sp-3);
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  /* The four facts are separated by SPACE, not by punctuation. A `·` glyph
+     between them was a real text node measuring 2.12:1 against the canvas —
+     a WCAG failure carrying no information at all. This gap separates them
+     just as clearly and leaves nothing that can fail. */
+  gap: var(--sp-3);
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
   color: var(--text-faint);
   pointer-events: none;
-}
-
-.cv-ledger-sep {
-  color: var(--line-2);
 }
 
 .cv-zoom {
@@ -674,10 +1097,13 @@
   border-radius: var(--r-md);
 }
 
+/* 32px, matching the shared small-button size. These were 24px — below
+   the minimum comfortable hit target, and a size nothing else in the app
+   uses. The overlay is not so cramped that it needed its own scale. */
 .cv-zoom .btn {
-  min-width: 24px;
-  height: 24px;
-  padding: 0 var(--sp-1);
+  min-width: 32px;
+  height: 32px;
+  padding: 0 var(--sp-2);
 }
 
 .cv-zoom-level {
@@ -704,14 +1130,19 @@
 
   .cv-meter-fill,
   .cv-node-body,
-  .cv-node-rule,
-  .cv-node-dot,
   .cv-node-icon,
   .cv-edge-line,
   .cv-edge-arrow,
   .cv-spark,
   .cv-grid,
-  .cv-port {
+  .cv-port,
+  /* Scaling and backlog transitions. These are short state changes rather
+     than entrance animations, which is why they exist at all — but a reader
+     who has asked for less motion still gets the new value immediately
+     instead of watching it travel there. The information is in the position,
+     never in the movement. */
+  .cv-unit,
+  .cv-vessel-fill {
     transition: none;
   }
 }

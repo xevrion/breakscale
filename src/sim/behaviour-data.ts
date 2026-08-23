@@ -27,6 +27,23 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+/**
+ * Scratch buffer for building an instance vector.
+ *
+ * A single module-level array shared by every node of every data-tier kind,
+ * which is safe for exactly one reason: ctx.reportInstances() COPIES what it
+ * is handed before returning, so the buffer's contents never have to survive
+ * past the call that fills them. Nothing may retain what this returns.
+ *
+ * The alternative -- a per-node buffer -- would be one more allocation per
+ * node held forever to save nothing, since the copy happens either way.
+ */
+let scratch: number[] = [];
+function instanceScratch(n: number): number[] {
+  if (scratch.length !== n) scratch.length = n;
+  return scratch;
+}
+
 /* ================================================================== *
  * replica -- a read replica set behind a primary
  * ================================================================== */
@@ -119,6 +136,37 @@ const replica: ComponentBehaviour = {
     if (queue.length - head >= ctx.effectiveQueueLimit(state)) return 'shed';
     queue.push(req);
     return 'handled';
+  },
+
+  // A replica set is a primary plus N read replicas, and drawing it as one
+  // box hides the reason adding replicas does not fix a write bottleneck.
+  instanceModel: 'custom',
+
+  /**
+   * Unit 0 is the PRIMARY and reports the write pool's utilisation; units
+   * 1..replicaCount are the read replicas.
+   *
+   * The read replicas all report the same number, and that is the honest
+   * reading rather than a shortcut: the engine pools read slots across the
+   * whole set, so a read is served by whichever replica is free and no
+   * individual replica has a utilisation of its own. Splitting the pool's
+   * load evenly across the drawn units says exactly that. What the vector
+   * DOES separate -- the primary from the read set -- is the distinction that
+   * carries the lesson, because it is where the two pools genuinely differ.
+   */
+  reportInstances(ctx: BehaviourCtx, state: NodeStateLike): void {
+    const ext = replicaExt(state);
+    const replicas = clampInt(state.config.replicaCount, 1);
+    const out = instanceScratch(replicas + 1);
+
+    const writeCap = writeCapacity(state);
+    out[0] = writeCap > 0 ? Math.min(ext.writeBusy / writeCap, 1) : 0;
+
+    const readCap = readCapacity(state);
+    const readUtil = readCap > 0 ? Math.min(ext.readBusy / readCap, 1) : 0;
+    for (let i = 1; i <= replicas; i++) out[i] = readUtil;
+
+    ctx.reportInstances(state, out, 0);
   },
 
   onTick(ctx: BehaviourCtx, state: NodeStateLike, _dtMs: number): void {
@@ -324,7 +372,24 @@ const shard: ComponentBehaviour = {
   creditsJoinCompletion: true,
   // A shard serves from shardCapacity (per partition), never from `capacity`.
   // Without this an autoscaler pointed here writes a field this kind ignores.
-  capacityField: 'shardCapacity',
+  scaleField: 'shardCapacity',
+  // One unit per partition. This is the kind the instance model exists for:
+  // the per-partition numbers are genuinely independent, and the gap between
+  // one pinned at 1.0 and the rest near idle IS the sharding lesson.
+  instanceModel: 'custom',
+
+  /**
+   * Unit i is partition i, reporting that partition's own smoothed
+   * utilisation -- the same vector already surfaced as `shardUtilization`,
+   * published here through the general instance channel so a consumer can
+   * draw any partitioned kind without knowing the word "shard".
+   */
+  reportInstances(ctx: BehaviourCtx, state: NodeStateLike): void {
+    const ext = ensureSized(state, shardExt(state));
+    const out = instanceScratch(ext.sized);
+    for (let i = 0; i < ext.sized; i++) out[i] = ext.utilization[i];
+    ctx.reportInstances(state, out, 0);
+  },
 
   initState(state: NodeStateLike): ShardExt {
     return makeShardExt(clampInt(state.config.shardCount, 1));

@@ -78,8 +78,14 @@ export interface BehaviourCtx {
   queueDepth(state: NodeStateLike): number;
   /** queueLimit floored to a non-negative integer. */
   effectiveQueueLimit(state: NodeStateLike): number;
-  /** capacity floored to at least one slot. */
+  /**
+   * How many requests this node can serve at once: `instances * capacity`,
+   * floored to at least one slot. `capacity` is the slot count of one
+   * instance; this is the whole node's parallelism.
+   */
   effectiveCapacity(state: NodeStateLike): number;
+  /** How many instances this node runs, >= 1. Absent config means one. */
+  effectiveInstances(state: NodeStateLike): number;
 
   /** Book a cache hit / miss against a node's rolling counters. */
   countHit(state: NodeStateLike): void;
@@ -87,6 +93,18 @@ export interface BehaviourCtx {
 
   /** Queue-node admission: ack the caller and buffer a detached copy. */
   ackAndBuffer(state: NodeStateLike, req: ReqLike): void;
+
+  /**
+   * Relay-node admission: ack the caller and deliver a detached copy
+   * DOWNSTREAM through this node's own slots, service time, routing and
+   * retry machinery. The sibling of ackAndBuffer() for kinds that push
+   * rather than being pulled from (a retry queue, a write-behind cache).
+   * `extraDeliveryMs` is added to the relayed copy's service time only,
+   * modelling time the message deliberately sits before delivery (a
+   * write-behind flush interval). The behaviour must check its own depth
+   * limit against queueDepth() before calling.
+   */
+  ackAndRelay(state: NodeStateLike, req: ReqLike, extraDeliveryMs?: number): void;
 
   /** The shared edge-selection policy: weighted-random, or least-loaded on ties. */
   pickWeightedOrLeastLoaded(out: readonly SimEdge[]): SimEdge | null;
@@ -126,14 +144,25 @@ export interface BehaviourCtx {
    * is watching exactly what the controller reacts to.
    */
   utilizationOf(nodeId: string): number | null;
-  /** A node's live capacity in slots, or null if it does not exist. */
-  capacityOf(nodeId: string): number | null;
   /**
-   * Write a node's capacity, in slots. Applied to both runtime state and the
-   * stored topology so the Inspector shows what the controller did, and any
-   * work waiting on the newly freed slots starts immediately.
+   * How big a node's fleet is, in the unit that kind scales along: instances
+   * for an ordinary server, slots-per-shard for a sharded store. Null when
+   * the node does not exist, or is a kind with no fleet to move.
    */
-  setCapacity(nodeId: string, capacity: number): void;
+  scaleOf(nodeId: string): number | null;
+  /**
+   * Resize a node's fleet, in the same unit scaleOf() reports. Applied to
+   * both runtime state and the stored topology so the Inspector shows what
+   * the controller did, and any work waiting on the newly freed slots starts
+   * immediately. A no-op for a kind that cannot be scaled.
+   */
+  setScale(nodeId: string, units: number): void;
+  /**
+   * The node this controller drives, from its CONTROL edge, or '' when it is
+   * not wired to one -- or when that edge is cut. Control edges are held
+   * apart from the routing set, so this is the only way to reach a target.
+   */
+  controlTargetOf(state: NodeStateLike): string;
   /**
    * Is this node currently taken out by an injected 'crash'? A controller
    * must not treat a crashed node as merely idle, and a region node uses it
@@ -181,6 +210,23 @@ export interface BehaviourCtx {
   reportShardUtilization(state: NodeStateLike, perShard: readonly number[]): void;
 
   /**
+   * Publish this node's instance vector: how many units it is made of right
+   * now, and each unit's utilisation. Called from reportInstances() by a kind
+   * whose structure the engine cannot derive -- a shard's partitions, a
+   * replica set's primary plus read replicas.
+   *
+   * `perUnit` is COPIED, so a behaviour may hand over the same scratch buffer
+   * every frame. The engine only publishes a new array to the snapshot when
+   * the contents actually changed, which is what lets a memoised React
+   * consumer compare by reference and still never miss an update.
+   *
+   * The meaning of an index is fixed per kind and documented on NodeStats.
+   * `pending` is units decided but not yet serving; pass 0 when the kind has
+   * no such notion.
+   */
+  reportInstances(state: NodeStateLike, perUnit: readonly number[], pending: number): void;
+
+  /**
    * Report true occupancy for a kind that runs its own slot discipline.
    *
    * The engine integrates utilisation from `state.busy`, which serveWithin()
@@ -197,4 +243,19 @@ export interface BehaviourCtx {
 
   /** Mark a request as a write, so downstream kinds see the classification. */
   markWrite(req: ReqLike, isWrite: boolean): void;
+
+  /**
+   * Create a detached request at `state` and dispatch it down one specific
+   * outgoing edge. For kinds that ORIGINATE traffic on their own schedule:
+   * a stream broker delivering to a consumer group, a pub/sub topic fanning
+   * a publish out, a cron job dumping its batch. The message is a detached
+   * root (nothing upstream waits on it), its outcome is reported back via
+   * onDownstreamResult when the behaviour declares `observesOutcome`, and
+   * it books arrivals/completions at the nodes it visits like any request.
+   *
+   * Returns false without emitting when the edge is cut, the target node
+   * does not exist, or the engine's live-request ceiling is hit; the caller
+   * decides what an undeliverable message means. Consumes no randomness.
+   */
+  emitDetached(state: NodeStateLike, edge: SimEdge, key: number): boolean;
 }

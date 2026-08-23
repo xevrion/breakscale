@@ -4,6 +4,7 @@ import { MinHeap, type Timed } from './heap';
 import { Rng } from './random';
 import type {
   ActiveFailure,
+  EdgeState,
   FailureKind,
   FailureOpts,
   FailureReason,
@@ -348,8 +349,21 @@ interface NodeState {
   waiting: Req[];
   /** Read cursor into `waiting`, so dequeue is O(1) without splice. */
   waitHead: number;
-  /** Outgoing edges, resolved from the topology. */
+  /**
+   * Outgoing REQUEST edges, resolved from the topology. Control edges are
+   * deliberately absent: this is the routing set, and everything that
+   * dispatches work walks it, so keeping them out here is what makes "no
+   * request is ever sent down a control edge" true by construction rather
+   * than by every routing site remembering to check.
+   */
   out: SimEdge[];
+  /**
+   * Outgoing CONTROL edges -- "this node acts on that one". Held apart from
+   * `out` because they are a different relationship, not a weaker one: an
+   * autoscaler finds its target here, and nothing that routes traffic ever
+   * looks at this list.
+   */
+  ctrl: SimEdge[];
   /** Queue nodes that feed this worker. */
   sources: string[];
   /** Integrated busy-slot-milliseconds, for utilization. */
@@ -380,6 +394,31 @@ interface NodeState {
    * into the snapshot and has no opinion about what a shard is.
    */
   shardUtil: number[];
+
+  /* ---- instance model ---- *
+   *
+   * The vector is held in two halves on purpose. `instanceUnits` is the
+   * engine's own working copy, mutated in place every frame at no allocation
+   * cost; `instancePublished` is the array actually handed to the snapshot,
+   * and is replaced with a fresh array ONLY when the contents changed.
+   *
+   * That split is what makes the field both cheap and correct. Publishing the
+   * working copy directly would be the aliasing bug that once froze the
+   * canvas: a memoised consumer holding last frame's NodeStats would find the
+   * same array identity with silently different contents, compare equal, and
+   * never re-render. Allocating unconditionally would be honest but would
+   * churn one array per node per frame at 10Hz forever. Copy-on-change gives
+   * a new identity exactly when there is something new to see.
+   */
+
+  /** Working per-unit utilisation, mutated in place. Length is the unit count. */
+  instanceUnits: number[];
+  /** The array published to the last snapshot, or null if none yet. */
+  instancePublished: number[] | null;
+  /** Units decided but not yet serving (autoscaler warm-up). */
+  instancePending: number;
+  /** `instancePending` as last published, so a change in it alone is noticed. */
+  instancePendingPublished: number;
 
   /**
    * Behaviour-private scratch state, allocated once from the behaviour's
@@ -454,6 +493,10 @@ export class Engine implements BehaviourCtx {
     crashed: 0,
     partitioned: 0,
     'region-down': 0,
+    'conn-refused': 0,
+    unauthorized: 0,
+    'bulkhead-full': 0,
+    deprioritized: 0,
   };
 
   /** Injected failures, keyed by node id. At most one fault per node. */
@@ -476,6 +519,7 @@ export class Engine implements BehaviourCtx {
   /** Reused snapshot containers so 10Hz polling does not churn the heap. */
   private snapNodes: Record<string, NodeStats> = {};
   private snapEdges: Record<string, number> = {};
+  private snapEdgeState: Record<string, EdgeState> = {};
 
   /**
    * Capacity each node was authored with, by node id.
@@ -657,10 +701,14 @@ export class Engine implements BehaviourCtx {
         for (const id of fault.edgeIds) this.cutEdges.add(id);
         continue;
       }
-      // No edge ids given: cut everything leaving the node.
+      // No edge ids given: cut everything leaving the node. Control edges
+      // included -- "unplug this box" severs the controller's reach as much as
+      // its traffic, and a partitioned autoscaler that kept steering its
+      // target would be a lie about what a network partition does.
       const state = this.nodes.get(nodeId);
       if (!state) continue;
       for (const edge of state.out) this.cutEdges.add(edge.id);
+      for (const edge of state.ctrl) this.cutEdges.add(edge.id);
     }
   }
 
@@ -741,6 +789,7 @@ export class Engine implements BehaviourCtx {
         hitRate: 0,
         totalCompleted: 0,
         totalFailed: 0,
+        queueLimit: this.effectiveQueueLimit(state),
         staleReadRate: 0,
         maxShardUtilization: 0,
         minShardUtilization: 0,
@@ -768,7 +817,31 @@ export class Engine implements BehaviourCtx {
       if (state.behaviour.decorateStats) {
         state.behaviour.decorateStats(this, state, entry);
       }
+
+      // The instance vector is built AFTER decorateStats, because a custom
+      // kind fills its working buffer from there (a shard's per-partition
+      // utilisation is computed in the same pass that fills shardUtilization)
+      // and because a slot-model kind's waterline must reflect any utilisation
+      // decorateStats corrected -- a sharded store rewrites `utilization` to
+      // the mean across partitions, and a stack drawn from the pre-correction
+      // value would disagree with the meter beside it.
+      const model = state.behaviour.instanceModel;
+      if (model === 'slots') {
+        this.fillSlotInstances(state);
+        this.finishInstances(state, entry);
+      } else if (model === 'custom') {
+        state.instancePending = 0;
+        if (state.behaviour.reportInstances) state.behaviour.reportInstances(this, state);
+        this.finishInstances(state, entry);
+      }
     }
+
+    // Warm-up units belong to the node being SCALED, not to the controller
+    // that ordered them. The autoscaler is the only node that knows a scale-up
+    // is booked, so the count is moved across here, once every node's own
+    // vector exists. Done as a second pass rather than inline because the
+    // target's NodeStats may not have been built yet when the controller's is.
+    this.attachPendingInstances(nodeOut);
 
     const edgeOut: Record<string, number> = this.snapEdges;
     for (const key of Object.keys(edgeOut)) {
@@ -783,9 +856,92 @@ export class Engine implements BehaviourCtx {
       nodes: nodeOut,
       history: this.history,
       edgeFlow: edgeOut,
+      edgeState: this.snapshotEdgeState(edgeOut),
       failuresByReason: this.failures,
       activeFailures: this.snapshotFailures(),
     };
+  }
+
+  /**
+   * Hand each autoscaler's booked-but-not-yet-live units to the node they were
+   * booked FOR.
+   *
+   * The controller knows the number; the target is what the student is
+   * looking at. Reporting it only on the autoscaler would leave the UI unable
+   * to draw ghosted units on the stack that is about to grow, which is the
+   * one place the warm-up lag is legible.
+   *
+   * `targetInstances` while scaling is the fleet size the target will reach,
+   * and its live `instances` is the size it has, so the difference is exactly
+   * what is still booting. Clamped at zero: a scale-up whose target was
+   * manually enlarged past the booked figure in the meantime owes nothing.
+   *
+   * Driven off the behaviour's own control-target resolution rather than a
+   * kind test, so the wiring rule lives in exactly one place.
+   */
+  private attachPendingInstances(nodeOut: Record<string, NodeStats>): void {
+    for (const state of this.nodes.values()) {
+      if (state.ctrl.length === 0) continue;
+      const own = nodeOut[state.id];
+      if (!own || own.scaling !== true) continue;
+      const watched = this.controlTargetOf(state);
+      const target = watched ? nodeOut[watched] : undefined;
+      if (!target || target.instances === undefined) continue;
+      const booked = own.targetInstances ?? 0;
+      const pending = booked - target.instances;
+      if (pending > 0) target.instancesPending = pending;
+    }
+  }
+
+  /**
+   * Classify every edge for the snapshot.
+   *
+   * Resolution order is fixed and matters: an injected cut is reported over a
+   * breaker's refusal, because the fault is the more specific truth about that
+   * particular wire. Below those, a kind that withholds traffic for a reason
+   * of its own gets to say so through edgeStateFor(); everything else falls
+   * back to whether the edge is actually moving requests.
+   */
+  private snapshotEdgeState(rates: Record<string, number>): Record<string, EdgeState> {
+    const out = this.snapEdgeState;
+    for (const key of Object.keys(out)) {
+      if (!this.edgeFlow.has(key)) delete out[key];
+    }
+
+    for (const state of this.nodes.values()) {
+      const hook = state.behaviour.edgeStateFor;
+      for (let i = 0; i < state.out.length; i++) {
+        const edge = state.out[i];
+        if (this.cutEdges.size > 0 && this.cutEdges.has(edge.id)) {
+          out[edge.id] = 'cut';
+          continue;
+        }
+        const declared = hook ? hook(this, state, edge, i) : null;
+        if (declared !== null) {
+          out[edge.id] = declared;
+          continue;
+        }
+        out[edge.id] = (rates[edge.id] ?? 0) > 0 ? 'live' : 'idle';
+      }
+
+      // Control edges get an entry too, because the map promises one per edge
+      // and a renderer asking about a wire it can see must never get
+      // undefined. They are never 'live': no request crosses one, so judging
+      // them by flow would paint every control link permanently idle-looking.
+      // 'standby' says the honest thing -- wired, healthy, carrying no
+      // traffic because that is not what it is for.
+      for (const edge of state.ctrl) {
+        out[edge.id] =
+          this.cutEdges.size > 0 && this.cutEdges.has(edge.id) ? 'cut' : 'standby';
+      }
+    }
+
+    // An edge whose source node no longer exists still has a flow counter, so
+    // give it a state rather than leaving a hole the UI has to guard against.
+    for (const id of this.edgeFlow.keys()) {
+      if (out[id] === undefined) out[id] = (rates[id] ?? 0) > 0 ? 'live' : 'idle';
+    }
+    return out;
   }
 
   /**
@@ -826,6 +982,10 @@ export class Engine implements BehaviourCtx {
       crashed: 0,
       partitioned: 0,
       'region-down': 0,
+      'conn-refused': 0,
+      unauthorized: 0,
+      'bulkhead-full': 0,
+      deprioritized: 0,
     };
     this.history = [];
     this.lastHistoryMs = 0;
@@ -862,6 +1022,7 @@ export class Engine implements BehaviourCtx {
         state = kept;
         state.config = { ...node.config };
         state.out = [];
+        state.ctrl = [];
         state.sources = [];
       } else {
         state = createNodeState(node);
@@ -875,6 +1036,15 @@ export class Engine implements BehaviourCtx {
       const from = next.get(edge.from);
       const to = next.get(edge.to);
       if (!from || !to) continue;
+      // A control edge is a supervisory relationship, not a traffic path, so
+      // it never enters the routing set. Two ways to be one: the edge says so
+      // (`control: true`), or the source kind only ever supervises (an
+      // autoscaler). The OR is what lets every preset written before the flag
+      // existed get the right behaviour without being edited.
+      if (edge.control === true || from.behaviour.controlsTarget === true) {
+        from.ctrl.push(edge);
+        continue;
+      }
       from.out.push(edge);
       // Structural wiring: a pull-based consumer drains whatever buffers feed
       // it. Both traits come off the behaviour, so a future kind that also
@@ -1302,6 +1472,62 @@ export class Engine implements BehaviourCtx {
     this.wakeWorkersFor(state.id);
   }
 
+  /**
+   * Acknowledge the caller and RELAY a detached copy through this node's
+   * own slot discipline.
+   *
+   * This is the delivery-side sibling of ackAndBuffer(): where a queue
+   * parks its detached message for pull-based consumers, a relaying kind
+   * (a retry queue, a write-behind cache) keeps the message and delivers
+   * it downstream ITSELF -- the copy occupies this node's slots, draws the
+   * node's service time, and then takes the ordinary completion path:
+   * error roll, routing to the out edges, and the caller-side retry
+   * machinery, so a failed delivery is re-issued with backoff by exactly
+   * the code every other retry uses.
+   *
+   * `extraDeliveryMs` is added on top of the drawn service time of the
+   * relayed copy (not of the ack), which is how a write-behind cache
+   * models the interval a write sits dirty before its flush lands.
+   *
+   * The messages live in the engine's own waiting list, so `queueDepth`,
+   * the snapshot's `queued`, and -- crucially -- killInFlight() all see
+   * them: crashing the node loses the buffered messages instantly and
+   * visibly, which is the write-behind lesson.
+   *
+   * The behaviour must check its own depth limit BEFORE calling this, the
+   * same contract ackAndBuffer has.
+   */
+  ackAndRelay(stateLike: NodeStateLike, reqLike: ReqLike, extraDeliveryMs = 0): void {
+    const state = stateLike as NodeState;
+    const req = reqLike as Req;
+    const ackMs = this.serviceTimeFor(state);
+
+    const msg = this.acquireReq();
+    msg.nodeId = state.id;
+    msg.parent = null;
+    msg.rootStartMs = this.now;
+    msg.enterMs = this.now;
+    msg.hop = req.hop;
+    msg.detached = true;
+    msg.key = req.key;
+    msg.isWrite = req.isWrite;
+    if (extraDeliveryMs > 0) msg.extraServiceMs = extraDeliveryMs;
+
+    // Start delivering now if a slot is free, else park it in the waiting
+    // list for pumpQueue to drain. Started BEFORE the caller is acked, in
+    // the same buffer-first order ackAndBuffer uses.
+    if (state.busy < this.effectiveCapacity(state)) {
+      this.startService(state, msg);
+    } else {
+      state.waiting.push(msg);
+    }
+
+    state.completions.add(this.now, 1);
+    state.totalCompleted++;
+    state.latency.add(this.now, ackMs);
+    this.resolve(req, true, 'error', ackMs);
+  }
+
   private wakeWorkersFor(queueId: string): void {
     for (const state of this.nodes.values()) {
       if (!state.behaviour.pullsFromQueues) continue;
@@ -1327,7 +1553,14 @@ export class Engine implements BehaviourCtx {
     state.busy++;
     req.holdingSlot = true;
     req.enterMs = this.now;
-    const ms = this.serviceTimeFor(state);
+    // Any extra service time a behaviour attached to this request (a
+    // write-behind cache's flush residence, booked via ackAndRelay) is
+    // consumed here, exactly as serveWithin() consumes it for the
+    // self-managed kinds. Zero for every request on the ordinary path, so
+    // no existing kind's timing changes.
+    const extra = req.extraServiceMs;
+    if (extra > 0) req.extraServiceMs = 0;
+    const ms = this.serviceTimeFor(state) + extra;
     req.ownMs = ms;
     if (ms > 0) {
       this.push(this.now + ms, EV_SERVICE_DONE, state.id, req, req.token);
@@ -1681,8 +1914,32 @@ export class Engine implements BehaviourCtx {
     return Math.max(0, Math.floor(state.config.queueLimit));
   }
 
+  /**
+   * How many requests this node can serve at once: `instances * capacity`.
+   *
+   * `capacity` is the slot count of ONE instance and `instances` is how many
+   * of them are running, so the product is the node's real parallelism and is
+   * what every slot decision in the engine compares against. A topology that
+   * never mentions `instances` runs one instance, and the product collapses to
+   * `capacity` -- which is exactly the quantity this function returned before
+   * the instance model existed, so nothing written against the old meaning
+   * changes behaviour.
+   */
   effectiveCapacity(state: NodeStateLike): number {
-    return Math.max(1, Math.floor(state.config.capacity));
+    return Math.max(1, Math.floor(state.config.capacity)) * this.effectiveInstances(state);
+  }
+
+  /**
+   * How many instances this node is running, >= 1.
+   *
+   * Absent means one, which is what makes the field additive: every topology,
+   * preset and saved graph written before instances existed keeps its exact
+   * behaviour. Floored rather than rounded so a slider mid-drag can never
+   * conjure a fractional machine.
+   */
+  effectiveInstances(state: NodeStateLike): number {
+    const raw = state.config.instances;
+    return raw === undefined ? 1 : Math.max(1, Math.floor(raw));
   }
 
   countHit(state: NodeStateLike): void {
@@ -1737,37 +1994,70 @@ export class Engine implements BehaviourCtx {
     return state ? state.utilization : null;
   }
 
-  capacityOf(nodeId: string): number | null {
+  /**
+   * How big a node's fleet is, in whatever unit that kind scales along --
+   * instances for an ordinary server, slots-per-shard for a sharded store.
+   *
+   * Null means the kind has no fleet a controller can move. Reading back the
+   * same quantity setScale() writes is what keeps a controller's arithmetic
+   * consistent with what it observes.
+   */
+  scaleOf(nodeId: string): number | null {
     const state = this.nodes.get(nodeId);
     if (!state) return null;
-    // Report the knob this kind actually serves from, so a controller reads
-    // back the same quantity it writes through setCapacity().
-    const field = state.behaviour.capacityField;
+    const field = state.behaviour.scaleField;
+    if (field === undefined) return null;
     if (field === 'shardCapacity') {
       return Math.max(1, Math.floor(state.config.shardCapacity));
     }
-    return this.effectiveCapacity(state);
+    return this.effectiveInstances(state);
   }
 
   /**
-   * Write a node's capacity. Both the runtime state and the stored topology
-   * are updated, so the Inspector shows what the controller actually did
-   * rather than the value the student last typed. Newly freed slots are
-   * pumped immediately, exactly as a manual capacity change is.
+   * Resize a node's fleet. Both the runtime state and the stored topology are
+   * updated, so the Inspector shows what the controller actually did rather
+   * than the value the student last typed. Newly freed slots are pumped
+   * immediately, exactly as a manual change is.
+   *
+   * Writing `instances` rather than `capacity` is the substance of the
+   * intuitiveness fix: the controller adds machines, the canvas draws
+   * machines, and the number it moved is the number the student sees grow.
    */
-  setCapacity(nodeId: string, capacity: number): void {
-    const next = Math.max(1, Math.floor(capacity));
+  setScale(nodeId: string, units: number): void {
+    const next = Math.max(1, Math.floor(units));
     const state = this.nodes.get(nodeId);
     if (!state) return;
-    // Write whichever knob this kind serves from. A sharded store ignores
-    // `capacity` entirely, so writing it there would make the controller a
-    // silent no-op that ramps to maxCapacity while nothing improves.
-    const field = state.behaviour.capacityField ?? 'capacity';
+    // Write whichever knob this kind actually scales along. A sharded store
+    // ignores `instances` entirely, so writing it there would make the
+    // controller a silent no-op that ramps to maxCapacity while nothing
+    // improves. A kind with no scale field is left alone outright.
+    const field = state.behaviour.scaleField;
+    if (field === undefined) return;
     if (state.config[field] === next) return;
     state.config[field] = next;
     const node = this.topology.nodes.find((n) => n.id === nodeId);
     if (node) node.config[field] = next;
     this.pumpQueue(state);
+  }
+
+  /**
+   * The node a controller drives, or '' when it is not wired to one.
+   *
+   * Read from the node's CONTROL edges, which are held separately from `out`
+   * so that a request can never be dispatched down one. Taking the first is
+   * deliberate: one controller drives one target, and a second control edge
+   * would be an ambiguity the student should see rather than a silent merge.
+   */
+  controlTargetOf(stateLike: NodeStateLike): string {
+    const ctrl = (stateLike as NodeState).ctrl;
+    if (ctrl.length === 0) return '';
+    // A severed control edge means the controller cannot reach its target.
+    // Reporting no target is what makes an injected partition on a controller
+    // do the thing it says on the tin: the fleet freezes at whatever size it
+    // had, which is exactly how a real control plane losing its data plane
+    // behaves.
+    if (this.cutEdges.size > 0 && this.cutEdges.has(ctrl[0].id)) return '';
+    return ctrl[0].to;
   }
 
   isCrashed(nodeId: string): boolean {
@@ -1812,6 +2102,47 @@ export class Engine implements BehaviourCtx {
   }
 
   /**
+   * Create a DETACHED request at `state` and dispatch it down one specific
+   * outgoing edge, for kinds that originate traffic of their own on an
+   * event-driven schedule: a stream broker delivering the next message to a
+   * consumer group, a pub/sub topic fanning one publish out to each
+   * subscriber, a cron job dumping its batch.
+   *
+   * The message is a detached root -- nobody upstream is waiting on it, so
+   * its eventual success or failure is booked at the nodes it visits and
+   * never at the system level, exactly like a queue message drained by a
+   * worker. The join still runs through this node, which means a behaviour
+   * declaring `observesOutcome` hears about each delivery's result in
+   * onDownstreamResult; that is how a broker paces a consumer group.
+   *
+   * Returns false without emitting when the edge is cut, the target does
+   * not exist, or the live-request ceiling is reached -- the caller decides
+   * what an undeliverable message means (a broker holds it; a cron drops
+   * it). Consumes no randomness itself; the service-time draws happen at
+   * the nodes the message visits, in event order, like any other request.
+   *
+   * This is a ctx addition, not an event-loop change: dispatch, admission
+   * and resolution all run the same code every other request runs.
+   */
+  emitDetached(stateLike: NodeStateLike, edge: SimEdge, key: number): boolean {
+    const state = stateLike as NodeState;
+    if (this.liveRequests >= MAX_LIVE_REQUESTS) return false;
+    if (this.cutEdges.size > 0 && this.cutEdges.has(edge.id)) return false;
+    if (!this.nodes.has(edge.to)) return false;
+    const msg = this.acquireReq();
+    msg.nodeId = state.id;
+    msg.parent = null;
+    msg.rootStartMs = this.now;
+    msg.enterMs = this.now;
+    msg.hop = 0;
+    msg.detached = true;
+    msg.key = ((Math.floor(key) % KEYSPACE) + KEYSPACE) % KEYSPACE;
+    msg.pending = 1;
+    this.sendChild(state, msg, edge, 0);
+    return true;
+  }
+
+  /**
    * Store a per-shard utilisation vector for the snapshot. Copied rather than
    * retained, so a behaviour reusing its own scratch array cannot mutate what
    * the UI is about to read.
@@ -1820,6 +2151,91 @@ export class Engine implements BehaviourCtx {
     const dst = (stateLike as NodeState).shardUtil;
     dst.length = perShard.length;
     for (let i = 0; i < perShard.length; i++) dst[i] = perShard[i];
+  }
+
+  /**
+   * Publish a kind's own instance vector. Writes into the node's working
+   * buffer; the copy-on-change publish happens once per snapshot in
+   * finishInstances(), so a behaviour cannot force an allocation by calling
+   * this more often than another kind does.
+   */
+  reportInstances(stateLike: NodeStateLike, perUnit: readonly number[], pending: number): void {
+    const state = stateLike as NodeState;
+    const units = state.instanceUnits;
+    units.length = perUnit.length;
+    for (let i = 0; i < perUnit.length; i++) units[i] = perUnit[i];
+    state.instancePending = pending > 0 ? Math.floor(pending) : 0;
+  }
+
+  /**
+   * Fill the working instance buffer for an `instanceModel: 'slots'` kind.
+   *
+   * One unit per INSTANCE -- one machine, holding `capacity` slots -- and the
+   * per-unit numbers are a WATERLINE: `utilization * instances`
+   * busy-instance-equivalents poured in from index 0. The engine integrates
+   * one smoothed utilisation per node, not one per instance, and requests go
+   * to whichever slot is free, so there is no per-machine truth to report and
+   * inventing one would be a prettier lie than the waterline.
+   *
+   * The count is read through effectiveInstances(), so a stack drawn from this
+   * is exactly the fleet the autoscaler most recently wrote.
+   */
+  private fillSlotInstances(state: NodeState): void {
+    const instances = this.effectiveInstances(state);
+    const units = state.instanceUnits;
+    units.length = instances;
+
+    // Utilisation can sit marginally above 1 when a node is oversubscribed;
+    // the waterline is capped so no unit ever reports more than full.
+    const util = state.utilization > 1 ? 1 : state.utilization > 0 ? state.utilization : 0;
+    let remaining = util * instances;
+    for (let i = 0; i < instances; i++) {
+      if (remaining >= 1) {
+        units[i] = 1;
+        remaining -= 1;
+      } else {
+        units[i] = remaining > 0 ? remaining : 0;
+        remaining = 0;
+      }
+    }
+  }
+
+  /**
+   * Copy the working instance buffer into the snapshot, allocating a new array
+   * only when something actually changed.
+   *
+   * The reference identity of the published array is the signal a memoised
+   * consumer keys off: unchanged contents keep the previous array, so a
+   * shallow compare correctly says "nothing to redraw", and any change at all
+   * -- a single unit's utilisation, the unit count, the pending count --
+   * yields a brand new array that no such compare can mistake for the old one.
+   */
+  private finishInstances(state: NodeState, entry: NodeStats): void {
+    const units = state.instanceUnits;
+    const prev = state.instancePublished;
+
+    let changed = prev === null || prev.length !== units.length;
+    if (!changed && prev !== null) {
+      for (let i = 0; i < units.length; i++) {
+        if (prev[i] !== units[i]) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    // The pending count rides on the same array identity, so a change in it
+    // alone still has to force a republish -- otherwise warming-up units would
+    // appear or vanish without the consumer being told anything changed.
+    if (state.instancePending !== state.instancePendingPublished) changed = true;
+
+    if (changed) {
+      state.instancePublished = units.slice();
+      state.instancePendingPublished = state.instancePending;
+    }
+
+    entry.instances = units.length;
+    entry.perInstance = state.instancePublished ?? units;
+    if (state.instancePending > 0) entry.instancesPending = state.instancePending;
   }
 
   /**
@@ -2012,6 +2428,7 @@ function createNodeState(node: SimNode): NodeState {
     waiting: [],
     waitHead: 0,
     out: [],
+    ctrl: [],
     sources: [],
     busyMsAccum: 0,
     lastIntegrateMs: 0,
@@ -2028,6 +2445,10 @@ function createNodeState(node: SimNode): NodeState {
     totalFailed: 0,
     pollScheduled: false,
     shardUtil: [],
+    instanceUnits: [],
+    instancePublished: null,
+    instancePending: 0,
+    instancePendingPublished: -1,
     ext: null,
     custom: null,
     ownOccupancy: null,

@@ -16,11 +16,14 @@
  * Engine class both documents that surface and stops a behaviour reaching into
  * scheduling internals it has no business knowing about.
  */
-import type { FailureReason, NodeKind, NodeStats, SimEdge } from './types';
+import type { EdgeState, FailureReason, NodeKind, NodeStats, SimEdge } from './types';
 import type { BehaviourCtx, ReqLike, NodeStateLike } from './engine-types';
 import { DATA_BEHAVIOURS } from './behaviour-data';
 import { EDGE_BEHAVIOURS } from './behaviour-edge';
 import { CONTROL_BEHAVIOURS } from './behaviour-control';
+import { STORE_BEHAVIOURS } from './behaviour-store';
+import { MESSAGING_BEHAVIOURS } from './behaviour-messaging';
+import { RESILIENCE_BEHAVIOURS } from './behaviour-resilience';
 
 /**
  * What a node does with a request offered to it.
@@ -71,6 +74,21 @@ export interface ComponentBehaviour {
   servesRequests: boolean;
   /** Does this node generate root requests (a traffic source)? */
   generatesLoad: boolean;
+  /**
+   * Is every edge leaving this kind a CONTROL edge rather than a request path?
+   *
+   * True for the autoscaler, whose outgoing edge names the node it resizes and
+   * has never carried traffic. Declaring it here means the engine can keep
+   * control edges out of routing structurally -- they are not in `state.out`
+   * at all -- instead of relying on each such kind to refuse traffic at
+   * admission, which only worked because the autoscaler happened to be a leaf
+   * and would have quietly failed for a controller wired mid-graph.
+   *
+   * An edge may also be marked `control` individually on the topology; the two
+   * are ORed. This trait covers the kinds where it is true by construction, so
+   * no existing preset has to be edited to get the right behaviour.
+   */
+  controlsTarget?: boolean;
   /** Does this node pull work from buffering nodes rather than being pushed to? */
   pullsFromQueues: boolean;
   /**
@@ -113,17 +131,29 @@ export interface ComponentBehaviour {
   noRouteReason?: FailureReason;
 
   /**
-   * Which NodeConfig knob actually controls this kind's serving capacity.
+   * Which NodeConfig knob a controller moves to make this kind BIGGER, and
+   * which the engine reads back to say how big it currently is.
    *
-   * Defaults to `capacity`, which is right for every kind the engine slots
-   * itself. A kind that serves from a different field must say so: a sharded
-   * store's slots are `shardCapacity` *per shard*, and it ignores `capacity`
-   * entirely -- so an autoscaler writing `capacity` at it would spin to
-   * maxCapacity while changing nothing at all, which looks to a student like
-   * a controller that simply does not work. Declared as a trait rather than
-   * tested for by kind, so the engine's setCapacity() stays kind-agnostic.
+   * This is the fleet count, not the slot count. For a kind with an instance
+   * model the answer is `instances`: an autoscaler adds machines and leaves
+   * `capacity` (the size of one machine) alone, which is both what a real one
+   * does and the only reading under which the drawn stack and the
+   * controller's steps describe the same thing.
+   *
+   * A kind that scales along a different axis must say so, and the reason is
+   * concrete: a sharded store serves from `shardCapacity` slots *per shard*
+   * and ignores `instances` entirely, so a controller writing `instances` at
+   * it would ramp to maxCapacity while changing nothing at all -- which looks
+   * to a student like a controller that simply does not work.
+   *
+   * Declared as a trait rather than tested for by kind, so the engine's
+   * setScale() stays kind-agnostic.
+   *
+   * Absent means this kind cannot be scaled by a controller at all (a queue,
+   * a breaker, a client): scaleOf() reports null and setScale() is a no-op,
+   * rather than silently inventing a fleet for a thing that has none.
    */
-  capacityField?: 'capacity' | 'shardCapacity';
+  scaleField?: 'instances' | 'shardCapacity';
   /**
    * Called after the node's own service time elapsed and its independent error
    * roll passed. Returning 'complete' answers the call here.
@@ -172,6 +202,58 @@ export interface ComponentBehaviour {
    * behaviours that declare it.
    */
   decorateStats?(ctx: BehaviourCtx, state: NodeStateLike, stats: NodeStats): void;
+
+  /* ---- instance model ---- */
+
+  /**
+   * Is this kind really N things rather than one, and if so what is a unit?
+   *
+   *  - 'slots'  one unit per capacity slot. The engine derives the count and
+   *             the per-unit waterline itself; the behaviour writes nothing.
+   *  - 'custom' the kind knows its own structure and publishes it from
+   *             reportInstances() -- a shard's partitions, a replica set's
+   *             primary-plus-replicas.
+   *  - absent   not an instance model. NodeStats.instances stays undefined.
+   *
+   * A trait rather than a hook because it is a fixed property of the kind and
+   * the snapshot loop reads it once per node per frame.
+   *
+   * The full per-kind interpretation is documented on NodeStats in types.ts;
+   * that comment is the contract, this field only selects which mechanism
+   * produces it.
+   */
+  instanceModel?: 'slots' | 'custom';
+
+  /**
+   * Publish the instance vector for an `instanceModel: 'custom'` kind. Called
+   * from the snapshot loop, before decorateStats. The behaviour hands its own
+   * scratch array to ctx.reportInstances(); the engine copies it, so reusing
+   * one buffer per node across frames is both safe and expected.
+   */
+  reportInstances?(ctx: BehaviourCtx, state: NodeStateLike): void;
+
+  /* ---- edge state ---- */
+
+  /**
+   * Classify one of this node's outgoing edges for the snapshot's edgeState
+   * map -- is the node refusing to use it ('blocked'), holding it in reserve
+   * ('standby'), or neither (return null and let the engine decide from flow)?
+   *
+   * Only kinds that can withhold traffic for a reason of their own declare it:
+   * a breaker that is OPEN, a region node with one active edge and the rest on
+   * standby. The engine never asks anything else, so an ordinary service pays
+   * nothing for the seam.
+   *
+   * Must be a pure read. It runs inside snapshot(), which is observation only:
+   * a behaviour that advanced its own state machine here would make the
+   * simulation depend on how often the UI polled it.
+   */
+  edgeStateFor?(
+    ctx: BehaviourCtx,
+    state: NodeStateLike,
+    edge: SimEdge,
+    index: number,
+  ): EdgeState | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -200,6 +282,8 @@ const client: ComponentBehaviour = {
 const lb: ComponentBehaviour = {
   kind: 'lb',
   servesRequests: true,
+  instanceModel: 'slots',
+  scaleField: 'instances',
   generatesLoad: false,
   pullsFromQueues: false,
   buffersForConsumers: false,
@@ -214,6 +298,8 @@ const lb: ComponentBehaviour = {
 const service: ComponentBehaviour = {
   kind: 'service',
   servesRequests: true,
+  instanceModel: 'slots',
+  scaleField: 'instances',
   generatesLoad: false,
   pullsFromQueues: false,
   buffersForConsumers: false,
@@ -228,6 +314,8 @@ const service: ComponentBehaviour = {
 const cache: ComponentBehaviour = {
   kind: 'cache',
   servesRequests: true,
+  instanceModel: 'slots',
+  scaleField: 'instances',
   generatesLoad: false,
   pullsFromQueues: false,
   buffersForConsumers: false,
@@ -248,6 +336,8 @@ const cache: ComponentBehaviour = {
 const db: ComponentBehaviour = {
   kind: 'db',
   servesRequests: true,
+  instanceModel: 'slots',
+  scaleField: 'instances',
   generatesLoad: false,
   pullsFromQueues: false,
   buffersForConsumers: false,
@@ -284,6 +374,8 @@ const queue: ComponentBehaviour = {
 const worker: ComponentBehaviour = {
   kind: 'worker',
   servesRequests: true,
+  instanceModel: 'slots',
+  scaleField: 'instances',
   generatesLoad: false,
   pullsFromQueues: true,
   buffersForConsumers: false,
@@ -305,6 +397,16 @@ const ALL: ComponentBehaviour[] = [
 // Data-tier kinds (replica, shard) live in their own module: both carry real
 // internal machinery, and keeping it there leaves this file declarative.
 ALL.push(...DATA_BEHAVIOURS);
+// Specialised stores (object storage, search, time-series, graph, cold
+// storage, vector) likewise: four of the six run a self-managed costed pool.
+ALL.push(...STORE_BEHAVIOURS);
+// Messaging and coordination kinds (streambroker, pubsub, websocket,
+// apigateway, sidecar, lambda, cron): the glue between services. Same deal;
+// real machinery lives in its own module, the registry stays declarative.
+ALL.push(...MESSAGING_BEHAVIOURS);
+// Resilience and delivery kinds (bulkhead, retryqueue, transcoder,
+// edgecompute, writebehind, loadshedder): the failure-handling tier.
+ALL.push(...RESILIENCE_BEHAVIOURS);
 
 const BY_KIND = new Map<NodeKind, ComponentBehaviour>();
 for (const b of ALL) BY_KIND.set(b.kind, b);

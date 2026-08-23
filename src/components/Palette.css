@@ -1,29 +1,148 @@
 /* ==========================================================================
-   Palette — left rail. Secondary chrome: it stays quiet so the canvas and
-   the hero readouts hold the eye. Flat list, hairline rules, no nested
-   cards, no boxes around the glyphs.
+   Palette — the left rail.
 
-   Dense by construction: 40px component rows and 44px preset rows in a
-   224px column, ending in a key reference rather than empty space. The
-   old rail was sized by its wrapped 11px descriptions, not its content —
-   the longest label is "Load balancer" at ~78px.
+   This rail is where a student learns the colour language the canvas
+   speaks. Every component row carries a chip painted in that kind's own
+   tokens, so the amber thing in the rail and the amber thing on the canvas
+   are recognisably the same object. That is the whole reason the chips are
+   here; they are a legend, not decoration.
+
+   WHY A CHIP AND NOT A COLOURED DOT.
+   Measured against the panel surface, --kind-*-line lands between 1.87:1
+   and 2.39:1 — well under the 3:1 a graphical mark needs. A bare dot in
+   that colour would be invisible to a good number of students. The chip
+   instead pairs the pale --kind-*-fill body with the --kind-*-stroke
+   outline, which measures 3.38 - 4.16:1 on every surface this rail uses
+   (surface, surface-2 on hover, surface-3 on press). The glyph inside is
+   --kind-*-ink at 6.91 - 7.40:1 on its own fill. The identity is carried
+   by a shape that is genuinely visible rather than by a tint that is not.
+
+   BOUNDARIES. Rows are separated by whitespace and a hover tint. There is
+   no border on a row, no box around a group, and no card inside a card.
+   The only rules in the file are the ones between disclosure sections,
+   where two same-coloured surfaces genuinely meet.
    ========================================================================== */
 
 .pal {
   display: flex;
   flex-direction: column;
-  padding-bottom: var(--sp-4);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pal-scroll {
+  flex: 1 1 auto;
+  padding: var(--sp-3) 0 var(--sp-5);
   overflow-x: hidden;
 }
 
+/* --------------------------------------------------------------------------
+   Disclosure section
+   -------------------------------------------------------------------------- */
+
+/* A hairline between sections — two identical surfaces meeting is the one
+   case the boundary rule allows a border for. */
 .pal-section + .pal-section {
-  margin-top: var(--sp-2);
-  border-top: 1px solid var(--border);
-  padding-top: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: var(--bw) solid var(--border);
 }
 
-.pal-heading {
-  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+.pal-h {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+}
+
+/* The header is the disclosure control. Full-bleed so the hit target is the
+   whole width of the rail rather than the width of the word. */
+.pal-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--sp-4);
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.pal-toggle:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.pal-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  /* Inset rather than offset: a full-bleed row has no margin to ring into,
+     and an outward ring would be clipped by the rail's overflow. */
+  outline-offset: -2px;
+  border-radius: 0;
+}
+
+/* The chevron inherits the header's colour, so it brightens with the label
+   on hover instead of staying behind at a dimmer step. */
+.pal-chev {
+  flex: none;
+  color: var(--text-faint);
+  transition:
+    transform var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.pal-toggle:hover .pal-chev {
+  color: var(--text-dim);
+}
+
+.pal-toggle[aria-expanded='true'] .pal-chev {
+  transform: rotate(90deg);
+}
+
+/* Inherits .label. The colour is overridden so the title tracks the header's
+   hover state as one unit. */
+.pal-toggle-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+}
+
+/* The count is a fact about a collapsed section, so it must stay legible
+   without pulling the eye. Tabular figures keep 3 and 14 the same width. */
+.pal-count {
+  flex: none;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.pal-body {
+  padding-top: var(--sp-1);
+}
+
+/* --------------------------------------------------------------------------
+   Group caption inside the Components section
+   -------------------------------------------------------------------------- */
+
+.pal-group + .pal-group {
+  margin-top: var(--sp-3);
+}
+
+/* Indented to the same left axis as the row NAMES, not the row chips, so the
+   caption reads as a heading for the words beneath it. Written as the sum it
+   actually is — row padding + chip + gap — so it cannot drift out of
+   alignment if any of the three changes. */
+.pal-group-title {
+  padding: var(--sp-2) var(--sp-4) var(--sp-1)
+    calc(var(--sp-4) + 22px + var(--sp-3));
+  color: var(--text-faint);
 }
 
 .pal-list {
@@ -33,9 +152,12 @@
 }
 
 /* --------------------------------------------------------------------------
-   Row. Full-bleed hit target; the hover tint is the only chrome it gets.
-   Square corners, so the active-preset rule can sit in the gutter without
-   becoming the banned rounded-box-with-a-colored-edge shape.
+   Row
+
+   Full-bleed, square-cornered. Square is deliberate: a full-bleed row that
+   is also rounded leaves slivers of panel showing at its corners, and the
+   active-preset marker can then sit in the gutter without producing the
+   rounded-box-with-a-coloured-edge shape the design rules forbid.
    -------------------------------------------------------------------------- */
 
 .pal-row {
@@ -43,16 +165,19 @@
   align-items: center;
   gap: var(--sp-3);
   width: 100%;
-  height: 40px;
+  min-height: 40px;
   padding: 0 var(--sp-4);
   border: none;
   border-radius: 0;
   background: transparent;
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-base);
+  letter-spacing: var(--tr-base);
   text-align: left;
   cursor: grab;
-  transition:
-    background-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
 .pal-row:hover {
@@ -60,56 +185,154 @@
 }
 
 .pal-row:active {
+  background: var(--surface-3);
   cursor: grabbing;
 }
 
 .pal-row:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+  border-radius: 0;
 }
 
-/* Glyph sits inline on the text baseline — no container, no fill, no box. */
+/* The chip. 22px is the smallest square that holds a 14px glyph with even
+   optical margin on all four sides. It never shrinks: `flex: none` is what
+   stops a long kind name squeezing it into a rectangle. */
 .pal-glyph {
-  flex: 0 0 14px;
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: center;
-  height: 14px;
-  color: var(--text-faint);
-  transition: color var(--dur-fast) var(--ease);
+  width: 22px;
+  height: 22px;
+  border: var(--bw) solid var(--k-stroke, var(--border-strong));
+  border-radius: var(--r-sm);
+  background: var(--k-fill, var(--surface-2));
+  color: var(--k-ink, var(--text-dim));
+  transition: transform var(--dur-fast) var(--ease);
 }
 
+/* The chip lifts very slightly on hover — enough to say "this is the thing
+   you are about to drag", not enough to read as motion. */
 .pal-row:hover .pal-glyph {
-  color: var(--text-dim);
+  transform: scale(1.06);
 }
 
 .pal-name {
+  flex: 1 1 auto;
   min-width: 0;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-body);
-  line-height: var(--lh-sm);
-  color: var(--text-dim);
-  white-space: nowrap;
+  /* "Circuit breaker" and "Load balancer" both fit a 200px rail, but a
+     narrowed rail must truncate rather than wrap a row to two lines. */
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color var(--dur-fast) var(--ease);
-}
-
-.pal-row:hover .pal-name {
-  color: var(--text);
+  white-space: nowrap;
 }
 
 /* --------------------------------------------------------------------------
-   Presets. Two lines: the name, and the failure mode it demonstrates.
-   The note is what turns a list of names into a menu of experiments.
+   Per-kind chip colours.
+
+   The only place in the app that maps a kind to its trio. Everything is a
+   token; `data-kind` is set by the component. A kind with no rule here
+   falls back to the neutral chip above rather than rendering colourless.
+   -------------------------------------------------------------------------- */
+
+.pal-row[data-kind='client'] .pal-glyph {
+  --k-fill: var(--kind-client-fill);
+  --k-stroke: var(--kind-client-stroke);
+  --k-ink: var(--kind-client-ink);
+}
+
+.pal-row[data-kind='lb'] .pal-glyph {
+  --k-fill: var(--kind-lb-fill);
+  --k-stroke: var(--kind-lb-stroke);
+  --k-ink: var(--kind-lb-ink);
+}
+
+.pal-row[data-kind='service'] .pal-glyph {
+  --k-fill: var(--kind-service-fill);
+  --k-stroke: var(--kind-service-stroke);
+  --k-ink: var(--kind-service-ink);
+}
+
+.pal-row[data-kind='cache'] .pal-glyph {
+  --k-fill: var(--kind-cache-fill);
+  --k-stroke: var(--kind-cache-stroke);
+  --k-ink: var(--kind-cache-ink);
+}
+
+.pal-row[data-kind='db'] .pal-glyph {
+  --k-fill: var(--kind-db-fill);
+  --k-stroke: var(--kind-db-stroke);
+  --k-ink: var(--kind-db-ink);
+}
+
+.pal-row[data-kind='queue'] .pal-glyph {
+  --k-fill: var(--kind-queue-fill);
+  --k-stroke: var(--kind-queue-stroke);
+  --k-ink: var(--kind-queue-ink);
+}
+
+.pal-row[data-kind='worker'] .pal-glyph {
+  --k-fill: var(--kind-worker-fill);
+  --k-stroke: var(--kind-worker-stroke);
+  --k-ink: var(--kind-worker-ink);
+}
+
+.pal-row[data-kind='replica'] .pal-glyph {
+  --k-fill: var(--kind-replica-fill);
+  --k-stroke: var(--kind-replica-stroke);
+  --k-ink: var(--kind-replica-ink);
+}
+
+.pal-row[data-kind='shard'] .pal-glyph {
+  --k-fill: var(--kind-shard-fill);
+  --k-stroke: var(--kind-shard-stroke);
+  --k-ink: var(--kind-shard-ink);
+}
+
+.pal-row[data-kind='autoscaler'] .pal-glyph {
+  --k-fill: var(--kind-autoscaler-fill);
+  --k-stroke: var(--kind-autoscaler-stroke);
+  --k-ink: var(--kind-autoscaler-ink);
+}
+
+.pal-row[data-kind='region'] .pal-glyph {
+  --k-fill: var(--kind-region-fill);
+  --k-stroke: var(--kind-region-stroke);
+  --k-ink: var(--kind-region-ink);
+}
+
+.pal-row[data-kind='cdn'] .pal-glyph {
+  --k-fill: var(--kind-cdn-fill);
+  --k-stroke: var(--kind-cdn-stroke);
+  --k-ink: var(--kind-cdn-ink);
+}
+
+.pal-row[data-kind='ratelimiter'] .pal-glyph {
+  --k-fill: var(--kind-ratelimiter-fill);
+  --k-stroke: var(--kind-ratelimiter-stroke);
+  --k-ink: var(--kind-ratelimiter-ink);
+}
+
+.pal-row[data-kind='breaker'] .pal-glyph {
+  --k-fill: var(--kind-breaker-fill);
+  --k-stroke: var(--kind-breaker-stroke);
+  --k-ink: var(--kind-breaker-ink);
+}
+
+/* --------------------------------------------------------------------------
+   Preset rows
+
+   Taller than a component row because they carry two lines, and a click
+   here replaces the whole canvas — an inviting target, not a list item.
    -------------------------------------------------------------------------- */
 
 .pal-row-preset {
-  flex-direction: column;
   align-items: flex-start;
-  justify-content: center;
-  gap: 0;
-  height: 44px;
+  min-height: 48px;
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  gap: var(--sp-2);
   cursor: pointer;
 }
 
@@ -117,67 +340,117 @@
   cursor: pointer;
 }
 
-.pal-note {
-  display: block;
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* The active marker occupies a slot on every row, filled or not, so the
+   preset names all sit on one left axis regardless of which is loaded.
+   22px matches the component chip, so the two lists share an axis too. */
+.pal-mark {
+  flex: none;
+  width: 22px;
+  /* Matches the cap height of the first line, so the dot sits on the
+     name's optical centre rather than the row's geometric one. */
+  height: 22px;
+  position: relative;
 }
 
-/* Active preset: an accent rule in the gutter plus a brighter name.
-   Not a filled pill. The rule is drawn as a border on a square-cornered
-   element, so it never becomes a rounded box with one colored edge. */
-.pal-row-preset[data-active] {
-  border-left: 2px solid var(--accent);
-  padding-left: calc(var(--sp-4) - 2px);
-  background: var(--surface-2);
+.pal-mark::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: var(--r-pill);
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.pal-row-preset[data-active] .pal-mark::after {
+  background: var(--accent);
 }
 
 .pal-row-preset[data-active] .pal-name {
-  color: var(--text);
+  font-weight: var(--fw-med);
+  color: var(--accent-ink);
+}
+
+.pal-preset-text {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* A preset name may run to two lines rather than truncate — the name is the
+   thing being chosen, so it is never abbreviated. The row grows instead. */
+.pal-row-preset .pal-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: var(--lh-sm);
+}
+
+/* The note is the reason to click this row, so it reads as prose in
+   sentence case rather than as an uppercase tag. Overrides the .label
+   defaults it inherits from the markup. */
+.pal-note {
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-faint);
+}
+
+.pal-row-preset:hover .pal-note {
+  color: var(--text-dim);
 }
 
 /* --------------------------------------------------------------------------
-   Key reference. Fills the tail of the rail with something true.
-   -------------------------------------------------------------------------- */
+   Keyboard reference
 
-.pal-keys {
-  margin-top: auto;
-}
+   A definition list, aligned on one axis. The key caps are the only
+   bordered boxes in the rail, and they earn it: a cap has to look like a
+   key or it reads as emphasis.
+   -------------------------------------------------------------------------- */
 
 .pal-keylist {
   margin: 0;
-  padding: 0 var(--sp-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-4) 0;
 }
 
 .pal-keyrow {
   display: flex;
   align-items: baseline;
-  gap: var(--sp-2);
-  min-width: 0;
+  gap: var(--sp-3);
+  min-height: 28px;
 }
 
 .pal-key {
-  flex: 0 0 auto;
-  min-width: 38px;
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-body);
-  line-height: var(--lh-sm);
+  flex: none;
+  /* Wide enough for "Shift", the longest cap, so every description starts
+     on the same axis instead of stepping in and out with the key width. */
+  width: 44px;
+  padding: 2px 0;
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
   color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-med);
+  line-height: var(--lh-label);
+  letter-spacing: 0;
+  text-align: center;
 }
 
 .pal-keydesc {
-  margin: 0;
+  flex: 1 1 auto;
   min-width: 0;
+  margin: 0;
   font-size: var(--fs-sm);
-  font-weight: var(--fw-body);
   line-height: var(--lh-sm);
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--text-dim);
 }

@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import type {
+  EdgeState,
   FailureKind,
   NodeKind,
   NodeStats,
@@ -23,7 +24,11 @@ import {
   GLYPH_BOX,
   KIND_NAME,
   NODE_DND_MIME,
+  cellStrip,
+  stackBadge,
+  stackLayers,
 } from './nodeVisuals';
+import { behaviourFor } from '../sim/behaviour';
 import {
   formatCount,
   formatMs,
@@ -59,6 +64,14 @@ export const NODE_W = 184;
 export const NODE_H = 88;
 /** Radii come from the design scale (3/4/6). The node body is the 6. */
 const NODE_R = 6;
+/**
+ * Gap between the node's outline and the selection ring drawn around it.
+ *
+ * 3px. Large enough that the ring is a separate object rather than a fringe
+ * on the border, small enough that at 0.4x zoom (where it is 1.2 device px)
+ * the ring has not visually detached from the node it belongs to.
+ */
+const RING_GAP = 3;
 
 /**
  * Internal layout.
@@ -96,6 +109,17 @@ export const SPARK_LEN = 60;
  * is the redundant, colour-blind-safe encoding of load, so it needs the
  * longest run the node can give it to be readable at a glance.
  */
+/**
+ * The per-unit strip's band: full inner width, in the gap above the meter.
+ *
+ * A shard's partitions are the node's primary content, so the strip gets the
+ * full 160px rather than the sparkline's 64px slot. That width is what keeps
+ * 64 partitions legible: 64 cells in 64px is 1.00px each, which cannot carry
+ * a readable fill height, while 64 cells in 160px is 2.50px each, which can.
+ */
+const STRIP_Y = 56;
+const STRIP_H = 12;
+
 const METER_Y = 80;
 const METER_H = 3;
 const METER_W = NODE_W - PAD_X * 2;
@@ -129,9 +153,16 @@ const DETAIL_ZOOM = 0.7;
 /** Below this only the name, health rule and meter survive. */
 const MINIMAL_ZOOM = 0.5;
 
-/** Auto-fit margin and clamp. 1.5 stops a 3-node preset becoming a billboard. */
+/** Auto-fit margin and clamp. 1.5 stops a 3-node preset becoming a billboard.
+ *
+ * FIT_MIN is deliberately DETAIL_ZOOM, not a rounder 0.6. Auto-fit runs on
+ * every preset load, so it decides what a student sees first — and at 0.6
+ * the fitted view landed in the 0.6-0.7 band where the body numbers are
+ * suppressed, presenting the flagship preset as a row of empty boxes. The
+ * floor and the legibility threshold are the same number by definition:
+ * never auto-fit to a zoom at which the diagram stops showing its data. */
 const FIT_MARGIN = 64;
-const FIT_MIN = 0.6;
+const FIT_MIN = DETAIL_ZOOM;
 const FIT_MAX = 1.5;
 
 /**
@@ -309,6 +340,59 @@ function readoutFor(
       };
     }
 
+    /**
+     * A shard reports its HOTTEST partition, not its mean.
+     *
+     * The mean is the number that lies. Measured on the real engine at
+     * hotKeyFraction 0.85 with 8 partitions: the node mean sat at 0.17 —
+     * comfortably "ok", green meter, nothing to see — while partition 0 was
+     * pinned at 1.00. A student watching the mean would conclude the store
+     * had 83% headroom at the exact moment one partition was melting.
+     *
+     * So the primary is the max, the meter is driven by the max, and health
+     * is judged on the max. The strip beside it shows the spread that the
+     * single number cannot, and `min` is reported next to it precisely so the
+     * GAP between them is legible: 100% hot against 0% cold is the signature
+     * of a hot key, and it is unmissable when both are printed.
+     */
+    case 'shard': {
+      const hot = clamp(s.maxShardUtilization, 0, 1);
+      return {
+        primary: { value: formatPct(hot), label: 'hot shard' },
+        a: { value: formatPct(clamp(s.minShardUtilization, 0, 1)), label: 'coldest' },
+        b: { value: formatCount(s.queued), label: 'queue' },
+        load: hot,
+        health: healthOfLoad(hot),
+        spark: hot,
+        losing,
+      };
+    }
+
+    /**
+     * A replica set reports its stale-read rate when there is one.
+     *
+     * Replication lag is the entire reason a read replica is a different
+     * component from a database, and it was previously invisible. It is shown
+     * only when non-zero: a synchronous set (replicationLagMs 0) never goes
+     * stale, and printing "0% stale" on it forever would train the student to
+     * stop reading the field before it ever had something to say.
+     */
+    case 'replica': {
+      const stale = clamp(s.staleReadRate, 0, 1);
+      return {
+        primary: { value: formatPct(util), label: 'util' },
+        a: { value: formatMs(s.p99), label: 'p99' },
+        b:
+          stale > 0
+            ? { value: formatPct(stale), label: 'stale' }
+            : { value: formatCount(s.queued), label: 'queue' },
+        load: util,
+        health: healthOfLoad(util),
+        spark: util,
+        losing,
+      };
+    }
+
     // service, db, worker
     default:
       return {
@@ -410,6 +494,35 @@ const Spark = memo(function Spark({ data, unit }: SparkProps) {
  */
 const GLYPH_PX = 18;
 const GLYPH_SCALE = GLYPH_PX / GLYPH_BOX;
+
+/**
+ * Trim a node label to what actually fits on the node.
+ *
+ * Width is estimated rather than measured, deliberately. Measuring would mean
+ * getComputedTextLength() on every node on every one of the 10Hz snapshots —
+ * a forced synchronous layout per node per tick, which is precisely the kind
+ * of thing that turns a smooth canvas into a stuttering one. An estimate that
+ * is slightly conservative costs at most one character of a label; a layout
+ * thrash costs frames.
+ *
+ * 0.55em per character is the average advance width of the UI sans stack at
+ * 14px across mixed-case text. Capitals run wider, so the result errs toward
+ * trimming one character early on a SHOUTY LABEL, which is the harmless
+ * direction to be wrong in.
+ */
+const NAME_CHAR_W = 0.55 * 14;
+
+function truncateLabel(label: string, showHeader: boolean): string {
+  const startX = showHeader ? PAD_X + GLYPH_PX + 8 : PAD_X;
+  // Reserve room for the status mark in the top-right corner when it can
+  // appear, so a long name never collides with the warn/danger/fault mark.
+  const avail = NODE_W - PAD_X - startX - (showHeader ? 12 : 0);
+  const max = Math.floor(avail / NAME_CHAR_W);
+  if (max <= 1 || label.length <= max) return label;
+  // U+2026, one glyph, so the ellipsis costs a single character of budget
+  // rather than the three that "..." would.
+  return `${label.slice(0, max - 1).trimEnd()}…`;
+}
 
 const Glyph = memo(function Glyph({ kind }: { kind: NodeKind }) {
   const filled = FILLED_GLYPHS.has(kind);
@@ -520,6 +633,24 @@ interface EdgeViewProps {
   bx: number;
   by: number;
   flow: number;
+  /**
+   * Why this wire is or is not carrying traffic, straight from the engine.
+   *
+   * This is NOT derivable from `flow`, and assuming it was is the specific
+   * dishonesty this prop exists to fix. Measured on the circuit-breaker
+   * preset at 3x load: for 665 of 900 frames the breaker's downstream edge
+   * was 'blocked', and `edgeFlow` on that edge read as high as 314 rps the
+   * whole time — that number is traffic ARRIVING at the breaker and being
+   * failed fast, not traffic crossing to payments. Drawing width from flow
+   * alone painted the single most severed link on the canvas as one of the
+   * thickest and busiest. State gates flow; it does not blend with it.
+   */
+  state: EdgeState;
+  /**
+   * True when this edge is a CONTROL relationship — an autoscaler driving the
+   * node it resizes — rather than a request path. No request ever crosses it.
+   */
+  control: boolean;
   selected: boolean;
   /** Health of the TARGET node — a failing sink colors its inbound wire. */
   targetHealth: Health;
@@ -533,6 +664,8 @@ const EdgeView = memo(function EdgeView({
   bx,
   by,
   flow,
+  state,
+  control,
   selected,
   targetHealth,
   showLabel,
@@ -545,8 +678,19 @@ const EdgeView = memo(function EdgeView({
   const tipX = bx - 2;
   const d = edgePath(ax, ay, tipX - ARROW_INSET, by);
 
-  const width = edgeWidth(flow);
-  const active = flow > 0.05;
+  /**
+   * A wire that cannot carry traffic is never drawn as if it might.
+   *
+   * `cut` and `blocked` are STRUCTURAL assertions the engine stands behind:
+   * nothing is crossing, whatever `edgeFlow` says about what is arriving at
+   * the source. Both therefore force the width to its minimum and kill the
+   * flow animation outright, rather than being tinted variants of a live
+   * wire. A control edge is the same case for a different reason — it is not
+   * a request path at all — so it also never animates.
+   */
+  const severed = state === 'cut' || state === 'blocked';
+  const width = severed || control ? 1 : edgeWidth(flow);
+  const active = !severed && !control && flow > 0.05;
 
   /**
    * Flow is encoded as dash DENSITY, and the animation only carries speed.
@@ -576,22 +720,38 @@ const EdgeView = memo(function EdgeView({
     } as CSSProperties;
   }, [active, flow]);
 
-  // Label anchor. The routed path's vertical leg sits at `mid`, so the visual
-  // centre of the wire is there rather than at the straight-line midpoint.
-  const dxTotal = bx - ax;
-  const midX =
-    Math.abs(by - ay) < 1
-      ? (ax + bx) / 2
-      : dxTotal > EDGE_STUB * 2
-        ? ax + Math.max(EDGE_STUB, dxTotal / 2)
-        : ax + EDGE_STUB;
+  /**
+   * Anchor for the flow label and the delete button.
+   *
+   * This must land on a part of the wire that is NOT covered by a node, and
+   * that is a stricter requirement than "the middle of the path". Nodes are
+   * painted after edges, so anything the edge draws underneath a node body is
+   * both invisible and unclickable — the delete button silently stopped
+   * working on exactly those edges, which is the same class of dead-overlay
+   * bug the input rebuild was done to kill.
+   *
+   * The safe region is the horizontal GAP between the source's exit port and
+   * the target's entry port. Both ports sit on node edges, so the span
+   * strictly between them is the one stretch of wire guaranteed to be clear
+   * of both endpoints. When the target is to the LEFT of the source (a
+   * back-edge, which routes out and around) that gap is empty or inverted, so
+   * the anchor falls back to the outbound stub, which is always exposed.
+   */
+  const gap = bx - ARROW_INSET - ax;
+  const midX = gap > EDGE_STUB ? ax + gap / 2 : ax + EDGE_STUB;
   const midY = (ay + by) / 2;
 
   return (
     <g
       className={`cv-edge${selected ? ' is-selected' : ''}${
         active ? ' is-active' : ''
-      } is-${targetHealth}`}
+      }${control ? ' is-control' : ''} is-state-${state} is-${
+        /* A severed wire takes its own state, not the health of the node
+           behind it. A breaker that is doing its job protects a downstream
+           that is failing, so colouring the blocked wire by that downstream's
+           danger would paint the protection and the problem identically. */
+        severed || control ? 'ok' : targetHealth
+      }`}
     >
       {/* Fat invisible hit area — a 1px line is impossible to click. The
           data-* attributes are what the surface's pointerdown router reads;
@@ -620,6 +780,42 @@ const EdgeView = memo(function EdgeView({
         className="cv-edge-arrow"
       />
 
+      {/*
+        THE BREAK. A severed wire gets a physical gap with two cut ends, not
+        just a fainter stroke.
+
+        This is the difference between "quiet" and "disconnected", and it has
+        to survive being read at a glance across a diagram. A dashed grey line
+        reads as low traffic; a line with a piece visibly MISSING from it
+        reads as broken, which is what has actually happened. The mark is
+        drawn over the wire's own midpoint gap, so the wire appears to stop,
+        break, and resume.
+      */}
+      {severed && (
+        <g className="cv-edge-break" transform={`translate(${midX},${midY})`}>
+          <rect className="cv-edge-break-gap" x={-7} y={-7} width={14} height={14} />
+          <path
+            className="cv-edge-break-mark"
+            d="M-4.5,-5 L-1.5,0 L-4.5,5 M4.5,-5 L1.5,0 L4.5,5"
+          />
+        </g>
+      )}
+
+      {/*
+        A control edge says what it IS, in a word.
+
+        The dashing and the hollow arrowhead already separate it from a
+        request path, but "this line means something categorically different"
+        is not a thing a student can be expected to infer from a stroke
+        pattern. One word removes the guess. It is shown at the same zoom the
+        rate labels appear at, so it obeys the existing detail budget.
+      */}
+      {showLabel && control && (
+        <text className="cv-edge-label is-control" x={midX} y={midY - 6}>
+          scales
+        </text>
+      )}
+
       {/* How traffic splits at a fan-out. Invisible before this change. */}
       {showLabel && active && (
         <text className="cv-edge-label" x={midX} y={midY - 6}>
@@ -640,6 +836,187 @@ const EdgeView = memo(function EdgeView({
           <path d="M-3.5,-3.5 L3.5,3.5 M3.5,-3.5 L-3.5,3.5" />
         </g>
       )}
+    </g>
+  );
+});
+
+/* ================================================================== *
+ * What a node is MADE OF
+ *
+ * Four small components, one per structural truth the engine exposes and the
+ * canvas used to throw away. Each is memoised separately from the node body
+ * so that a node whose structure did not change this frame does not re-render
+ * its units just because its p99 moved.
+ *
+ * The shared rule for all four: EVERY element they emit is
+ * `pointer-events: none` (set in Canvas.css on `.cv-units`, `.cv-strip`,
+ * `.cv-vessel` and their children). They are decoration painted inside the
+ * node group, and the node group already carries the `data-hit="node"` that
+ * the pointer router reads. If any of these could take a pointer, a press on
+ * a shard cell would resolve to the cell rather than to the node, and
+ * `closest('[data-hit]')` would still find the node — but the extra elements
+ * would sit above the ports' 15px hit discs and eat link gestures near the
+ * node's edges. Making them inert is what keeps the input layer untouched.
+ * ================================================================== */
+
+/**
+ * The layered cards behind a node body that say "this is several machines".
+ *
+ * Drawn as siblings BEHIND the body rect (earlier in paint order), each
+ * offset up and to the right, so the node reads as the front card of a stack.
+ * Offsetting up-right rather than down-right matters: down-right would push
+ * the stack toward the meter and the ports, which live along the bottom and
+ * sides, and would collide with the node below in a stacked preset.
+ */
+const InstanceStack = memo(function InstanceStack({
+  live,
+  pending,
+}: {
+  live: number;
+  pending: number;
+}) {
+  const layers = stackLayers(live, pending);
+  if (layers.length === 0) return null;
+  return (
+    <g className="cv-units" aria-hidden="true">
+      {layers.map((l) => (
+        <rect
+          key={`${l.offset}-${l.pending ? 'p' : 'l'}`}
+          className={l.pending ? 'cv-unit is-pending' : 'cv-unit'}
+          x={l.offset}
+          y={-l.offset}
+          width={NODE_W}
+          height={NODE_H}
+          rx={NODE_R}
+          ry={NODE_R}
+        />
+      ))}
+    </g>
+  );
+});
+
+/**
+ * A strip of per-unit cells, each filled by that unit's own utilisation.
+ *
+ * This is the sharding lesson in one object. The node-level `utilization` a
+ * shard reports is the MEAN across partitions, and with a hot key that mean is
+ * reassuring while one partition is pinned at 1.0 — measured on the real
+ * engine at hotKeyFraction 0.85: per-shard [1.00, 0.10, 0.05, 0.03, 0.09,
+ * 0.00, 0.07, 0.03] against a node mean of 0.17. A single meter cannot say
+ * that. Eight cells can, instantly, without a number being read.
+ *
+ * Each cell fills from the BOTTOM like a column of liquid, so the strip reads
+ * as a bar chart of load rather than as a row of status lights. A cell at or
+ * past the danger threshold also gets a class, so colour is a redundant
+ * channel on top of height rather than the only one.
+ */
+const UnitStrip = memo(function UnitStrip({
+  values,
+  x,
+  y,
+  width,
+  height,
+  /** Index that should be marked as structurally distinct (a replica primary). */
+  leadIndex = -1,
+}: {
+  values: readonly number[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  leadIndex?: number;
+}) {
+  const n = values.length;
+  if (n === 0) return null;
+  const strip = cellStrip(n, width);
+  return (
+    <g className="cv-strip" transform={`translate(${x},${y})`} aria-hidden="true">
+      {values.map((raw, i) => {
+        const v = clamp(Number.isFinite(raw) ? raw : 0, 0, 1);
+        // Never render a busy unit as an empty cell: the same
+        // never-print-zero rule the meter follows. 1px of fill is the
+        // difference between "idle" and "barely working", and at these cell
+        // sizes it is the smallest mark that still resolves.
+        const fh = v > 0 ? Math.max(1, v * height) : 0;
+        const cls = [
+          'cv-cell-fill',
+          healthOfLoad(v) === 'danger' ? 'is-danger' : healthOfLoad(v) === 'warn' ? 'is-warn' : '',
+          i === leadIndex ? 'is-lead' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        return (
+          <g key={i}>
+            <rect
+              className={i === leadIndex ? 'cv-cell is-lead' : 'cv-cell'}
+              x={strip.x(i)}
+              y={0}
+              width={strip.w}
+              height={height}
+            />
+            {fh > 0 && (
+              <rect
+                className={cls}
+                x={strip.x(i)}
+                y={height - fh}
+                width={strip.w}
+                height={fh}
+              />
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+});
+
+/**
+ * A queue drawn as a vessel filling toward its limit.
+ *
+ * A queue's `utilization` is structurally ZERO — measured on async-workers
+ * under 2.5x load: depth climbed 369 -> 946 -> 2478 while utilisation stayed
+ * at 0.00 the whole time, because a buffer holds work rather than serving it.
+ * So the standard meter on a queue node was not merely uninformative, it was
+ * pinned empty while the backlog ran away. Depth against limit is the only
+ * honest reading, and it is the one a student can watch fill and drain.
+ *
+ * At the limit the vessel gains a shedding state, because that is the moment
+ * the queue stops being a buffer and starts destroying requests.
+ */
+const QueueVessel = memo(function QueueVessel({
+  depth,
+  limit,
+  shedding,
+  x,
+  y,
+  width,
+  height,
+}: {
+  depth: number;
+  limit: number;
+  shedding: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}) {
+  const lim = limit > 0 ? limit : 1;
+  const fill = clamp(depth / lim, 0, 1);
+  const fw = fill > 0 ? Math.max(1.5, fill * width) : 0;
+  return (
+    <g
+      className={shedding ? 'cv-vessel is-shedding' : 'cv-vessel'}
+      transform={`translate(${x},${y})`}
+      aria-hidden="true"
+    >
+      <rect className="cv-vessel-track" x={0} y={0} width={width} height={height} rx={2} />
+      {fw > 0 && (
+        <rect className="cv-vessel-fill" x={0} y={0} width={fw} height={height} rx={2} />
+      )}
+      {/* The limit wall. A vessel with no visible brim gives the fill nothing
+          to be full AGAINST, so a backlog of 2478 and one of 80 look the same
+          when both are drawn against their own scale. */}
+      <rect className="cv-vessel-brim" x={width - 1} y={-1} width={1.5} height={height + 2} />
     </g>
   );
 });
@@ -693,6 +1070,38 @@ const NodeView = memo(function NodeView({
   // A faulted node is never reported as healthy, whatever its metrics say.
   const health: Health = fault ? 'danger' : readout ? readout.health : 'ok';
 
+  /* ---- structure: what this node is made of -----------------------
+     `instances === undefined` means "this kind is genuinely one thing" and
+     must fall back to the scalar meters — never be treated as zero. That is
+     the engine's documented contract, and it is why every branch below tests
+     for undefined rather than for a count. */
+  const units = stats?.perInstance;
+  const pending = stats?.instancesPending ?? 0;
+  const badge = stackBadge(stats?.instances);
+
+  /**
+   * Which structural drawing this kind gets. One kind, one answer — the
+   * three are mutually exclusive, so a node can never draw two competing
+   * pictures of itself.
+   *
+   *   strip   the units are INDEPENDENT and their individual values carry
+   *           the lesson (shard partitions, replica set members).
+   *   vessel  the node is a buffer, and depth-against-limit is the reading
+   *           (queue).
+   *   stack   the units are INTERCHANGEABLE machines and the count is the
+   *           lesson (service, worker, db, cache, lb, cdn).
+   */
+  const structure: 'strip' | 'vessel' | 'stack' | 'none' =
+    node.kind === 'shard' || node.kind === 'replica'
+      ? 'strip'
+      : node.kind === 'queue'
+        ? 'vessel'
+        : units && units.length > 1
+          ? 'stack'
+          : pending > 0
+            ? 'stack'
+            : 'none';
+
   const handleKey = useCallback(
     (e: React.KeyboardEvent<SVGGElement>) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -744,9 +1153,28 @@ const NodeView = memo(function NodeView({
       role="button"
       aria-label={
         [
-          KIND_NAME[node.kind],
+          // The kind is dropped when the user's own label already says it, so
+          // a node called "Database" is announced once, not as "Database,
+          // Database". Compared case-insensitively because the label is free
+          // text the student typed.
+          node.label.trim().toLowerCase() === KIND_NAME[node.kind].toLowerCase()
+            ? null
+            : KIND_NAME[node.kind],
           node.label,
           readout ? `${readout.primary.value} ${readout.primary.label}` : null,
+          /* The structure is announced, not just drawn. A stack of cards, a
+             strip of partitions and a filling vessel are all pure geometry —
+             a screen-reader user has no access to any of them, and they are
+             the whole point of this pass. Said in words rather than as a
+             count alone: "4 partitions" beats "4x". */
+          badge
+            ? node.kind === 'shard'
+              ? `${stats?.instances} partitions`
+              : node.kind === 'replica'
+                ? `primary plus ${(stats?.instances ?? 1) - 1} read replicas`
+                : `${stats?.instances} instances`
+            : null,
+          pending > 0 ? `${pending} warming up` : null,
           // The fault is announced, not just drawn: a screen-reader user has
           // no access to the square mark in the corner.
           fault ? `faulted: ${fault}` : null,
@@ -757,8 +1185,18 @@ const NodeView = memo(function NodeView({
       aria-pressed={selected}
       data-hit="node"
       data-id={node.id}
+      /* Drives the per-kind colour trio in Canvas.css. Identity is expressed
+         entirely through CSS custom properties keyed off this one attribute,
+         so no colour value is ever computed in JS. */
+      data-kind={node.kind}
       onKeyDown={handleKey}
     >
+      {/* The fleet, BEHIND the body. Painted first so the body is the front
+          card of the stack rather than an object sitting on top of one. */}
+      {structure === 'stack' && showHeader && (
+        <InstanceStack live={units?.length ?? 1} pending={pending} />
+      )}
+
       {/* Body. One surface. No header band fill, no card-in-card. */}
       <rect
         className="cv-node-body"
@@ -771,30 +1209,43 @@ const NodeView = memo(function NodeView({
       {/*
         Selection ring.
 
-        Drawn as a SEPARATE inset rect rather than as a border on the body,
-        for two reasons. It can be 2px without changing the body's geometry
-        (a thicker border would shift every child by a pixel), and it can sit
-        slightly inside the edge so the accent reads as a ring around the node
-        rather than as the node's own outline. This is the single most
-        important state in the canvas — the user said selection was
-        unmistakably bad — so it gets its own element and the only cool colour
-        on screen.
+        Drawn as a SEPARATE rect OUTSIDE the body, offset by 3px, rather than
+        as a border on the body itself. Three reasons, and on a per-kind
+        palette the third is decisive:
+
+          - it can be 2px without changing the body's geometry (a thicker
+            border would shift every child by a pixel);
+          - offsetting it outward leaves a 3px gap of raw canvas between ring
+            and node, and that gap is what makes it read as a ring AROUND the
+            component rather than as a recolouring of its outline;
+          - the node now has its own kind colour on its border. If selection
+            simply repainted that border, selecting a node would destroy the
+            identity cue the whole redesign exists to establish. Keeping them
+            on separate geometry means a selected database is still visibly
+            a database.
+
+        Measured: --accent against the palest of the fourteen kind fills is
+        5.42:1, so the ring is unmistakable on every node in the system.
       */}
       {selected && (
         <rect
           className="cv-node-ring"
-          x={1}
-          y={1}
-          width={NODE_W - 2}
-          height={NODE_H - 2}
-          rx={NODE_R - 1}
-          ry={NODE_R - 1}
+          x={-RING_GAP}
+          y={-RING_GAP}
+          width={NODE_W + RING_GAP * 2}
+          height={NODE_H + RING_GAP * 2}
+          rx={NODE_R + RING_GAP}
+          ry={NODE_R + RING_GAP}
         />
       )}
 
-      {/* Health rule: a 1.5px bar inset from the rounded corners, along the
-          top edge. Paints --status, so it is invisible-by-neutral at ok and
-          the only warm mark on the node at warn/danger. */}
+      {/* Kind rule: a 1.5px bar inset from the rounded corners along the top
+          edge, carrying the component's own colour.
+
+          This used to be a third health channel. It is not any more: health
+          now lives on the meter, inside the node, so that the kind colour
+          (identity, on the border) and the health colour (state, inside)
+          never meet at an edge and fight. See the note in Canvas.css. */}
       <rect
         className="cv-node-rule"
         x={NODE_R}
@@ -822,12 +1273,29 @@ const NodeView = memo(function NodeView({
         </>
       )}
 
+      {/*
+        The node name, truncated to the width actually available.
+
+        SVG <text> has no text-overflow: it simply paints past its container,
+        so a long label used to run straight out of the node and across the
+        canvas (measured: 125px of overhang on a 36-character label, over open
+        background and neighbouring wires). Since the student types this
+        label, "nobody would do that" is not a defence.
+
+        The budget is derived from the real geometry rather than hardcoded, so
+        it stays correct if the glyph size or insets ever change. The full
+        label is always available: it is in the accessible name, and <title>
+        gives it a native hover tooltip.
+      */}
       <text
         className="cv-node-name"
         x={showHeader ? PAD_X + GLYPH_PX + 8 : PAD_X}
         y={showHeader ? 21 : 24}
       >
-        {node.label}
+        {truncateLabel(node.label, showHeader)}
+        {truncateLabel(node.label, showHeader) !== node.label && (
+          <title>{node.label}</title>
+        )}
       </text>
 
       {/*
@@ -853,6 +1321,30 @@ const NodeView = memo(function NodeView({
         <circle className="cv-node-mark is-warn" cx={NODE_W - PAD_X - 3.5} cy={12.5} r={3} />
       )}
 
+      {/*
+        Unit count. The PRECISE channel for how many things this node is,
+        where the stack behind it is only the approximate one — past five
+        instances the stack stops growing and this is what still tells the
+        truth. Sits left of the status mark so the two never overlap, and is
+        suppressed entirely at one unit (see stackBadge).
+
+        `+n` is appended while units are warming up. That is a different claim
+        from the count itself — "5 running, 3 on the way" — and keeping it in
+        one label rather than two stops a scaling node from gaining and losing
+        a whole separate element every few seconds.
+      */}
+      {showHeader && badge && (
+        <text
+          className={pending > 0 ? 'cv-node-badge is-warming' : 'cv-node-badge'}
+          x={NODE_W - PAD_X - (fault || health !== 'ok' ? 12 : 0)}
+          y={16}
+          textAnchor="end"
+        >
+          {badge}
+          {pending > 0 ? `+${pending}` : ''}
+        </text>
+      )}
+
       {full && readout && (
         <>
           <text className="cv-node-primary" x={PAD_X} y={52}>
@@ -862,20 +1354,95 @@ const NodeView = memo(function NodeView({
             </tspan>
           </text>
 
-          <Spark data={spark} unit={sparkUnit} />
+          {/*
+            The sparkline slot carries the STRUCTURE when the node has one,
+            and the trend otherwise.
 
-          <text className="cv-node-sec" x={PAD_X} y={70}>
-            <tspan className="cv-val">{readout.a.value}</tspan>
-            <tspan className="cv-cap" dx={3}>
-              {readout.a.label}
-            </tspan>
-          </text>
-          <text className="cv-node-sec" x={PAD_X + 56} y={70}>
-            <tspan className="cv-val">{readout.b.value}</tspan>
-            <tspan className="cv-cap" dx={3}>
-              {readout.b.label}
-            </tspan>
-          </text>
+            For a shard or a replica set this is a straight upgrade, not a
+            trade: the sparkline there plots the node-level MEAN, which is the
+            single most misleading number those two kinds produce. A shard at
+            hotKeyFraction 0.85 traces a calm flat 0.17 while partition 0 is
+            pinned at 1.00 and shedding. The strip shows both facts at once and
+            the trend is still available on the meter and in the Inspector.
+          */}
+          {structure === 'strip' && units ? (
+            <UnitStrip
+              values={units}
+              /* FULL BODY WIDTH, not the sparkline's 64px slot.
+
+                 For a shard the strip is not a secondary indicator sitting
+                 beside the numbers — it IS the node's primary content, and
+                 the width directly buys legibility at high partition counts.
+                 Measured: 64 partitions in the 64px slot gives 1.00px cells,
+                 which is below the point where a fill height can be read; the
+                 same 64 partitions across the full 160px inner width give
+                 2.50px cells, which still resolve as distinct bars. The
+                 numbers move left to their own column to make room. */
+              x={PAD_X}
+              /* Sits in the band between the secondary readout (baseline 70)
+                 and the meter (80): a 10px strip at y=58 clears the primary
+                 text above it and the meter below without either moving. */
+              y={STRIP_Y}
+              width={METER_W}
+              height={STRIP_H}
+              // A replica set is [primary, ...replicas]: index 0 is a
+              // different KIND of thing from the rest, not just another
+              // member, and the write pool saturating while the read set
+              // idles is the lesson. A shard has no privileged partition.
+              leadIndex={node.kind === 'replica' ? 0 : -1}
+            />
+          ) : structure === 'vessel' && stats ? (
+            <QueueVessel
+              depth={stats.queued}
+              limit={stats.queueLimit}
+              shedding={stats.shedRate > 0}
+              x={SPARK_X}
+              y={SPARK_Y + SPARK_H - 10}
+              width={SPARK_W}
+              height={10}
+            />
+          ) : (
+            <Spark data={spark} unit={sparkUnit} />
+          )}
+
+          {/*
+            The two secondary metrics are anchored to OPPOSITE edges — the
+            first to the left inset, the second to the right — rather than the
+            second sitting at a fixed x offset from the first.
+
+            The fixed offset was a real bug, not a style preference: it
+            assumed the left metric never got wide. At three-digit latency
+            ("117ms P99") the left pair overran the offset and printed
+            straight through the right pair, rendering "P99" and "89%" on top
+            of each other. Anchoring them to opposite edges makes the two grow
+            AWAY from one another, so the gap between them shrinks under
+            pressure instead of going negative.
+          */}
+          {/* The strip occupies this row and already shows the spread these
+              two numbers summarise, so they are dropped for those kinds
+              rather than printed on top of it. The exact hottest/coldest
+              figures remain one click away in the Inspector. */}
+          {structure !== 'strip' && (
+            <>
+              <text className="cv-node-sec" x={PAD_X} y={70}>
+                <tspan className="cv-val">{readout.a.value}</tspan>
+                <tspan className="cv-cap" dx={3}>
+                  {readout.a.label}
+                </tspan>
+              </text>
+              <text
+                className="cv-node-sec"
+                x={NODE_W - PAD_X}
+                y={70}
+                textAnchor="end"
+              >
+                <tspan className="cv-val">{readout.b.value}</tspan>
+                <tspan className="cv-cap" dx={3}>
+                  {readout.b.label}
+                </tspan>
+              </text>
+            </>
+          )}
         </>
       )}
 
@@ -1846,6 +2413,32 @@ export default function Canvas({
   }, [snapshot]);
 
   /**
+   * Which edges are CONTROL relationships rather than request paths.
+   *
+   * The rule is read from the behaviour registry rather than restated here,
+   * so the canvas and the engine cannot drift apart about what a control edge
+   * is. The engine's definition is exactly this OR: an explicit
+   * `SimEdge.control` flag, or a source whose kind only ever supervises. The
+   * OR is why no preset needed a flag added — an autoscaler's edge is control
+   * because of what an autoscaler IS.
+   *
+   * Depends only on the topology, not the snapshot, so it survives every
+   * frame of a running simulation without recomputing.
+   */
+  const controlEdges = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of topology.edges) {
+      if (e.control) {
+        set.add(e.id);
+        continue;
+      }
+      const src = nodeById.get(e.from);
+      if (src && behaviourFor(src.kind).controlsTarget) set.add(e.id);
+    }
+    return set;
+  }, [topology.edges, nodeById]);
+
+  /**
    * Health per node, so an edge can be colored by the state of the node it
    * feeds. Computed once per snapshot rather than per edge.
    *
@@ -1908,7 +2501,9 @@ export default function Canvas({
     backgroundSize: `${minor}px ${minor}px, ${minor}px ${minor}px, ${major}px ${major}px, ${major}px ${major}px`,
     backgroundPosition: `${view.x}px ${view.y}px`,
     // Fade the grid out as the diagram shrinks past the point where rules help.
-    opacity: view.k < MINIMAL_ZOOM ? 0 : view.k < FIT_MIN ? 0.5 : 1,
+    // Keyed to the DETAIL threshold, not to the fit floor: the grid should
+    // thin out at the same zoom the nodes stop showing their numbers.
+    opacity: view.k < MINIMAL_ZOOM ? 0 : view.k < DETAIL_ZOOM ? 0.5 : 1,
   };
 
   const elapsed = snapshot ? snapshot.system.timeMs / 1000 : 0;
@@ -1994,6 +2589,8 @@ export default function Canvas({
                     bx={q.x}
                     by={q.y}
                     flow={snapshot?.edgeFlow[ed.id] ?? 0}
+                    state={snapshot?.edgeState[ed.id] ?? 'idle'}
+                    control={controlEdges.has(ed.id)}
                     selected={selectedIds.has(ed.id)}
                     targetHealth={healthById.get(ed.to) ?? 'ok'}
                     showLabel={showEdgeLabels}
@@ -2051,13 +2648,10 @@ export default function Canvas({
           dead space. */}
       {topology.nodes.length > 0 && (
         <div className="cv-ledger label" aria-hidden="true">
-          {topology.nodes.length} nodes
-          <span className="cv-ledger-sep">·</span>
-          {topology.edges.length} edges
-          <span className="cv-ledger-sep">·</span>
-          zoom {Math.round(view.k * 100)}%
-          <span className="cv-ledger-sep">·</span>
-          {elapsed.toFixed(1)}s
+          <span>{topology.nodes.length} nodes</span>
+          <span>{topology.edges.length} edges</span>
+          <span>zoom {Math.round(view.k * 100)}%</span>
+          <span>{elapsed.toFixed(1)}s</span>
         </div>
       )}
 

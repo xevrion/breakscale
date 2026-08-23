@@ -445,6 +445,25 @@ const breaker: ComponentBehaviour = {
     }
   },
 
+  /**
+   * An OPEN breaker's downstream edge is carrying nothing, and it is carrying
+   * nothing for a REASON -- the component is doing its job. Reporting it as
+   * 'blocked' is what lets the canvas draw that wire severed instead of merely
+   * quiet, which is the difference between a student seeing the breaker work
+   * and seeing a link that looks identical to an idle one.
+   *
+   * HALF-OPEN is deliberately NOT blocked: a trickle of probes really is
+   * crossing, and drawing it cut would contradict the traffic on it.
+   */
+  edgeStateFor: (ctx, state, _edge, _index) => {
+    const b = state.ext as BreakerState | null;
+    if (!b) return null;
+    // Same lazy transition decorateStats reports, so the wire and the badge
+    // never disagree: a circuit whose openMs has elapsed is already probing.
+    const open = b.phase === 'open' && ctx.now - b.openedAtMs < cfgOpenMs(state);
+    return open ? 'blocked' : null;
+  },
+
   decorateStats: (ctx, state, stats: NodeStats) => {
     const b = state.ext as BreakerState | null;
     if (!b) return;

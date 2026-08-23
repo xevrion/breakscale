@@ -64,9 +64,61 @@ function niceCeil(v: number): number {
   return Number.isFinite(out) && out > 0 ? out : 1;
 }
 
-/** Five ticks at 0, 25, 50, 75, 100% of the axis top. */
+/**
+ * Tick values for an axis, chosen so every LABEL is a round number.
+ *
+ * Quartering the axis top is the obvious approach and it is wrong: a top of
+ * 5000 quartered gives 1250 / 2500 / 3750, which the compact formatter
+ * renders as "1.3k  2.5k  3.8k" — an axis whose own labels are rounded
+ * approximations of arbitrary values. It reads as broken, because it is.
+ *
+ * Instead a round STEP is chosen from the 1/2/5 family and the ticks are
+ * multiples of it. The step is picked so the axis carries four or five
+ * gridlines: enough to read a value against, few enough not to fence the
+ * plot. The returned top may exceed the requested one, which is correct —
+ * the axis must contain the data, and a round ceiling is the point.
+ */
 function ticksFor(top: number): number[] {
-  return [0, 0.25, 0.5, 0.75, 1].map((f) => f * top);
+  if (!Number.isFinite(top) || top <= 0) return [0, 1];
+
+  // Aim for 4 intervals, then round the resulting step up to 1/2/5 x 10^n
+  // so every multiple of it is a number a person would choose to write.
+  const raw = top / 4;
+  const exp = Math.floor(Math.log10(raw));
+  const pow = 10 ** exp;
+  if (!Number.isFinite(pow) || pow <= 0) return [0, top];
+
+  const frac = raw / pow;
+  const nice = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
+
+  /* A whole-number floor on the step.
+     All three axes count things — milliseconds, requests per second,
+     failures per second — so a fractional gridline is not a finer reading,
+     it is a meaningless one: there is no such thing as 0.4 failures per
+     second as an axis rule. It is also unrenderable, because the compact
+     formatter floors anything under 0.05 to "<0.1", so a sub-integer step
+     produced axes labelled "0  <0.1  <0.1  <0.1" — four gridlines with the
+     same label. Clamping the step to at least 1 fixes the reading and the
+     rendering with the same line. */
+  const step = Math.max(1, nice * pow);
+  if (!Number.isFinite(step) || step <= 0) return [0, top];
+
+  /* Ticks must COVER the data, so the loop runs until it has passed `top`
+     rather than stopping at it. Stopping at `top` was an off-by-one that
+     put the ceiling below the maximum — an axis topping out at 100 for a
+     value of 120, with the trace drawn above its own top gridline. The
+     count is capped so a pathological range cannot emit a thousand rules. */
+  const out: number[] = [];
+  const EPS = step / 1e6;
+  for (let i = 0; i <= 8; i += 1) {
+    // Multiply rather than accumulate: repeated addition of a 0.1-style
+    // step drifts in binary and 0.30000000000000004 would reach the
+    // formatter. toPrecision(12) clears the residue that remains.
+    const v = Number((i * step).toPrecision(12));
+    out.push(v);
+    if (v >= top - EPS) break;
+  }
+  return out.length >= 2 ? out : [0, top];
 }
 
 /**
@@ -120,7 +172,19 @@ function useStickyAxis(max: number, fallback: number): { top: number; ticks: num
      guarded here rather than at each of the call sites. niceCeil already
      returns > 0, but the fallback arrives from a caller. */
   const safeTop = Number.isFinite(top) && top > 0 ? top : 1;
-  return useMemo(() => ({ top: safeTop, ticks: ticksFor(safeTop) }), [safeTop]);
+
+  /* The axis ceiling is raised to the HIGHEST TICK rather than the ticks
+     being squeezed under an arbitrary ceiling. If the two disagree, the top
+     gridline floats somewhere below the top of the plot and the trace can
+     be drawn above its own axis — the classic "line escapes the chart"
+     artefact. Deriving the ceiling from the ticks makes that unrepresentable
+     rather than merely unlikely. */
+  return useMemo(() => {
+    const ticks = ticksFor(safeTop);
+    const highest = ticks[ticks.length - 1] ?? safeTop;
+    const ceiling = Number.isFinite(highest) && highest > 0 ? highest : safeTop;
+    return { top: ceiling, ticks };
+  }, [safeTop]);
 }
 
 /**
@@ -198,22 +262,33 @@ function useMeasuredWidth<T extends HTMLElement>() {
  * ------------------------------------------------------------------ */
 
 interface ChartHeadProps {
-  /** Eyebrow, e.g. "LATENCY · MS". Uppercase, T1. */
+  /** What the chart shows, e.g. "Latency". Sentence case, T1. */
   caption: string;
   /** The single T5 readout on the right. */
   value: string;
+  /**
+   * The readout's unit, printed once beside the figure rather than folded
+   * into the caption. The caption used to carry it as "Latency · ms", which
+   * put the unit at the far left of the header and the number it belonged
+   * to at the far right — the two were never read together. Beside the
+   * value it is where the eye already is.
+   */
+  unit: string;
   tone?: Health;
-  /** Optional secondary figure, e.g. "DROPPED 42 rps". */
+  /** Optional secondary figure, e.g. the live "Lost 42/s". */
   extra?: React.ReactNode;
 }
 
-function ChartHead({ caption, value, tone = 'ok', extra }: ChartHeadProps) {
+function ChartHead({ caption, value, unit, tone = 'ok', extra }: ChartHeadProps) {
   return (
     <header className="mx-head">
       <span className="label mx-eyebrow">{caption}</span>
       <span className="mx-head-right">
         {extra}
-        <span className={`num num-lg mx-readout ${toneClass(tone)}`}>{value}</span>
+        <span className="mx-readout-wrap">
+          <span className={`num num-lg mx-readout ${toneClass(tone)}`}>{value}</span>
+          <span className="unit mx-unit">{unit}</span>
+        </span>
       </span>
     </header>
   );
@@ -246,7 +321,7 @@ const Frame = memo(function Frame({
   format,
   w,
   empty,
-  emptyLabel = 'AWAITING TRAFFIC',
+  emptyLabel = 'Waiting for traffic',
 }: FrameProps) {
   const plotH = CHART_H - PAD_T - PAD_B;
   const right = Math.max(PAD_L + 1, w - PAD_R);
@@ -301,16 +376,16 @@ const Frame = memo(function Frame({
         y2={baseY}
       />
 
-      <text className="label mx-xlabel" x={PAD_L} y={CHART_H - 8}>
-        60S
+      <text className="mx-xlabel" x={PAD_L} y={CHART_H - 8}>
+        60s ago
       </text>
-      <text className="label mx-xlabel" x={right} y={CHART_H - 8} textAnchor="end">
-        NOW
+      <text className="mx-xlabel" x={right} y={CHART_H - 8} textAnchor="end">
+        now
       </text>
 
       {empty && (
         <text
-          className="label mx-empty"
+          className="mx-empty"
           x={(PAD_L + right) / 2}
           y={PAD_T + plotH / 2}
           dy="0.32em"
@@ -386,7 +461,7 @@ const LatencyChart = memo(function LatencyChart({
 
   return (
     <section className="mx-chart" aria-label="Latency over the last 60 seconds">
-      <ChartHead caption="Latency · ms" value={formatMs(p99)} tone={tone} />
+      <ChartHead caption="Latency" unit="p99" value={formatMs(p99)} tone={tone} />
 
       <div className="mx-plot" ref={ref} style={{ height: CHART_H }}>
         <PlotLayer w={w}>
@@ -509,12 +584,13 @@ const ThroughputChart = memo(function ThroughputChart({
   return (
     <section className="mx-chart" aria-label="Throughput over the last 60 seconds">
       <ChartHead
-        caption="Throughput · rps"
+        caption="Throughput"
+        unit="succeeding /s"
         value={formatCompact(safeGoodput)}
         extra={
           live ? (
             <span className="mx-dropped">
-              <span className="label">Dropped</span>
+              <span className="label">Lost</span>
               <span className="num num-md is-danger">{formatCompact(dropped)}</span>
             </span>
           ) : undefined
@@ -541,12 +617,12 @@ const ThroughputChart = memo(function ThroughputChart({
         />
         <LegendKey
           className="mx-key-goodput"
-          name="goodput"
+          name="succeeded"
           value={formatCompact(safeGoodput)}
         />
         <LegendKey
           className="mx-key-gap"
-          name="dropped"
+          name="lost"
           value={formatCompact(dropped)}
           dim={!live}
         />
@@ -570,6 +646,10 @@ const REASON_ORDER: FailureReason[] = [
   'crashed',
   'partitioned',
   'region-down',
+  'conn-refused',
+  'unauthorized',
+  'bulkhead-full',
+  'deprioritized',
 ];
 
 const REASON_LABEL: Record<FailureReason, string> = {
@@ -583,6 +663,10 @@ const REASON_LABEL: Record<FailureReason, string> = {
   crashed: 'crashed',
   partitioned: 'partitioned',
   'region-down': 'region down',
+  'conn-refused': 'conn refused',
+  unauthorized: 'unauthorized',
+  'bulkhead-full': 'bulkhead full',
+  deprioritized: 'deprioritized',
 };
 
 /**
@@ -707,7 +791,8 @@ const FailureChart = memo(function FailureChart({
       aria-label="Failures over the last 60 seconds"
     >
       <ChartHead
-        caption="Failures · /s"
+        caption="Failures"
+        unit="/s"
         value={healthy ? '0' : formatCompact(total)}
         tone={healthy ? 'ok' : 'danger'}
       />
@@ -730,7 +815,7 @@ const FailureChart = memo(function FailureChart({
             format={formatCompact}
             w={w}
             empty={empty}
-            emptyLabel="AWAITING TRAFFIC"
+            emptyLabel="Waiting for traffic"
           />
         </svg>
       </div>
@@ -747,8 +832,8 @@ const FailureChart = memo(function FailureChart({
           {empty
             ? 'No traffic yet.'
             : windowHadFailures
-              ? 'Recovered — nothing failing now.'
-              : 'No failures in the last 60s.'}
+              ? 'Recovered. Nothing is failing now.'
+              : 'Nothing has failed in the last 60 seconds.'}
         </p>
       ) : (
         <ul className="mx-legend mx-legend-stack">

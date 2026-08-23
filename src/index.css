@@ -1,23 +1,34 @@
 /* ==========================================================================
    sys-sim design system — foundation layer
 
+   IDENTITY: warm paper. This is a teaching tool for a student who has never
+   seen a queueing curve. It should read like a well-set textbook figure —
+   open, calm, legible — not like a monitoring console.
+
    This file owns, and is the SOLE owner of:
      - the six-step type scale
-     - the six-step 4px spacing scale
-     - every color token
+     - the seven-step 4px spacing scale
+     - every colour token, including the 14 per-kind colour trios
      - the shared primitives: .panel .label .num .btn .slider .field .scroll,
        status classes, the focus ring, scrollbars, reduced motion
 
    Rules enforced here:
-     - Six font sizes only: 10 / 12 / 13 / 15 / 20 / 32. Nothing else.
-     - Two weights only: 500 and 600.
-     - Spacing is 4 / 8 / 12 / 16 / 24 / 32. No other value, no negatives.
-     - Radii are 4 / 5 / 6 only. A radius is never combined with a
+     - Six font sizes only: 11 / 12 / 14 / 16 / 22 / 34. Nothing else.
+       No half-pixel sizes, ever.
+     - Three weights only: 450 (body), 550 (emphasis/labels), 650 (numbers).
+     - Spacing is 4 / 8 / 12 / 16 / 20 / 28 / 40. No other value.
+     - Radii are 6 / 8 / 10 / 14 / 999. A radius is never combined with a
        single-side border.
      - Every number renders in --mono with tabular-nums.
-     - Status colors describe a metric's state. They never decorate.
-     - No gradients, no backdrop-filter, no glow, no serif, no shadow except
-       the focus ring.
+     - No gradients, no backdrop-filter, no glow, no serif headline, no
+       coloured shadow, no entrance animation.
+
+   COLOUR DERIVATION. Every colour in this file was generated in OKLCH and
+   its contrast measured numerically, not chosen by eye. OKLCH is used rather
+   than HSL because HSL lightness is not perceptual — a 60% blue and a 60%
+   yellow look nothing alike, which is precisely how a 14-swatch palette ends
+   up looking like 14 unrelated stickers. In OKLCH, holding L and C fixed and
+   varying only H yields swatches of genuinely equal weight.
 
    No component-specific class may be defined in this file.
    ========================================================================== */
@@ -27,135 +38,345 @@
      Type scale — six steps, all integers.
      Nothing outside this table may set a font-size anywhere in the codebase.
 
-       T1  10  600  uppercase  labels, eyebrows, captions, axis captions
-       T2  12  500             secondary body; mono variant for tick values
-       T3  13  500             body default, node name, app title
-       T4  15  600  mono       workhorse numeric: node primary, stat values
-       T5  20  600  mono       chart header readouts, selected node primary
-       T6  32  600  mono       exactly two: offered load, system p99
+       T1  11  550  uppercase  labels, eyebrows, axis captions
+       T2  12  450             secondary prose, help text, tick values
+       T3  14  450             body default, node name, list rows  [BASE]
+       T4  16  650  mono       workhorse numeric: node primary, stat values
+       T5  22  650  mono       chart header readouts, selected node primary
+       T6  34  650  mono       exactly two: offered load, system p99
+
+     The base step is 14px rather than the 13px a dense professional tool
+     would use. This is read, not scanned.
      ------------------------------------------------------------------------ */
-  --fs-label: 10px;
+  --fs-label: 11px;
   --fs-sm: 12px;
-  --fs-base: 13px;
-  --fs-num: 15px;
-  --fs-lg: 20px;
-  --fs-hero: 32px;
+  --fs-base: 14px;
+  --fs-num: 16px;
+  --fs-lg: 22px;
+  --fs-hero: 34px;
 
   /* Tracking paired to each step. Small text opens up, large text tightens. */
-  --tr-label: 0.08em;
+  --tr-label: 0.06em;
+  --tr-sm: 0;
+  --tr-base: -0.005em;
   --tr-num: -0.01em;
-  --tr-lg: -0.02em;
-  --tr-hero: -0.03em;
+  --tr-lg: -0.018em;
+  --tr-hero: -0.025em;
 
-  /* Line heights. Numeric steps are set tight — they are single-line readouts
-     whose box height must not vary with the digits inside it. */
-  --lh-label: 1.2;
-  --lh-sm: 1.4;
-  --lh-base: 1.5;
-  --lh-num: 1.1;
+  /* Line heights. Generous for prose; numeric steps are set tight because a
+     live readout's box must not change height as its digits change. */
+  --lh-label: 1.25;
+  --lh-sm: 1.5;
+  --lh-base: 1.6;
+  --lh-prose: 1.65;
+  --lh-num: 1.15;
   --lh-hero: 1;
 
-  /* Only two weights exist. 500 = every label and body string.
-     600 = every number and the app title. */
-  --fw-body: 500;
-  --fw-num: 600;
+  /* Three weights. 450 reads lighter and friendlier than 500 on a light
+     background, where type appears optically heavier than on a dark one. */
+  --fw-body: 450;
+  --fw-med: 550;
+  --fw-num: 650;
 
   /* ------------------------------------------------------------------------
-     Spacing — strict 4px grid, six tokens.
-     No value outside this set may appear as padding, gap or margin.
+     Spacing — strict 4px grid, seven tokens.
 
-       4   number-to-unit gap, stacked legend rows, icon-to-text, tick clearance
-       8   list rows, internal padding of compact controls
-       12  palette row padding, label-to-control gap, node inner horizontal
-       16  panel padding (palette, inspector, metrics strip)
-       24  between sections within a panel, metrics grid column gap
-       32  between top-level bar regions only
+       4   number-to-unit gap, icon-to-text, tick clearance
+       8   compact control padding, stacked legend rows
+       12  list row padding, label-to-control gap
+       16  panel padding on narrow rails
+       20  panel padding, default
+       28  between sections within a panel
+       40  between top-level bar regions only
      ------------------------------------------------------------------------ */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
-  --sp-6: 24px;
-  --sp-8: 32px;
+  --sp-5: 20px;
+  --sp-7: 28px;
+  --sp-10: 40px;
 
-  /* Radii — three values, nothing else. Never combine with a one-sided border. */
-  --r-sm: 4px;
-  --r-node: 5px;
-  --r-md: 6px;
+  /* Radii. Soft enough to feel welcoming, tight enough to stay adult.
+       6    inputs, small chips, meter troughs
+       8    buttons
+       10   panels, nodes
+       14   large containers, modals
+       999  pills and circular thumbs */
+  --r-sm: 6px;
+  --r-btn: 8px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+  --r-node: 10px;
 
-  /* Interactive transitions only, 120-200ms. There are no entrance animations. */
+  /* Border weights. Hairline for quiet dividers, 1.5px for a node outline
+     that must hold its own against the canvas. */
+  --bw: 1px;
+  --bw-strong: 1.5px;
+
+  /* Elevation. Neutral, low-opacity, never coloured, never glowing.
+     Shadow carries a warm-neutral hue at very low alpha so it sits on paper
+     rather than looking like grey dirt. */
+  --shadow-sm: 0 1px 2px rgba(60, 50, 40, 0.06);
+  --shadow-md:
+    0 1px 2px rgba(60, 50, 40, 0.05), 0 4px 10px rgba(60, 50, 40, 0.07);
+  --shadow-lg:
+    0 2px 4px rgba(60, 50, 40, 0.05), 0 12px 28px rgba(60, 50, 40, 0.1);
+
+  /* Interactive transitions only, 120-200ms. There are no entrance
+     animations anywhere in this application. */
   --dur-fast: 120ms;
   --dur-base: 160ms;
   --dur-slow: 200ms;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 0.84, 0.44, 1);
 
   /* ------------------------------------------------------------------------
-     Neutral ramp.
-     Deepened and de-hued from the previous palette so the canvas reads as
-     ground and the node body sits visibly above it. Each step is a small
-     lightness lift with no hue shift, keeping status colors legible on top.
+     Neutral ramp — warm paper.
+     Hue 75 (warm yellow-orange) at very low chroma. Warmth is what separates
+     "paper" from "clinical white"; the chroma is kept under 0.014 so it never
+     reads as beige or as a colour cast.
+
+     Note --surface is LIGHTER than --bg. Panels lift off the canvas toward
+     white rather than darkening toward grey, which is what makes the layout
+     feel open instead of boxed-in.
      ------------------------------------------------------------------------ */
-  --bg: #0a0b0d;
-  --surface: #101216; /* chrome panels: palette, inspector, metrics strip */
-  --surface-2: #171a20; /* node body, inputs, raised rows */
-  --surface-3: #1e222a; /* node header band ONLY */
-  --border: #232830;
+  --bg: #faf7f3; /* app canvas / ground */
+  --surface: #fffdfa; /* chrome panels: palette, inspector, metrics */
+  --surface-2: #f7f3ee; /* inputs, recessed rows, meter troughs */
+  --surface-3: #f0ece5; /* pressed states, table header bands */
+  --border: #e8e2da; /* hairline divider — 1.20:1 on bg, deliberately quiet */
+  --border-strong: #d2cbc2; /* input outline, node outline — 1.51:1 on bg */
 
   /* Canvas rules. Both must recede almost to invisibility: a ruled field
      reads as a workspace, a loud one competes with the diagram. */
-  --grid-line: #171a20; /* 32px hairline rules */
-  --grid-major: #1e222a; /* every 4th rule, 128px */
+  --grid-line: #f1ece6; /* 32px hairline rules — 1.10:1 on bg */
+  --grid-major: #e7e2dc; /* every 4th rule, 128px — 1.21:1 on bg */
+  --grid-dot: var(--grid-line); /* retained alias */
 
-  /* Retained alias: the dot grid is replaced by ruled lines, but the token
-     name is kept so any remaining reference resolves rather than falling back
-     to an invalid value. */
-  --grid-dot: var(--grid-line);
-
-  /* Continuation of the neutral ramp above --border, for edges, ports,
-     arrowheads and neutral chart series. Chart series are distinguished by
-     weight and lightness, never by hue. */
-  --line: #2e343e; /* idle edge */
-  --line-2: #3a414d; /* hover edge, arrowheads */
-  --line-3: #4a5260;
-  --line-4: #6b7484; /* p50 series, sparkline stroke */
-  --line-5: #6d7686;
-  --track: #1c2027; /* meter troughs */
+  /* Neutral line ramp for edges, ports, arrowheads and neutral chart series.
+     Chart series are distinguished by weight and lightness, never by hue. */
+  --line: #cfc8bf; /* idle edge */
+  --line-2: #b3aba1; /* hover edge, arrowheads */
+  --line-3: #948c82; /* axis rules */
+  --line-4: #6f6a63; /* p50 series, sparkline stroke */
+  --line-5: #545049;
+  --track: #ece7e0; /* meter troughs */
 
   /* Two categorical hues, used ONLY to separate failure reasons in the
-     breakdown, where five causes must be told apart at a glance. */
-  --cat-violet: #b06fd8;
-  --cat-blue: #649ad4;
+     breakdown, where five causes must be told apart at a glance.
+     Both measured >= 4.5:1 on --surface. */
+  --cat-violet: #7a4bab;
+  --cat-blue: #1f6099;
 
-  /* Text ramp. Verified ratios on --bg: --text 17.09:1, --text-dim 8.32:1,
-     --text-faint 6.12:1. --text-faint is never used below 10px and never
-     carries a value — captions and units only. */
-  --text: #edeff2;
-  --text-dim: #a2a9b4;
-  --text-faint: #8a9099;
+  /* ------------------------------------------------------------------------
+     Text ramp. Cool-leaning ink (hue 264) against warm paper — the slight
+     temperature opposition is what makes the text read as ink on stock
+     rather than as a wash of the same colour.
 
-  /* Single accent hue. Four permitted uses, all meaning "you did this":
-     the focus ring, selection, the slider fill, and .btn-primary.
-     A data series may never wear the selection hue. */
-  --accent: #4c8dff;
-  --accent-hover: #6ba0ff;
-  --accent-press: #3d7ae6;
-  --accent-fg: #06070a;
+     Measured, on --bg / --surface / --surface-2 / --surface-3:
+       --text        14.60 / 15.35 / 14.11 / 13.24
+       --text-dim     6.71 /  7.06 /  6.49 /  6.08
+       --text-faint   5.17 /  5.43 /  5.00 /  4.69
+     ALL THREE pass AA body text (4.5:1) on ALL FOUR surfaces. --text-faint
+     was darkened specifically so it is never a trap: there is no surface in
+     this app on which it silently fails.
+     ------------------------------------------------------------------------ */
+  --text: #1e242e;
+  --text-dim: #525862;
+  --text-faint: #646972;
 
-  /* Semantic metric states. Three permitted carriers only: a node's meter and
-     health mark, a numeric value that has crossed a threshold, and the failure
-     breakdown. Never a border, background, panel or decorative icon. */
-  --ok: #3fb950;
-  --warn: #d29922;
-  --danger: #f0553f;
+  /* On a saturated fill (accent, danger) text is always white. */
+  --text-on-fill: #ffffff;
 
+  /* ------------------------------------------------------------------------
+     Accent — a single warm-leaning indigo. Four permitted uses, all meaning
+     "you did this": the focus ring, selection, the slider fill, .btn-primary.
+     A data series may never wear the selection hue.
+
+     Measured: --accent as text on --bg 5.78:1 (AA body).
+               white on --accent 6.17:1, on hover 7.61:1, on press 9.32:1.
+               --accent against the palest kind fill 5.42:1, so the selection
+               ring is unmistakable on every node in the system.
+     ------------------------------------------------------------------------ */
+  --accent: #325cbd;
+  --accent-hover: #2a4fa5;
+  --accent-press: #23438c;
+  --accent-fg: #ffffff;
+  --accent-soft: #e3edff; /* tinted chip background; --text on it = 13.23:1 */
+  --accent-ink: #2d5277; /* text on --accent-soft = 6.90:1 */
+  --accent-ring: rgba(50, 92, 189, 0.32); /* focus halo, flat not glowing */
+
+  /* ------------------------------------------------------------------------
+     Semantic metric states.
+
+     Amber on a light background is the classic accessibility failure, so the
+     health colours are SPLIT BY ROLE rather than pretending one value works
+     for both:
+
+       --ok / --warn / --danger        TEXT. >= 4.5:1 on every surface AND on
+                                       every one of the 14 kind fills.
+       --ok-mark / --warn-mark /       FILLS, meter bars, strokes, dots.
+       --danger-mark                   >= 3:1 on --bg. Brighter and more
+                                       saturated, never used as text.
+
+     Measured as text, worst case across all four surfaces (--surface-3):
+       ok 4.59, warn 5.01, danger 4.74. On --bg: ok 5.06, warn 5.53,
+       danger 5.23. All clear AA on every surface in the app.
+     Measured as marks on --bg: ok 3.46, warn 3.24, danger 4.45.
+     --warn is a dark bronze, not a yellow. A yellow that passes 4.5:1 on
+     paper does not exist; this is the honest answer.
+     ------------------------------------------------------------------------ */
+  --ok: #187a3b;
+  --warn: #945500;
+  --danger: #c52b30;
+
+  --ok-mark: #319751;
+  --warn-mark: #c57800;
+  --danger-mark: #d73337;
+
+  --ok-soft: #e6f4ea;
+  --warn-soft: #fbeedb;
+  --danger-soft: #fdeceb;
+
+  /* ==========================================================================
+     PER-KIND COLOUR SYSTEM — the heart of the redesign.
+
+     DERIVATION RULE. Each of the 14 kinds owns exactly ONE hue angle. The
+     three roles are then generated at a FIXED lightness and chroma that is
+     identical for all 14 kinds, so only the hue ever differs:
+
+       --kind-*-fill   OKLCH  L 0.958  C 0.021   node body background
+       --kind-*-line   OKLCH  L 0.740  C 0.110   internal rule / accent stroke
+       --kind-*-stroke OKLCH  L 0.600  C 0.125   the node OUTLINE
+       --kind-*-ink    OKLCH  L 0.430  C 0.075   glyph and text on the fill
+
+     Chroma is clamped per-hue to the sRGB gamut boundary where needed (yellow
+     and cyan run out of gamut before blue does). Without that clamp the
+     browser silently clips the colour and the swatch drifts off-rule, which
+     is a common and invisible way a systematic palette stops being systematic.
+
+     Because L and C are constant, all 14 have equal visual weight. Verified:
+       ink-on-fill contrast spans only 6.91 - 7.40 across all fourteen.
+       --text on every fill spans only 13.69 - 13.94.
+     A range that tight is what makes them read as ONE family.
+
+     HUE FAMILIES — related kinds sit on adjacent hues, so a student learns
+     the neighbourhood as well as the individual piece:
+
+       origin       client 295                        violet
+       compute      lb 250, service 262, worker 274   blues
+       storage      shard 206, replica 218, db 230    cyan-blues
+                    cache 70                          amber (deliberate
+                      outlier: cache is storage that behaves like edge, and
+                      being the one warm store makes it instantly findable)
+       flow         queue 310, region 340             magenta-pinks
+       edge/protect cdn 190, ratelimiter 145,         teal, green, red
+                    breaker 25
+       control      autoscaler 118                    olive
+
+     ACCESSIBILITY, measured on every one of the 14 fills:
+       --text          13.69 - 13.94  (AA, AAA)
+       --text-dim       6.29 -  6.40  (AA)
+       --ok             4.79 -  4.87  (AA)
+       --warn           5.23 -  5.31  (AA)
+       --danger         4.90 -  4.99  (AA)
+     Every health colour clears AA on every kind fill. This was the single
+     constraint most likely to break the scheme; it holds with margin, which
+     is why health can be shown as text directly on a coloured node.
+     --kind-*-stroke measures 3.49 - 3.95 on --bg: AA for graphics, all 14.
+     ========================================================================== */
+
+  /* origin ---------------------------------------------------------------- */
+  --kind-client-fill: #f2effe;
+  --kind-client-line: #b09de9;
+  --kind-client-stroke: #866fc2;
+  --kind-client-ink: #534775;
+
+  /* compute --------------------------------------------------------------- */
+  --kind-lb-fill: #e7f3ff;
+  --kind-lb-line: #73b0ee;
+  --kind-lb-stroke: #3e84c8;
+  --kind-lb-ink: #2d5277;
+
+  --kind-service-fill: #eaf2ff;
+  --kind-service-line: #85abf0;
+  --kind-service-stroke: #567fca;
+  --kind-service-ink: #394f79;
+
+  --kind-worker-fill: #edf1ff;
+  --kind-worker-line: #95a5f0;
+  --kind-worker-stroke: #6a79ca;
+  --kind-worker-ink: #434c79;
+
+  /* storage --------------------------------------------------------------- */
+  --kind-db-fill: #e4f4fd;
+  --kind-db-line: #57b8e3;
+  --kind-db-stroke: #008cba;
+  --kind-db-ink: #185771;
+
+  --kind-replica-fill: #e2f5fb;
+  --kind-replica-line: #48bbd9;
+  --kind-replica-stroke: #008fab;
+  --kind-replica-ink: #07596b;
+
+  --kind-shard-fill: #e2f6f8;
+  --kind-shard-line: #3fbecd;
+  --kind-shard-stroke: #00919e;
+  --kind-shard-ink: #005b64;
+
+  --kind-cache-fill: #fbefe2;
+  --kind-cache-line: #d79e59;
+  --kind-cache-stroke: #af7112;
+  --kind-cache-ink: #6a481c;
+
+  /* flow ------------------------------------------------------------------ */
+  --kind-queue-fill: #f5eefc;
+  --kind-queue-line: #c097df;
+  --kind-queue-stroke: #9769b8;
+  --kind-queue-ink: #5c446f;
+
+  --kind-region-fill: #fcecf6;
+  --kind-region-line: #d98fc1;
+  --kind-region-stroke: #b06098;
+  --kind-region-ink: #6b3f5d;
+
+  /* edge / protection ----------------------------------------------------- */
+  --kind-cdn-fill: #e2f6f4;
+  --kind-cdn-line: #41c1ba;
+  --kind-cdn-stroke: #00948e;
+  --kind-cdn-ink: #005d59;
+
+  --kind-ratelimiter-fill: #e9f5e9;
+  --kind-ratelimiter-line: #7dbd7f;
+  --kind-ratelimiter-stroke: #4b934f;
+  --kind-ratelimiter-ink: #345b35;
+
+  --kind-breaker-fill: #ffecea;
+  --kind-breaker-line: #e88f87;
+  --kind-breaker-stroke: #c05f59;
+  --kind-breaker-ink: #743e3b;
+
+  /* control --------------------------------------------------------------- */
+  --kind-autoscaler-fill: #f0f3e4;
+  --kind-autoscaler-line: #a5b461;
+  --kind-autoscaler-stroke: #7a8a23;
+  --kind-autoscaler-ink: #4c5522;
+
+  /* ------------------------------------------------------------------------
+     Type stacks. System-first: the OS UI font is the one a student's eye is
+     already calibrated to, it needs no network request, and it never causes
+     a layout shift. No web font is loaded.
+     ------------------------------------------------------------------------ */
   --sans:
-    system-ui, -apple-system, 'Segoe UI', Inter, Roboto, 'Helvetica Neue',
-    Arial, sans-serif;
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, Roboto,
+    'Helvetica Neue', Arial, sans-serif;
   --mono:
     ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
     'Liberation Mono', monospace;
 
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 /* --------------------------------------------------------------------------
@@ -187,6 +408,7 @@ body {
   font-size: var(--fs-base);
   font-weight: var(--fw-body);
   line-height: var(--lh-base);
+  letter-spacing: var(--tr-base);
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -221,8 +443,12 @@ h4 {
 }
 
 /* --------------------------------------------------------------------------
-   Focus — one ring, everywhere, 2px accent at offset 2.
-   This is the only box-shadow-or-outline effect in the system.
+   Focus — one ring, everywhere.
+
+   On a light background a bare 2px outline is easy to lose against pale
+   surfaces, so the ring is doubled: a solid accent outline plus a soft accent
+   halo carried on box-shadow. The halo is a FLAT 32%-alpha ring, not a blur
+   glow — it has a hard edge and does not bloom.
    -------------------------------------------------------------------------- */
 
 :focus {
@@ -235,30 +461,63 @@ h4 {
   border-radius: var(--r-sm);
 }
 
+/* Opt-in halo for controls that sit on a tinted or busy surface. */
+.focus-halo:focus-visible {
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
 /* --------------------------------------------------------------------------
    Primitives
    -------------------------------------------------------------------------- */
 
-/* A panel is a single surface with a single border. It may contain rows.
-   A row may not contain another bordered box — one nesting level, maximum. */
+/* A panel is a single surface. It may contain rows. A row may not contain
+   another bordered box — one nesting level, maximum.
+
+   BOUNDARY RULE for the whole system:
+     - whitespace         is the default separator. Try it first.
+     - background shift   when two regions must be told apart while scrolling
+                          (surface vs surface-2).
+     - border             ONLY when two surfaces of the SAME colour meet, or
+                          when a control must advertise that it is editable.
+   A border that duplicates a background shift is noise and is deleted. */
 .panel {
   background: var(--surface);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
   min-height: 0;
   min-width: 0;
 }
 
-/* T1. The sole 10px definition in the codebase. Uppercase is mandatory: it is
-   what makes 10px read as a label rather than as failed body text.
+/* Panel that sits directly on the canvas and needs to detach from it. */
+.panel-raised {
+  background: var(--surface);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* T1. The sole 11px definition in the codebase. Uppercase is mandatory: it is
+   what makes 11px read as a label rather than as failed body text.
    Never a sentence, never a number, max ~18 characters. */
 .label {
   font-size: var(--fs-label);
-  font-weight: var(--fw-num);
+  font-weight: var(--fw-med);
   line-height: var(--lh-label);
   text-transform: uppercase;
   letter-spacing: var(--tr-label);
   color: var(--text-faint);
+}
+
+/* Explanatory prose. This app teaches, so help text is a first-class element
+   with a real measure limit and open leading — not a cramped afterthought. */
+.prose {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-prose);
+  color: var(--text-dim);
+  max-width: 58ch;
+  text-wrap: pretty;
 }
 
 /* Every number in the application carries this class. Tabular figures are
@@ -291,6 +550,8 @@ h4 {
   letter-spacing: var(--tr-lg);
 }
 
+/* The single largest element on screen: the offered-load and system-p99
+   readouts. Nothing else may use this step. */
 .num-hero {
   font-size: var(--fs-hero);
   font-weight: var(--fw-num);
@@ -298,9 +559,18 @@ h4 {
   letter-spacing: var(--tr-hero);
 }
 
+/* A unit suffix rides at the dim step beside its value, never at the value's
+   size — that is what keeps "1.2 k/s" from reading as two competing numbers. */
+.unit {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
 /* Status modifiers. Applied to the number itself, never to its container.
-   At 'ok' nothing is colored — a healthy screen is entirely neutral, which is
-   what gives --warn and --danger their meaning when they do appear. */
+   At 'ok' nothing is coloured — a healthy screen is entirely neutral, which
+   is what gives --warn and --danger their meaning when they do appear. */
 .is-ok {
   color: var(--ok);
 }
@@ -313,49 +583,109 @@ h4 {
   color: var(--danger);
 }
 
+/* Status pill. Text sits on a soft tint at the AA-verified text colour. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-med);
+  letter-spacing: var(--tr-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pill.is-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.pill.is-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.pill.is-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 /* --------------------------------------------------------------------------
    Buttons — sole definition. Do not re-declare .btn in a component file.
+
+   SIZING. Default height 36px, comfortably above the 32px floor. Primary
+   actions use .btn-lg at 44px. Icon-only buttons are square at 36px so the
+   glyph is centred by box AND by eye.
+
+   TACTILITY. A button is legible as clickable from three cues at once: a
+   real surface, a 1px outline slightly darker than any divider, and a 1px
+   inset highlight along the top edge that reads as a subtle bevel. On press
+   the surface darkens and the bevel is removed, so the control visibly
+   depresses rather than merely changing colour.
    -------------------------------------------------------------------------- */
 
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-1);
-  height: 26px;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface-2);
+  gap: var(--sp-2);
+  height: 36px;
+  padding: 0 var(--sp-3);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-btn);
+  background: var(--surface);
   color: var(--text);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-body);
-  line-height: var(--lh-sm);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-med);
+  line-height: 1;
+  letter-spacing: var(--tr-base);
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
   transition:
     background-color var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--surface-3);
-  border-color: var(--line);
+  background: var(--surface-2);
+  border-color: var(--line-2);
 }
 
 .btn:active:not(:disabled) {
-  background: var(--surface-2);
-  border-color: var(--line);
+  background: var(--surface-3);
+  border-color: var(--line-2);
+  box-shadow: none;
+  transform: translateY(1px);
 }
 
-/* At most one primary button is visible at a time. */
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
+/* Primary. At most one is visible at a time. 44px tall — this is the action
+   the student is meant to take. */
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
   font-weight: var(--fw-num);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -366,51 +696,135 @@ h4 {
 .btn-primary:active:not(:disabled) {
   background: var(--accent-press);
   border-color: var(--accent-press);
+  box-shadow: none;
+  transform: translateY(1px);
 }
 
+/* Secondary is the .btn default above; this alias exists so a call site can
+   state its intent rather than relying on the bare class. */
+.btn-secondary {
+  background: var(--surface);
+}
+
+/* Ghost. No surface and no outline until hovered — for dense toolbars where
+   a row of outlined buttons would read as a fence. */
 .btn-ghost {
   background: transparent;
   border-color: transparent;
   color: var(--text-dim);
+  box-shadow: none;
 }
 
 .btn-ghost:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: transparent;
   color: var(--text);
+  box-shadow: none;
 }
 
 .btn-ghost:active:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--surface-3);
+  box-shadow: none;
+  transform: translateY(1px);
 }
 
+/* Destructive. Outlined at rest so a delete never looks like the happy path;
+   fills only on hover, once the intent is deliberate. */
+.btn-danger {
+  background: var(--surface);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-on-fill);
+}
+
+.btn-danger:active:not(:disabled) {
+  background: #a8232a;
+  border-color: #a8232a;
+  color: var(--text-on-fill);
+  box-shadow: none;
+  transform: translateY(1px);
+}
+
+.btn-danger:focus-visible {
+  outline-color: var(--danger);
+  box-shadow: 0 0 0 4px rgba(197, 43, 48, 0.28);
+}
+
+/* Size variants. */
+.btn-lg {
+  height: 44px;
+  padding: 0 var(--sp-5);
+  font-size: var(--fs-base);
+}
+
+.btn-sm {
+  height: 32px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.btn-icon {
+  width: 36px;
+  padding: 0;
+}
+
+.btn-icon.btn-sm {
+  width: 32px;
+}
+
+/* Disabled. Opacity alone would drag the label under 4.5:1, so the disabled
+   state is expressed with real tokens and keeps its contrast. */
 .btn:disabled {
-  opacity: 0.4;
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-faint);
+  box-shadow: none;
   cursor: not-allowed;
+  transform: none;
+}
+
+.btn-ghost:disabled {
+  background: transparent;
+  border-color: transparent;
 }
 
 /* Pressed / selected state for toggles and segmented controls. */
 .btn[aria-pressed='true'],
 .btn[data-active='true'] {
-  background: var(--surface-2);
+  background: var(--accent-soft);
   border-color: var(--accent);
-  color: var(--text);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+
+.btn[aria-pressed='true']:hover:not(:disabled),
+.btn[data-active='true']:hover:not(:disabled) {
+  background: #d7e5ff;
 }
 
 /* --------------------------------------------------------------------------
    Slider — the app's primary control, and the only thing on screen the
-   student directly manipulates. It must feel precise.
+   student directly manipulates continuously. It must feel precise and
+   pleasant to drag.
 
    Geometry, identical across engines:
-     hit area  28px tall (pointer target, well above the 24px minimum)
-     track      4px, --r-sm, --track fill, 1px --border
-     thumb     12px circle, --text at rest, --accent while dragging
+     hit area  32px tall (pointer target, well above the 24px minimum)
+     track      6px, pill radius, --track trough
+     fill       accent, shown on BOTH engines
+     thumb     18px circle, white with a 2px accent ring and a real shadow,
+               so it reads as a physical knob resting on the track
 
-   WebKit centers the thumb on the track with a negative margin-top; Firefox
-   centers it automatically. Both are specified explicitly below because the
-   two engines share no pseudo-elements and a rule for one is invisible to
-   the other. The selectors are therefore deliberately NOT merged into a
-   single list: one unrecognized pseudo-element invalidates a whole group.
+   WebKit exposes no ::-moz-range-progress equivalent, so the filled portion
+   is painted with a hard-stop background-image on the input itself, driven by
+   a --fill-pct custom property the component sets from the value. Firefox
+   uses its native progress pseudo-element. Both are specified; the selectors
+   are deliberately NOT merged, because one unrecognised pseudo-element
+   invalidates an entire selector group.
    -------------------------------------------------------------------------- */
 
 .slider {
@@ -418,94 +832,110 @@ h4 {
   appearance: none;
   display: block;
   width: 100%;
-  height: 28px;
+  height: 32px;
   margin: 0;
   padding: 0;
   background: transparent;
-  cursor: pointer;
+  cursor: grab;
   touch-action: none;
+  /* The component sets --fill-pct (0-100). Defaults to 0 so an unset slider
+     renders an empty track rather than a broken gradient. */
+  --fill-pct: 0%;
 }
 
-/* --- Track: WebKit --- */
+.slider:active {
+  cursor: grabbing;
+}
+
+/* --- Track: WebKit ---
+   The fill is a two-stop hard-edged background. It is a solid-colour fill
+   expressed through gradient syntax, not a gradient: both stops meet at the
+   same position, so no blend is ever rendered. */
 .slider::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: var(--r-sm);
-  background: var(--track);
-  border: 1px solid var(--border);
+  height: 6px;
+  border-radius: var(--r-pill);
+  background-color: var(--track);
+  background-image: linear-gradient(
+    to right,
+    var(--accent) 0 var(--fill-pct),
+    transparent var(--fill-pct) 100%
+  );
+  border: none;
 }
 
 /* --- Thumb: WebKit ---
-   margin-top centers a 12px thumb on a 4px track with 1px borders:
-   (4 + 2 - 12) / 2 = -3px. */
+   margin-top centres an 18px thumb on a 6px track: (6 - 18) / 2 = -6px. */
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: -3px;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
   border-radius: 50%;
-  background: var(--text);
-  border: none;
+  background: #ffffff;
+  border: 2px solid var(--accent);
+  box-shadow: var(--shadow-sm);
   transition:
-    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
     transform var(--dur-fast) var(--ease);
 }
 
 .slider:hover::-webkit-slider-thumb {
-  background: #ffffff;
+  border-color: var(--accent-hover);
+  transform: scale(1.08);
 }
 
 .slider:active::-webkit-slider-thumb {
-  background: var(--accent);
-  transform: scale(1.1);
+  border-color: var(--accent-press);
+  transform: scale(1.12);
 }
 
-/* The thumb cannot take an outline, so focus is drawn as a ring on the thumb
-   itself. This is the focus indicator, not a glow: a flat 3px accent ring at
-   full opacity, matching the 2px outline used everywhere else. */
+/* The thumb cannot take an outline, so focus is drawn as a flat halo ring on
+   the thumb itself — a hard-edged 4px ring, not a blur. */
 .slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-ring);
 }
 
 /* --- Track: Firefox --- */
 .slider::-moz-range-track {
-  height: 4px;
-  border-radius: var(--r-sm);
+  height: 6px;
+  border-radius: var(--r-pill);
   background: var(--track);
-  border: 1px solid var(--border);
+  border: none;
 }
 
-/* Filled portion. Firefox only — WebKit exposes no equivalent pseudo-element,
-   so the fill is a progressive enhancement and never load-bearing: the thumb
-   position alone always communicates the value. */
 .slider::-moz-range-progress {
-  height: 4px;
-  border-radius: var(--r-sm);
+  height: 6px;
+  border-radius: var(--r-pill);
   background: var(--accent);
 }
 
 .slider::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--text);
-  border: none;
+  background: #ffffff;
+  border: 2px solid var(--accent);
+  box-shadow: var(--shadow-sm);
   transition:
-    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
     transform var(--dur-fast) var(--ease);
 }
 
 .slider:hover::-moz-range-thumb {
-  background: #ffffff;
+  border-color: var(--accent-hover);
+  transform: scale(1.08);
 }
 
 .slider:active::-moz-range-thumb {
-  background: var(--accent);
-  transform: scale(1.1);
+  border-color: var(--accent-press);
+  transform: scale(1.12);
 }
 
 .slider:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-ring);
 }
 
 /* Firefox draws a dotted inner focus ring on the input itself; suppress it in
@@ -519,8 +949,18 @@ h4 {
 }
 
 .slider:disabled {
-  opacity: 0.4;
   cursor: not-allowed;
+  --fill-pct: 0%;
+}
+
+.slider:disabled::-webkit-slider-thumb {
+  border-color: var(--line-2);
+  transform: none;
+}
+
+.slider:disabled::-moz-range-thumb {
+  border-color: var(--line-2);
+  transform: none;
 }
 
 /* --------------------------------------------------------------------------
@@ -529,18 +969,28 @@ h4 {
 
 input[type='text'],
 input[type='number'],
-select {
-  height: 26px;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--border);
+select,
+textarea {
+  height: 36px;
+  padding: 0 var(--sp-3);
+  border: var(--bw) solid var(--border-strong);
   border-radius: var(--r-sm);
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   font-weight: var(--fw-body);
   transition:
     border-color var(--dur-fast) var(--ease),
-    background-color var(--dur-fast) var(--ease);
+    background-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+textarea {
+  height: auto;
+  min-height: 72px;
+  padding: var(--sp-2) var(--sp-3);
+  line-height: var(--lh-base);
+  resize: vertical;
 }
 
 /* Numeric inputs are numbers: mono, tabular, right-aligned so the digits of
@@ -554,13 +1004,13 @@ input[type='number'] {
 }
 
 select {
-  padding-right: var(--sp-6);
+  padding-right: var(--sp-7);
   cursor: pointer;
-  /* Neutral chevron, inlined so no network request is needed. Stroke is
-     --text-dim (#a2a9b4). */
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a2a9b4' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* Neutral chevron, inlined so no network request is needed.
+     Stroke is --text-faint (#646972). */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23646972' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right var(--sp-2) center;
+  background-position: right var(--sp-3) center;
   -webkit-appearance: none;
   appearance: none;
 }
@@ -570,32 +1020,42 @@ select option {
   color: var(--text);
 }
 
-input[type='text']:hover,
-input[type='number']:hover,
-select:hover {
-  border-color: var(--line);
+input[type='text']:hover:not(:disabled),
+input[type='number']:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--line-2);
 }
 
 input[type='text']:focus,
 input[type='number']:focus,
-select:focus {
+select:focus,
+textarea:focus {
+  outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
 input[type='text']:focus-visible,
 input[type='number']:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
-input::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: var(--text-faint);
 }
 
 input:disabled,
-select:disabled {
-  opacity: 0.4;
+select:disabled,
+textarea:disabled {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-faint);
   cursor: not-allowed;
 }
 
@@ -611,13 +1071,22 @@ input[type='number']::-webkit-inner-spin-button {
   margin: 0;
 }
 
+/* Checkbox / radio, sized to sit on the same optical line as 14px body text. */
+input[type='checkbox'],
+input[type='radio'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* Label + control on one row. */
 .field {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  min-height: 26px;
+  min-height: 36px;
 }
 
 .field > .label {
@@ -627,8 +1096,8 @@ input[type='number']::-webkit-inner-spin-button {
 
 .field > input,
 .field > select {
-  flex: 0 0 84px;
-  width: 84px;
+  flex: 0 0 96px;
+  width: 96px;
 }
 
 /* Full-width control below its label. */
@@ -639,16 +1108,17 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .field-stack > input,
-.field-stack > select {
+.field-stack > select,
+.field-stack > textarea {
   width: 100%;
 }
 
 /* Key / value row: dim label left, mono value right-aligned so every value in
    a panel shares one vertical axis. */
 .row-k {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   font-weight: var(--fw-body);
-  line-height: var(--lh-sm);
+  line-height: var(--lh-base);
   color: var(--text-dim);
 }
 
@@ -662,6 +1132,40 @@ input[type='number']::-webkit-inner-spin-button {
   letter-spacing: var(--tr-num);
   color: var(--text);
   text-align: right;
+  /* Guards the edge case the brief calls out: a 4-digit value where two were
+     expected must not wrap and shove the label into the panel wall. */
+  white-space: nowrap;
+}
+
+/* A long node label must truncate, never overflow its panel. */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Empty state. Centred, calm, and written as a sentence — this is where a
+   student lands before they have done anything, so it must not read as an
+   error. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-7) var(--sp-5);
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-prose);
+}
+
+/* Hairline divider. Used only where two same-coloured surfaces meet. */
+.rule {
+  height: 1px;
+  background: var(--border);
+  border: none;
 }
 
 /* --------------------------------------------------------------------------
@@ -676,8 +1180,8 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .scroll::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 .scroll::-webkit-scrollbar-track {
@@ -686,9 +1190,9 @@ input[type='number']::-webkit-inner-spin-button {
 
 .scroll::-webkit-scrollbar-thumb {
   background: var(--line);
-  border: 3px solid transparent;
+  border: 4px solid transparent;
   background-clip: content-box;
-  border-radius: var(--r-md);
+  border-radius: var(--r-pill);
 }
 
 .scroll::-webkit-scrollbar-thumb:hover {
@@ -718,7 +1222,7 @@ input[type='number']::-webkit-inner-spin-button {
    Reduced motion
    The app has exactly two animations: interactive transitions (120-200ms) and
    the edge-flow dash offset, which encodes a live measurement. Both are
-   neutralized here; no content animation exists to suppress.
+   neutralised here; no content animation exists to suppress.
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -731,10 +1235,19 @@ input[type='number']::-webkit-inner-spin-button {
     scroll-behavior: auto !important;
   }
 
+  .btn:active:not(:disabled),
+  .btn-primary:active:not(:disabled),
+  .btn-ghost:active:not(:disabled),
+  .btn-danger:active:not(:disabled) {
+    transform: none;
+  }
+
+  .slider:hover::-webkit-slider-thumb,
   .slider:active::-webkit-slider-thumb {
     transform: none;
   }
 
+  .slider:hover::-moz-range-thumb,
   .slider:active::-moz-range-thumb {
     transform: none;
   }

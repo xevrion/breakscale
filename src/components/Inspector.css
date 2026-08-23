@@ -1,103 +1,186 @@
 /* ==========================================================================
-   Inspector — the right-hand config panel — and TrafficControl, the top bar.
+   Inspector — the right-hand configuration panel — and TrafficControl,
+   which lives in the top bar.
 
-   This file owns ONLY layout and the few classes unique to these two
-   components. It deliberately defines no .btn, no .slider, no .label, no
-   .row-k/.row-v and no font-size: index.css is the sole owner of all of
-   those. The previous version re-declared .btn and .slider with different
-   values (28px vs 6/12 padding; 14px vs 12px thumb; 4px vs 3px track), so
-   which one won depended on bundler import order.
+   This file owns LAYOUT and the handful of classes unique to these two
+   components. It deliberately declares no .btn, no .slider, no .label, no
+   .row-k / .row-v and no font-size outside the type scale: index.css is the
+   sole owner of every one of those.
 
-   One nesting level maximum: the panel is a surface, it contains rows, and
-   a row never contains another bordered box.
+   ONE NESTING LEVEL. The panel is a surface; it holds sections; a section
+   holds rows. A row never contains another bordered box. Sections are
+   separated by whitespace and a caption, never by a card.
    ========================================================================== */
 
 .ins {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
-  padding: var(--sp-4);
+  min-height: 0;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  border-left: var(--bw) solid var(--border);
   text-align: left;
 }
 
-/* The empty state is one calm line, not a centered placeholder graphic. */
-.ins-empty {
-  color: var(--text-dim);
-  font-size: var(--fs-sm);
-  line-height: var(--lh-sm);
+.ins-scroll {
+  flex: 1 1 auto;
+  padding: var(--sp-5) var(--sp-5) var(--sp-7);
 }
 
-/* ---------------- header / inline rename ---------------- */
+/* --------------------------------------------------------------------------
+   Empty state
+
+   The first thing a student sees. It is a sentence, centred and calm, and
+   it says what to do rather than reporting that nothing is selected.
+   -------------------------------------------------------------------------- */
+
+.ins-empty {
+  padding: var(--sp-7) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-base);
+  line-height: var(--lh-prose);
+  text-wrap: pretty;
+}
+
+.ins-empty-hint {
+  padding-top: var(--sp-3);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
+/* --------------------------------------------------------------------------
+   Header — the name is editable in place
+   -------------------------------------------------------------------------- */
 
 .ins-head {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  /* Reserves the space the input's own focus ring needs, so focusing the
+     title does not shove the blurb below it. */
+  margin-bottom: var(--sp-4);
 }
 
-/* The title is an input that does not look like one until you reach for it:
-   editing the name is a normal thing to do, but a boxed field would make the
-   panel read as a form rather than as a readout. */
+/* The title does not look like a field until you reach for it. Renaming is
+   a normal thing to do here, but a permanently boxed input would make the
+   whole panel read as a form to be filled in rather than a thing to read.
+
+   Negative left margin cancels the padding, so the title's first glyph sits
+   on exactly the same axis as every label below it. The padding has to
+   exist for the hover and focus states to have room. */
 .ins-title {
-  width: 100%;
-  height: 26px;
-  /* No left padding, so the title's first glyph aligns with the labels below
-     it. The old file used margin-left:-6px to correct padding it had just
-     applied; not applying it is the actual fix. */
-  padding: 0 var(--sp-2) 0 0;
-  font-size: var(--fs-base);
+  width: calc(100% + var(--sp-2) * 2);
+  height: 32px;
+  margin-left: calc(var(--sp-2) * -1);
+  padding: 0 var(--sp-2);
+  border: var(--bw) solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-num);
   font-weight: var(--fw-num);
   letter-spacing: var(--tr-num);
-  color: var(--text);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  transition:
-    background-color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease);
 }
 
-.ins-title:hover {
+.ins-title:hover:not(:focus) {
   background: var(--surface-2);
   border-color: var(--border);
 }
 
 .ins-title:focus {
-  background: var(--bg);
+  background: var(--surface);
   border-color: var(--accent);
 }
 
-/* One line on what this kind of component does. Body text, not a caption:
-   it is a sentence, so it may not use .label. */
+.ins-kind {
+  color: var(--text-faint);
+}
+
+/* The one-line explanation of what this kind does. Real prose: it is the
+   teaching text, so it gets prose leading and a measure limit. */
 .ins-blurb {
+  margin-bottom: var(--sp-5);
   color: var(--text-dim);
   font-size: var(--fs-sm);
-  line-height: var(--lh-sm);
+  line-height: var(--lh-prose);
+  text-wrap: pretty;
 }
 
-/* ---------------- sections ---------------- */
+.ins-blurb em {
+  font-style: normal;
+  font-weight: var(--fw-med);
+  color: var(--text);
+}
 
-.ins-section {
+/* --------------------------------------------------------------------------
+   Utilisation
+
+   The one reading that answers "is this the problem", so it is the only
+   stat given a meter. Length is the primary channel and colour the
+   secondary one, which keeps it readable in greyscale and to a colourblind
+   student.
+   -------------------------------------------------------------------------- */
+
+.ins-util {
+  margin-bottom: var(--sp-5);
+}
+
+.ins-util-head {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  justify-content: space-between;
   gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
 }
 
-/* A rule above the eyebrow separates sections without drawing a box around
-   either one. Padding, never a border on the section itself. */
+.ins-meter {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+
+.ins-meter-fill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--ok-mark);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+/* The bar uses the -mark tokens: they are fills, never text, and they carry
+   the saturation a 6px bar needs to register at all. */
+.ins-meter.is-warn .ins-meter-fill {
+  background: var(--warn-mark);
+}
+
+.ins-meter.is-danger .ins-meter-fill {
+  background: var(--danger-mark);
+}
+
+/* --------------------------------------------------------------------------
+   Section
+
+   A caption and its content. No border, no card — the caption plus the
+   space above it is the whole boundary, which is what keeps a panel of six
+   sections from looking like a stack of drawers.
+   -------------------------------------------------------------------------- */
+
+.ins-section + .ins-section {
+  margin-top: var(--sp-7);
+}
+
 .ins-section-title {
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--border);
+  margin-bottom: var(--sp-3);
+  color: var(--text-faint);
 }
 
-/* ---------------- config fields ---------------- */
+/* --------------------------------------------------------------------------
+   Fields
+   -------------------------------------------------------------------------- */
 
 .ins-fields {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 
 /* A slider field: label and live value on one line, track beneath. */
@@ -114,13 +197,67 @@
   gap: var(--sp-3);
 }
 
-/* A numeric field: label left, input right, on a single row. */
+.ins-field-head .row-k {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The live value beside a slider is a readout, not a heading — one step
+   below the stat readouts so the two do not compete down the panel. */
+.ins-field-head .row-v {
+  flex: none;
+  font-size: var(--fs-base);
+}
+
+/* `mixed` is a word, not a number, so it drops the mono treatment it would
+   otherwise inherit from .row-v and states itself in the panel's voice. */
+.ins-mixed {
+  font-family: var(--sans);
+  font-weight: var(--fw-body);
+  font-style: italic;
+  color: var(--text-faint);
+}
+
+/* A number field.
+
+   Stacked, not side by side. A 320px rail minus a 68px input minus a unit
+   leaves well under half the width for the label, and real labels — "Test
+   requests before closing", "Requests waiting in line" — were being
+   ellipsised down to "Requests waiting…". Truncating the question while
+   showing the answer in full is exactly backwards: the label is what makes
+   the number mean anything.
+
+   The label now owns a full line and wraps if it must; the control sits
+   beneath it on its own row, sharing the slider fields' left axis so the
+   two field types read as one column. */
 .ins-field-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  min-height: 26px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-1);
+}
+
+.ins-hint {
+  /* One line of plain English under a knob whose name is ambiguous next to
+     its neighbour (instances vs capacity, shardCount vs shardCapacity).
+     Dim and small on purpose: it is there for the first read and must not
+     compete with the value once the student knows what the field means. */
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+.ins-field-row .row-k {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  /* Wraps rather than truncating — see above. */
+  text-wrap: pretty;
 }
 
 .ins-number-wrap {
@@ -129,187 +266,335 @@
   gap: var(--sp-2);
 }
 
+/* 84px holds five digits plus the caret at 14px mono with room to spare —
+   the "4-digit number where 2 were expected" case, which must not clip. */
 .ins-number {
-  width: 72px;
   flex: none;
+  width: 84px;
+  height: 32px;
 }
 
-/* The unit beside an input. A caption, so --text-faint is legal here. */
+/* A mixed multi-selection shows a placeholder rather than one node's value
+   dressed up as everyone's. */
+.ins-number[data-mixed] {
+  color: var(--text-faint);
+}
+
+/* The unit rides beside the input at the quiet step, taking whatever width
+   it needs — "extra tries" was being clipped to "extra tri…" by a fixed
+   width chosen for shorter words. Sentence case, not uppercase: these are
+   words a student reads, not a taxonomy. */
 .ins-unit {
-  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  color: var(--text-faint);
 }
 
-/* ---------------- live stats ---------------- */
+/* --------------------------------------------------------------------------
+   Live stats
+
+   A key/value table on one right axis. Zebra striping and rules are both
+   omitted: at this row height the shared right edge of the mono column is
+   already enough structure, and either would add noise for nothing.
+   -------------------------------------------------------------------------- */
 
 .ins-stats {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
 }
 
-/* Label left, value right. Every value in the panel lands on one axis, which
-   is what lets the eye scan the column instead of reading each row. */
+/* 24px is THE key/value row height in this panel. The manifest rows use the
+   same figure, because they do the same job — a label on the left, a mono
+   figure on the right. Two heights one step apart for one role is the kind
+   of near-miss that makes a panel feel unconsidered. */
 .ins-stat {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--sp-3);
+  min-height: 24px;
 }
 
-/* The arithmetic behind the derived ceiling, shown so the number is not
-   magic. Faint and small — it is a footnote to the value above it. */
+.ins-stat .row-k {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Readouts sit one step below the panel title. They are the panel's densest
+   column, so they take the base size rather than the numeric step — 16px
+   mono down a list of twelve rows reads as a spreadsheet. */
+.ins-stat .row-v {
+  flex: none;
+  font-size: var(--fs-base);
+}
+
+/* The arithmetic behind a derived figure, shown so the number is not magic.
+   Deliberately quiet and mono — it is a formula, not a reading. */
 .ins-expr {
+  padding: var(--sp-1) 0 var(--sp-2);
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--fs-label);
-  line-height: var(--lh-label);
-  letter-spacing: var(--tr-label);
-  text-transform: uppercase;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  letter-spacing: 0;
   color: var(--text-faint);
 }
 
-/* ---------------- footer ---------------- */
+/* --------------------------------------------------------------------------
+   Multi-selection
+   -------------------------------------------------------------------------- */
 
-.ins-foot {
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--border);
+.ins-multi-title {
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
 }
 
-/* Destructive, so it stays quiet until hovered. It is never the primary
-   action of the panel and must not compete with the config above it. */
-.ins-delete {
-  background: transparent;
+.ins-multi-word {
   color: var(--text-dim);
 }
 
-.ins-delete:hover:not(:disabled) {
-  background: transparent;
-  border-color: var(--danger);
-  color: var(--danger);
+/* The manifest of what is selected. A recessed block rather than a bordered
+   one: the background shift already separates it, so a border would be the
+   duplicate the boundary rule deletes. */
+.ins-manifest {
+  list-style: none;
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.ins-manifest-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 24px;
+}
+
+.ins-manifest-row .row-k {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-manifest-row .row-v {
+  flex: none;
+  font-size: var(--fs-base);
+}
+
+/* --------------------------------------------------------------------------
+   Footer
+
+   Pinned below the scroll area so the destructive action never scrolls out
+   of reach, and never drifts up under the last field either.
+   -------------------------------------------------------------------------- */
+
+.ins-foot {
+  flex: none;
+  padding: var(--sp-3) var(--sp-5);
+  border-top: var(--bw) solid var(--border);
+  background: var(--surface);
+}
+
+.ins-delete {
+  width: 100%;
 }
 
 /* ==========================================================================
-   TrafficControl — the primary control bar.
+   TrafficControl — the top bar.
 
-   It is a plain flex child of .app-bar and supplies NO background, border,
-   font or padding of its own. The previous version re-declared all four,
-   and the doubled border plus padding is what pushed the load slider and
-   its scale off the top of the viewport.
+   Two hero numbers and one slider. The slider is the only thing on screen
+   the student manipulates continuously, and p99 is the thing they are meant
+   to watch while they do it, so those two are the largest elements in the
+   application and everything else in the bar is deliberately smaller.
    ========================================================================== */
 
 .traffic {
   display: flex;
   align-items: center;
-  gap: var(--sp-8);
+  gap: var(--sp-5);
   min-width: 0;
+  /* No margin of its own: the bar (App.css) owns the gap between the
+     wordmark and this control. It previously compensated here for a gap
+     token that did not exist; that token is fixed, so the workaround is
+     gone and spacing lives in one place again. */
 }
 
-/* ---------------- offered load: the one input ---------------- */
+/* --------------------------------------------------------------------------
+   Offered load — the cause
+   -------------------------------------------------------------------------- */
 
-/* The value sits BESIDE the track, not above it.
-   Stacking eyebrow + 32px hero + 28px slider + 12px scale measures 80px, which
-   is what overflowed the 52px bar and pushed the primary control off the top of
-   the viewport. Side-by-side, the tallest element is the 32px hero and the
-   whole block measures 44px — inside a 56px bar with room to spare. */
+/* The readout sits BESIDE the track rather than stacked above it. The
+   number and the control that changes it then read as one line, instead of
+   sitting at opposite ends of a stack — and the bar stays short enough to
+   leave the canvas the height it deserves. */
 .traffic-load {
   display: flex;
+  flex: 0 1 420px;
   align-items: center;
   gap: var(--sp-4);
-  flex: 1 1 auto;
   min-width: 280px;
-  /* Capped so the slider and the number it changes stay adjacent on a wide
-     screen instead of drifting to opposite edges. */
-  max-width: 720px;
 }
 
+/* The caption and the figure, stacked tight on the left of the control. */
 .traffic-load-head {
   display: flex;
-  flex-direction: column;
-  gap: 0;
   flex: none;
-}
-
-/* The track and its scale, taking the remaining width. */
-.traffic-load-track {
-  display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
+.traffic-load-head .label {
+  color: var(--text-faint);
+  line-height: var(--lh-label);
+  white-space: nowrap;
+}
+
+/* Baseline alignment, so the unit sits on the numeral's baseline rather
+   than being centred against the hero's box. */
 .traffic-load-readout {
   display: flex;
   align-items: baseline;
   gap: var(--sp-1);
 }
 
-.traffic-load-unit {
-  color: var(--text-faint);
+/* The hero is 34px with a line-height of 1. Fixed minimum width for four
+   glyphs plus the unit, so the slider beside it does not resize as the
+   value steps between "9", "370" and "5k". */
+.traffic-load-readout .num-hero {
+  min-width: 62px;
 }
 
-/* Scale marks positioned at their true log location along the track. The
-   row is relative and each mark is absolute, translated by half its own
-   width so it is centred on its tick rather than starting at it. */
-.traffic-scale {
-  position: relative;
-  height: 12px;
-  font-size: var(--fs-label);
-  line-height: var(--lh-label);
+.traffic-load-unit {
   color: var(--text-faint);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.traffic-load-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Track height plus the scale row beneath it. Fixed, so the bar's height
+     never changes as the value does. */
+  padding-bottom: 12px;
+}
+
+/* The scale marks sit at their TRUE log positions, which is why they are
+   absolutely positioned rather than spread with space-between: 1k lands at
+   69% of the travel, and an evenly-spaced row would lie about where the
+   thumb will go. */
+.traffic-scale {
+  position: absolute;
+  inset: auto 0 0;
+  height: 12px;
+  /* The thumb is 18px, so its centre can only reach 9px from either end.
+     Insetting the mark rail by that much makes a mark sit under the thumb
+     position it names instead of drifting outward at the extremes. */
+  margin: 0 9px;
+  pointer-events: none;
 }
 
 .traffic-scale-mark {
   position: absolute;
+  top: 0;
+  /* Centres the label on its own position. */
   transform: translateX(-50%);
   font-size: var(--fs-label);
+  font-weight: var(--fw-body);
+  line-height: 1;
+  letter-spacing: 0;
+  color: var(--text-faint);
   white-space: nowrap;
 }
 
-/* Slack falls here, between the control and the readout, rather than being
-   pushed onto the headline with margin-left:auto. */
+/* Whitespace between the control half of the bar and the readout half. */
 .traffic-spacer {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: var(--sp-4);
 }
 
-/* ---------------- headline metrics: the effect ---------------- */
+/* --------------------------------------------------------------------------
+   Readouts — the effect
+   -------------------------------------------------------------------------- */
 
 .traffic-headline {
   display: flex;
-  align-items: baseline;
-  gap: var(--sp-6);
   flex: none;
+  align-items: baseline;
+  gap: var(--sp-7);
+  min-width: 0;
 }
 
 .traffic-metric {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: 2px;
+  /* Right-aligned so each figure's last digit sits on a fixed axis: a
+     value going from 99 to 100 must not shove its own label sideways. */
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.traffic-metric .label {
+  color: var(--text-faint);
   white-space: nowrap;
 }
 
+/* The secondary readouts. Grouped so they read as a set beside the hero
+   rather than as three more competing headlines. */
 .traffic-metric-group {
   display: flex;
   align-items: baseline;
-  gap: var(--sp-6);
+  gap: var(--sp-5);
 }
 
 .traffic-actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--sp-2);
-  flex: none;
 }
 
-/* At narrower widths the secondary metrics are the first thing to go: the
-   slider and p99 are the two things that must always be reachable. */
-@media (max-width: 1360px) {
-  .traffic {
-    gap: var(--sp-6);
-  }
+/* --------------------------------------------------------------------------
+   Narrow bar.
 
+   Below this the secondary readouts are dropped rather than crushed: the
+   slider and p99 are the two things that must survive, and three squeezed
+   figures help nobody. Nothing here may wrap — the bar grows if it does,
+   and it is meant to stay one line tall.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1100px) {
   .traffic-metric-group {
     display: none;
+  }
+
+  .traffic-headline {
+    gap: var(--sp-4);
+  }
+}
+
+@media (max-width: 900px) {
+  .traffic-load {
+    flex-basis: 220px;
+    min-width: 160px;
+  }
+
+  .traffic {
+    gap: var(--sp-4);
   }
 }

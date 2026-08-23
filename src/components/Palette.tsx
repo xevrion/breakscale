@@ -38,13 +38,51 @@ interface KindGroup {
 }
 
 const KIND_GROUPS: KindGroup[] = [
-  { id: 'traffic', title: 'Traffic', kinds: ['client', 'lb', 'cdn'] },
-  { id: 'compute', title: 'Compute', kinds: ['service', 'worker', 'queue'] },
-  { id: 'data', title: 'Data', kinds: ['db', 'cache', 'replica', 'shard'] },
+  { id: 'traffic', title: 'Traffic', kinds: ['client', 'lb', 'cdn', 'edgecompute'] },
+  {
+    id: 'compute',
+    title: 'Compute',
+    kinds: ['service', 'worker', 'queue', 'retryqueue', 'transcoder'],
+  },
+  {
+    id: 'data',
+    title: 'Data',
+    kinds: ['db', 'cache', 'writebehind', 'replica', 'shard'],
+  },
+  {
+    // The polyglot-persistence shelf: each of these exists because putting
+    // its workload in the main database is the mistake it teaches against.
+    id: 'stores',
+    title: 'Specialised stores',
+    kinds: [
+      'objectstore',
+      'searchindex',
+      'timeseriesdb',
+      'graphdb',
+      'vectordb',
+      'coldstorage',
+    ],
+  },
+  {
+    // How services talk when it is not one request calling one server:
+    // logs, topics, sockets, functions and jobs on a clock.
+    id: 'messaging',
+    title: 'Messaging',
+    kinds: ['streambroker', 'pubsub', 'websocket', 'lambda', 'cron'],
+  },
   {
     id: 'control',
     title: 'Control',
-    kinds: ['ratelimiter', 'breaker', 'autoscaler', 'region'],
+    kinds: [
+      'ratelimiter',
+      'loadshedder',
+      'breaker',
+      'bulkhead',
+      'autoscaler',
+      'region',
+      'apigateway',
+      'sidecar',
+    ],
   },
 ];
 
@@ -69,27 +107,52 @@ const KIND_HINT: Record<NodeKind, string> = {
   cdn: 'Serves most requests before they reach you',
   ratelimiter: 'Refuses excess traffic cheaply, at the door',
   breaker: 'Stops calling a dependency that is failing',
+  objectstore: 'Blobs: slow per request, near-unlimited',
+  searchindex: 'Fast search, but writes index late',
+  timeseriesdb: 'Swallows metrics; range queries cost',
+  graphdb: 'Relationships. Depth multiplies the cost',
+  coldstorage: 'Archive tier: cheap, and takes seconds',
+  vectordb: 'Similarity search. Recall costs latency',
+  streambroker: 'A replayable log; consumers fall behind',
+  pubsub: 'One publish becomes N deliveries',
+  websocket: 'Holds connections; they run out, not rps',
+  apigateway: 'Auth, rate limits and routing at the door',
+  sidecar: 'A proxy tax on every hop, buying retries',
+  lambda: 'Scales instantly, but cold starts cost',
+  cron: 'Dumps a burst of work on a schedule',
+  bulkhead: 'Caps calls to one dependency; contains it',
+  retryqueue: 'Redelivers failures; dead-letters the rest',
+  transcoder: 'Grinds long CPU jobs pulled off a queue',
+  edgecompute: 'Answers what it can at the edge itself',
+  writebehind: 'Acks writes fast; a crash loses the buffer',
+  loadshedder: 'Under load, drops low-priority traffic first',
 };
 
 /**
- * The failure mode each example exists to teach, stated as a fact rather
- * than a sentence. This is the line that makes the preset list a menu of
- * experiments instead of a list of names.
+ * What each example teaches, written as something a person would say.
+ *
+ * These used to be fragments — "Bottleneck: db", "Shed at the door" — which
+ * read as tags on a config file rather than as an invitation to try
+ * something. A student picking an example wants to know what they are about
+ * to watch happen, so each line now says that in plain words.
  */
 const PRESET_NOTE: Record<string, string> = {
-  'single-server': 'Bottleneck: db',
-  'load-balanced': 'Shared bottleneck',
-  'cache-aside': 'Hit rate collapse',
-  'async-workers': 'Backlog growth',
-  'retry-storm': 'Retry amplification',
-  'cdn-origin': 'Origin offload',
-  'rate-limited-api': 'Shed at the door',
-  'circuit-breaker': 'Fail fast',
-  'read-replicas': 'Stale reads',
-  'sharded-database': 'Hot key',
-  'autoscaling-service': 'Warmup lag',
-  'multi-region': 'Failover cost',
-  'full-stack': 'Everything at once',
+  'single-server': 'Watch the database become the bottleneck',
+  'load-balanced': 'More servers, same database behind them',
+  'cache-aside': 'What happens when the hit rate falls',
+  'async-workers': 'A backlog that grows faster than it drains',
+  'retry-storm': 'Retries making an overload worse',
+  'cdn-origin': 'How much traffic never reaches you',
+  'rate-limited-api': 'Turning excess away before it queues',
+  'circuit-breaker': 'Giving a failing dependency room to recover',
+  'read-replicas': 'Reads that scale, and reads that go stale',
+  'sharded-database': 'One hot key undoing all the partitions',
+  'autoscaling-service': 'Capacity arriving after it was needed',
+  'multi-region': 'What a failover actually costs you',
+  'full-stack': 'Every piece at once, under real load',
+  'specialised-stores': 'The right store for each job, side by side',
+  'event-driven': 'Lag, fan-out, cold starts and a cron burst',
+  'resilient-delivery': 'Choosing what fails, and where failures go',
 };
 
 /**
@@ -280,6 +343,11 @@ export function Palette({
                     <button
                       type="button"
                       className="pal-row"
+                      /* Drives the chip's colour trio in Palette.css. This
+                         is the same `data-kind` contract the canvas uses,
+                         so a kind is coloured by one rule per surface
+                         rather than by an inline style computed in JS. */
+                      data-kind={kind}
                       draggable
                       onDragStart={(e) => handleDragStart(e, kind)}
                       onClick={() => onAdd(kind)}

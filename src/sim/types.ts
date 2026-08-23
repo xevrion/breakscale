@@ -12,12 +12,59 @@ export type NodeKind =
   | 'ratelimiter'
   | 'breaker'
   | 'replica'
-  | 'shard';
+  | 'shard'
+  | 'objectstore'
+  | 'searchindex'
+  | 'timeseriesdb'
+  | 'graphdb'
+  | 'coldstorage'
+  | 'vectordb'
+  | 'streambroker'
+  | 'pubsub'
+  | 'websocket'
+  | 'apigateway'
+  | 'sidecar'
+  | 'lambda'
+  | 'cron'
+  | 'bulkhead'
+  | 'retryqueue'
+  | 'transcoder'
+  | 'edgecompute'
+  | 'writebehind'
+  | 'loadshedder';
 
 /** Tunable knobs per node kind. Not every field applies to every kind. */
 export interface NodeConfig {
-  /** Number of parallel request slots (threads / connections / shards). */
+  /**
+   * Parallel request slots ON ONE INSTANCE -- threads, connections, workers
+   * inside a single process. This is a property of the machine image, not of
+   * the fleet: it is what a student sets, and an autoscaler never touches it.
+   *
+   * The quantity that actually decides how much work a node can do at once is
+   * `instances * capacity`. See `instances` below for why the two are split.
+   */
   capacity: number;
+  /**
+   * How many copies of this node are running -- machines, pods, containers.
+   * Defaults to 1 when absent, which is exactly the behaviour of every
+   * topology written before this field existed: one instance holding
+   * `capacity` slots, so `instances * capacity === capacity`.
+   *
+   * WHY THIS EXISTS. `capacity` alone had to mean two different things at
+   * once. A student reads "traffic went up, so we added servers"; the engine
+   * read "the number of threads went up". Those are not the same lesson, and
+   * the ambiguity is what made the autoscaler feel like it did nothing: it
+   * incremented a thread count nobody could see. Splitting the two gives each
+   * number one job -- `capacity` is how big one box is, `instances` is how
+   * many boxes there are -- and it makes the autoscaler do the thing its name
+   * promises: it adds and removes INSTANCES, which is what a real one does.
+   *
+   * Only kinds with an instance model read it (service, worker, db, cache,
+   * lb, cdn). A shard's fleet size is `shardCount` and a replica set's is
+   * `replicaCount`; both already had their own honest count and neither is
+   * driven through this field.
+   */
+  instances?: number;
   /** Mean service time in ms for one request. */
   serviceMs: number;
   /** Coefficient of variation of service time. 0 = deterministic, 1 = exponential. */
@@ -36,8 +83,12 @@ export interface NodeConfig {
   rps: number;
 
   /* ---- autoscaler ------------------------------------------------- *
-   * An autoscaler is a controller, not a request path. It watches one
-   * downstream node's utilisation and writes that node's `capacity`.
+   * An autoscaler is a controller, not a request path. It watches one node's
+   * utilisation and writes that node's INSTANCE COUNT -- it adds and removes
+   * machines, leaving `capacity` (the size of one machine) alone.
+   *
+   * It is joined to the node it drives by a CONTROL EDGE (`SimEdge.control`),
+   * which carries no requests. See SimEdge.
    * ------------------------------------------------------------------ */
 
   /**
@@ -46,9 +97,17 @@ export interface NodeConfig {
    * minus a dead band it scales down.
    */
   targetUtil?: number;
-  /** Autoscaler only: floor on the watched node's capacity, in slots. */
+  /**
+   * Autoscaler only: fewest instances the controller will leave running.
+   *
+   * Named `minCapacity` for backward compatibility -- every existing preset
+   * and saved topology sets it -- but the unit is INSTANCES, matching what
+   * the controller now writes. For the one-instance-per-slot topologies that
+   * predate the instance model the two readings coincide, so nothing that
+   * already worked changes meaning.
+   */
   minCapacity?: number;
-  /** Autoscaler only: ceiling on the watched node's capacity, in slots. */
+  /** Autoscaler only: most instances the controller will run. In instances. */
   maxCapacity?: number;
   /**
    * Autoscaler only: ms the controller must wait after one decision before
@@ -57,14 +116,19 @@ export interface NodeConfig {
    */
   cooldownMs?: number;
   /**
-   * Autoscaler only: size of a single scaling step as a fraction of current
-   * capacity, 0..1. 0.5 means "add or remove half the current slots".
+   * Autoscaler only: size of a single scaling step as a fraction of the
+   * current instance count, 0..1. 0.5 means "add or remove half the fleet".
+   * A step always moves at least one instance, so a small percentage of a
+   * small fleet is never a silent no-op.
    */
   scaleStepPct?: number;
   /**
-   * Autoscaler only: ms between a scale-UP decision and the new slots
-   * actually becoming usable (boot + warm-up). Scale-DOWN is immediate, as
-   * it is in reality. This delay is what makes capacity lag load.
+   * Autoscaler only: ms between a scale-UP decision and the new instances
+   * actually serving traffic (boot + image pull + warm-up). Scale-DOWN is
+   * immediate, as it is in reality. This delay is what makes capacity lag
+   * load, and it is the single most important knob in the component: it is
+   * why a student sees requests fail *after* the autoscaler already decided
+   * to help.
    */
   warmupMs?: number;
 
@@ -187,6 +251,228 @@ export interface NodeConfig {
    */
   hotKeyFraction: number;
 
+  /* ---- searchindex: a search cluster with asynchronous indexing ----- *
+   * Reads (searches) are cheap; writes pay an extra indexing cost, and a
+   * committed write is not searchable until `indexLagMs` later. The read
+   * vs write split reuses `readFraction` above.
+   * ------------------------------------------------------------------- */
+
+  /**
+   * Search index only: extra service milliseconds a WRITE pays on top of
+   * the drawn `serviceMs`, for tokenising and updating the inverted index.
+   * Searches pay only `serviceMs`. This asymmetry is why bulk writes can
+   * starve a search cluster whose queries were never the problem.
+   */
+  indexMs?: number;
+  /**
+   * Search index only: milliseconds after a write COMMITS before the
+   * document is visible to searches (the refresh interval of a real search
+   * engine). A search for a key inside that window is served from the old
+   * index and is counted as a stale search. 0 means instantly searchable.
+   */
+  indexLagMs?: number;
+
+  /* ---- timeseriesdb: cheap appends, expensive range queries --------- */
+
+  /**
+   * Time-series store only: fraction of traffic that is RANGE QUERIES,
+   * 0..1. The rest are appends, which cost only `serviceMs`. Raising this
+   * a few percent is enough to melt a store sized for pure ingest.
+   */
+  rangeQueryFraction?: number;
+  /**
+   * Time-series store only: extra service milliseconds a range query pays
+   * on top of the drawn `serviceMs`, for scanning and aggregating many
+   * points. Appends never pay it.
+   */
+  rangeQueryMs?: number;
+
+  /* ---- graphdb: traversal cost grows with depth --------------------- */
+
+  /**
+   * Graph database only: how many hops a query traverses from its start
+   * node, >= 1. Each extra hop multiplies the edges visited by ~3 (the
+   * modelled mean out-degree), so query cost is
+   * `serviceMs * 3^(traversalDepth - 1)`: depth 1 reads one neighbourhood,
+   * depth 2 is friends-of-friends at 3x, depth 3 is 9x, and so on. This is
+   * the knob that shows why a deep traversal gets expensive fast.
+   */
+  traversalDepth?: number;
+
+  /* ---- vectordb: embedding search over a large index ---------------- */
+
+  /**
+   * Vector database only: size of the vector index, in THOUSANDS of
+   * embeddings. Query cost grows with log2 of this, matching an ANN index
+   * that probes more partitions as the corpus grows.
+   */
+  indexSizeK?: number;
+  /**
+   * Vector database only: target recall of the approximate search, 0..0.99.
+   * Cost scales with `1 / (1 - recallTarget)`: 0.9 probes 10x more of the
+   * index than 0, 0.99 probes 100x. Mean query cost works out to
+   * `serviceMs * log2(2 + indexSizeK) / (1 - recallTarget)`, which is the
+   * recall/latency trade-off drawn as one curve.
+   */
+  recallTarget?: number;
+
+  /* ---- streambroker: a partitioned, replayable log ------------------ *
+   * Kafka-shaped: producers are acknowledged immediately, messages land in
+   * a partition by key, and every outgoing edge is an independent CONSUMER
+   * GROUP with its own cursor. Within one partition a group consumes
+   * serially, so `partitions` is the parallelism ceiling of every group.
+   * `queueLimit` doubles as the log's RETENTION in messages: a group that
+   * falls further behind than that skips ahead, and the skipped messages
+   * are lost to it, exactly like expiring out of a Kafka topic.
+   * ------------------------------------------------------------------- */
+
+  /**
+   * Stream broker only: number of partitions in the log. A message lands in
+   * partition `key % partitions`, and one consumer group consumes at most
+   * one message per partition at a time, so this is also the maximum
+   * delivery parallelism of every group. Floored to >= 1.
+   */
+  partitions?: number;
+
+  /* ---- websocket: capacity in held connections ---------------------- */
+
+  /**
+   * Websocket gateway only: mean lifetime of one connection in ms. Each
+   * accepted connection occupies one of the node's `instances * capacity`
+   * connection slots for exactly this long. Concurrent connections settle
+   * at `rps * connectionMs / 1000` (Little's law), which is why a chat
+   * gateway saturates on connection count rather than on request rate.
+   */
+  connectionMs?: number;
+
+  /* ---- apigateway: auth in front of routing ------------------------- */
+
+  /**
+   * API gateway only: fraction of requests refused as 'unauthorized',
+   * 0..1. Rolled at admission, after the token bucket, so a burst of bad
+   * credentials still spends rate-limit tokens the way it does in life.
+   */
+  authFailRate?: number;
+
+  /* ---- sidecar: outlier ejection ------------------------------------ */
+
+  /**
+   * Sidecar only: consecutive downstream failures after which the proxy
+   * ejects its upstream and fails fast for `openMs`. A simpler policy than
+   * the breaker's windowed error rate on purpose; this is Envoy-style
+   * outlier detection, and having both flavours in the palette is itself
+   * a lesson. Floored to >= 1; defaults to 5 when unset.
+   */
+  outlierAfter?: number;
+
+  /* ---- lambda: serverless scaling ----------------------------------- */
+
+  /**
+   * Lambda only: extra latency in ms paid by a request that arrives when
+   * no warm instance is idle. This is the cold start: the platform must
+   * provision and boot an instance before the function body even runs.
+   */
+  coldStartMs?: number;
+  /**
+   * Lambda only: ms an idle warm instance is kept alive after finishing a
+   * request before the platform reclaims it. Short keep-warm plus bursty
+   * traffic is the recipe for a high cold-start rate.
+   */
+  keepWarmMs?: number;
+  /**
+   * Lambda only: most invocations allowed to run at once (the account
+   * concurrency limit). Arrivals beyond it are refused as 'throttled';
+   * a lambda has no queue of its own.
+   */
+  maxConcurrency?: number;
+
+  /* ---- cron: scheduled batch load ----------------------------------- */
+
+  /**
+   * Cron only: ms between firings of the scheduled job. Each firing dumps
+   * `batchSize` requests down every outgoing edge at once.
+   */
+  intervalMs?: number;
+  /**
+   * Cron only: requests emitted per outgoing edge each time the job fires.
+   * The burst arrives effectively simultaneously, which is the point: it
+   * is what a midnight report run does to a database.
+   */
+  batchSize?: number;
+
+  /* ---- bulkhead: an isolated concurrency pool ------------------------ *
+   * A gate in front of ONE dependency. It caps how many calls may be
+   * outstanding to that dependency at once; the excess fails fast as
+   * 'bulkhead-full' instead of queueing behind a slow downstream.
+   * ------------------------------------------------------------------- */
+
+  /**
+   * Bulkhead only: most downstream calls allowed to be in flight at once
+   * through this bulkhead. Requests arriving with the pool full are
+   * refused immediately as 'bulkhead-full'. Floored to >= 1; defaults to
+   * 8 when unset. By Little's law the pool supports roughly
+   * `bulkheadMax / serviceSeconds` requests per second of admitted
+   * traffic, and the cap is what keeps a slowed dependency's backlog
+   * bounded instead of letting it grow without limit.
+   */
+  bulkheadMax?: number;
+
+  /* ---- retryqueue: retried delivery with a dead letter shelf --------- *
+   * Reuses the shared knobs: `capacity` is delivery concurrency,
+   * `serviceMs` the per-delivery dispatch cost, `queueLimit` the buffered
+   * message ceiling, `timeoutMs` the per-attempt deadline, and `retries`
+   * how many redeliveries a failed message gets before it is dead-lettered.
+   * No field of its own is needed.
+   * ------------------------------------------------------------------- */
+
+  /* ---- writebehind: a write buffer in front of a store --------------- */
+
+  /**
+   * Write-behind cache only: ms an acknowledged write sits dirty in the
+   * buffer before its flush lands on the backing store. Models the batch
+   * interval of a real write-behind cache. The standing dirty population
+   * is roughly `writeRate * (flushDelayMs / 1000)` writes, and that
+   * population is exactly what a crash of this node loses. 0 means the
+   * flush is issued immediately.
+   */
+  flushDelayMs?: number;
+
+  /* ---- edgecompute: limited compute at the CDN edge ------------------ */
+
+  /**
+   * Edge compute only: fraction of requests the edge function can answer
+   * entirely on its own, 0..1. The rest pass through to whatever is wired
+   * downstream. This is capability, not caching: the edge is fast but
+   * limited, and this knob is how limited.
+   */
+  edgeShare?: number;
+
+  /* ---- loadshedder: priority-aware admission ------------------------- *
+   * A token bucket like the rate limiter's (it reuses `rateLimitRps` and
+   * `burst`), but it refuses by PRIORITY: low-priority traffic is turned
+   * away while the bucket still holds a reserve, so high-priority traffic
+   * keeps finding tokens when the system is saturated.
+   * ------------------------------------------------------------------- */
+
+  /**
+   * Load shedder only: fraction of traffic classified low priority, 0..1.
+   * Priority is derived deterministically from the request key (a hash of
+   * the key against this share), so the same key is always the same
+   * priority and no RNG draw is spent on classification. Defaults to 0,
+   * under which every request is high priority and the shedder behaves
+   * like a plain rate limiter.
+   */
+  lowPriorityShare?: number;
+  /**
+   * Load shedder only: fraction of the token bucket reserved for
+   * high-priority traffic, 0..1. A low-priority request needs the bucket
+   * to hold more than `1 + priorityReserve * burst` tokens; a
+   * high-priority one needs only 1. Under saturation the bucket hovers
+   * inside the reserve, so low-priority traffic is dropped first while
+   * high-priority traffic keeps being admitted. Defaults to 0.3.
+   */
+  priorityReserve?: number;
+
 }
 
 export interface SimNode {
@@ -204,6 +490,29 @@ export interface SimEdge {
   to: string;
   /** Share of traffic leaving `from` that takes this edge (relative weight). */
   weight: number;
+
+  /**
+   * This edge is a CONTROL relationship, not a request path.
+   *
+   * A control edge says "`from` acts on `to`" -- an autoscaler driving the
+   * node it resizes. It looks like a wire and it is drawn like one, but no
+   * request ever crosses it: the engine leaves control edges out of every
+   * node's routing set entirely, so fan-out, load-balancer edge selection and
+   * region indices never see them. A student who wires an autoscaler beside a
+   * service is stating a supervisory relationship, and previously that was
+   * indistinguishable from wiring traffic INTO the controller -- which is a
+   * mistake the topology had no way to express, let alone show.
+   *
+   * Absent or false means an ordinary request edge, so every topology written
+   * before this field existed keeps its exact meaning.
+   *
+   * The engine also treats it as control when the SOURCE is a kind that only
+   * ever supervises (an autoscaler), regardless of this flag -- see
+   * `ComponentBehaviour.controlsTarget`. The flag is what lets the renderer
+   * and the topology be explicit about it, and what would let some future
+   * kind have a control edge and a request edge at the same time.
+   */
+  control?: boolean;
 
   /* ---- link characteristics (networking phase) ---------------------- *
    * All optional and absent from every topology today, so nothing changes
@@ -264,23 +573,178 @@ export interface NodeStats {
   /** Total failed since sim start. */
   totalFailed: number;
 
-  /* ---- autoscaler readouts ---------------------------------------- */
+  /* ================================================================== *
+   * INSTANCE MODEL -- what this node is actually made of
+   *
+   * Every field above describes a node as ONE thing with one meter. Several
+   * kinds are not one thing: a service scaled to 5 is five machines, a shard
+   * with 4 partitions is four independent queue-and-server units, a replica
+   * set is a primary plus N read replicas. The engine has always known this;
+   * these three fields are how it says so, and they are what lets the canvas
+   * draw a stack of instances or a row of partitions instead of a box.
+   *
+   * ------------------------------------------------------------------
+   * WHAT ONE UNIT MEANS, PER KIND -- the decision, so the next agent
+   * follows it rather than inventing a second interpretation:
+   *
+   *   service, worker, db, cache, lb, cdn
+   *     ONE UNIT = ONE INSTANCE -- one machine, pod or container, holding
+   *     `capacity` request slots. `instances` is `config.instances` (1 when
+   *     unset), and the node's real parallelism is `instances * capacity`.
+   *
+   *     This is a DELIBERATE REVISION of the earlier reading, which made one
+   *     unit one capacity slot. That reading was chosen because `capacity`
+   *     was the knob the autoscaler wrote, and it had the fatal property that
+   *     the drawn stack meant "threads" while every student read it as
+   *     "servers". The slots-per-machine knob it complained did not exist now
+   *     does: it is `capacity` itself, and `instances` is the fleet size the
+   *     controller moves. The stack and the controller's steps still line up
+   *     exactly -- the controller adds 1 instance and the picture gains 1
+   *     card -- but now they line up on the quantity the student meant.
+   *
+   *     perInstance is a WATERLINE, not a per-machine busy flag. The engine
+   *     integrates one smoothed utilisation per node, not one per instance,
+   *     and requests are dispatched to whichever slot is free -- instance 3
+   *     has no identity that outlives a request. So `utilization * instances`
+   *     busy-instance-equivalents are filled from index 0: full units read 1,
+   *     one boundary unit carries the remainder, the rest read 0. A stack
+   *     drawn from this shows "3 of 5 busy" truthfully without inventing
+   *     per-machine state the simulation does not have.
+   *
+   *   shard
+   *     ONE UNIT = ONE PARTITION. perInstance[i] is shard i's own smoothed
+   *     utilisation -- genuinely independent numbers, because a partition
+   *     has its own slots and its own backlog. This is the kind where the
+   *     vector carries the whole lesson: with a hot key one entry pins at
+   *     1.0 while the others sit near 0 and the node-level mean looks fine.
+   *
+   *   replica
+   *     ONE UNIT = ONE MEMBER OF THE SET, ordered [primary, replica 0,
+   *     replica 1, ...], so instances === replicaCount + 1. Index 0 is the
+   *     primary and reports the WRITE pool's utilisation; the rest share the
+   *     read pool's utilisation, which is the honest reading because a read
+   *     is served by whichever replica is free and the engine pools them.
+   *     Drawing the primary distinctly from the read set is the point: the
+   *     write pool saturating while the read set idles is why adding read
+   *     replicas does not fix a write bottleneck.
+   *
+   *   client, queue, autoscaler, region, ratelimiter, breaker
+   *     NOT an instance model. These report `instances` undefined. A queue is
+   *     a buffer (draw its depth against queueLimit), a breaker and a limiter
+   *     are gates, an autoscaler and a region are controllers. Giving them a
+   *     stack would say something false about what they are.
+   *
+   * A consumer must treat `instances === undefined` as "this kind is one
+   * thing" and fall back to the scalar meters, never as "zero instances".
+   * ------------------------------------------------------------------ */
 
   /**
-   * Autoscaler only: capacity in slots the controller has decided the
-   * watched node should have. Differs from the watched node's live capacity
-   * for `warmupMs` after a scale-up, which is exactly the lag worth seeing.
+   * How many units this node currently represents, >= 1. Undefined for kinds
+   * that are genuinely one thing (see the table above). For a kind whose unit
+   * is an instance this equals the live `config.instances`, which is exactly
+   * what an autoscaler writes.
    */
-  targetCapacity?: number;
+  instances?: number;
   /**
-   * Autoscaler only: true while a scale-up decision is booked but its slots
-   * have not warmed up yet.
+   * Units that have been DECIDED but are not serving yet -- an autoscaler's
+   * scale-up during its `warmupMs`. Present and > 0 only while the watched
+   * node has instances booked and still booting.
+   *
+   * These are NOT included in `instances`, and deliberately so: they cannot
+   * take a request, so counting them as live would overstate the node and
+   * would make the drawn stack claim capacity the system does not have. The
+   * UI draws `instances` solid and `instancesPending` ghosted, and the
+   * interval where the ghosts sit there while the queue builds behind them is
+   * the whole teaching point of warm-up lag.
+   */
+  instancesPending?: number;
+  /**
+   * Utilisation per unit, 0..1, with `length === instances`. Undefined
+   * whenever `instances` is. Index meaning is per-kind and fixed by the table
+   * above -- partition i for a shard, [primary, ...replicas] for a replica
+   * set, an anonymous waterline over interchangeable slots for the rest.
+   *
+   * OWNERSHIP: this array belongs to the snapshot that produced it. The
+   * engine hands out a fresh array whenever the contents changed, so a
+   * memoised React consumer comparing the previous NodeStats by reference (or
+   * this field by reference) sees a new identity exactly when there is
+   * something new to draw. Do not mutate it, and do not retain it across
+   * snapshots expecting it to update in place -- it will not.
+   */
+  perInstance?: number[];
+
+  /**
+   * The node's queue limit in requests, mirrored from config so a drawable
+   * `queued / queueLimit` fill needs only the snapshot. Always >= 0, and
+   * always the same integer the engine actually sheds against -- reading
+   * `config.queueLimit` instead would show the raw slider value rather than
+   * the floored one the simulation enforces.
+   *
+   * For a shard this is the limit PER PARTITION, matching the per-shard
+   * backlogs the behaviour keeps; for a replica set it is the one shared
+   * backlog reads and writes both draw from.
+   */
+  queueLimit: number;
+
+  /* ---- autoscaler readouts ---------------------------------------- *
+   * Everything needed to narrate the controller's decision in words, without
+   * the reader having to open the config panel:
+   *
+   *   "watching <watchedId>: it is at <watchedUtil> against my setpoint of
+   *    <setpoint>. I want <targetInstances> instances, it has
+   *    <watchedInstances>, <pendingInstances> are booting (<phase>)."
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Autoscaler only: instance count the controller has decided the watched
+   * node should have. Differs from the watched node's live instance count for
+   * `warmupMs` after a scale-up, which is exactly the lag worth seeing.
+   */
+  targetInstances?: number;
+  /** Autoscaler only: the watched node's live instance count right now. */
+  watchedInstances?: number;
+  /**
+   * Autoscaler only: instances decided but still booting. Equal to
+   * `targetInstances - watchedInstances` while warming up, else 0. The same
+   * number is attached to the WATCHED node as `instancesPending`, so the
+   * stack that is about to grow can draw its own ghosts.
+   */
+  pendingInstances?: number;
+  /**
+   * Autoscaler only: id of the node this controller drives, or '' when it is
+   * not wired to one. Resolved from its control edge, so a UI can name the
+   * target without re-walking the topology.
+   */
+  watchedId?: string;
+  /** Autoscaler only: the utilisation it is reacting to, 0..1. */
+  watchedUtil?: number;
+  /** Autoscaler only: the setpoint it is holding that utilisation against, 0..1. */
+  setpoint?: number;
+  /**
+   * Autoscaler only: what the controller is doing right now.
+   *
+   *  - 'observing' gathering its first metric window on a target it has just
+   *                been pointed at; it will not act yet.
+   *  - 'warming'   a scale-up is booked and its instances are still booting.
+   *  - 'cooldown'  it acted recently and is waiting out `cooldownMs`.
+   *  - 'steady'    free to act, and the utilisation does not call for it.
+   *
+   * This is the field that turns the component from a silent box into
+   * something a student can read a sentence off.
+   */
+  scalePhase?: 'observing' | 'warming' | 'cooldown' | 'steady';
+  /**
+   * Autoscaler only: ms until the current phase ends -- until observation
+   * completes, until booked instances land, or until the cooldown expires.
+   * 0 in 'steady'. Lets a UI draw a countdown rather than a frozen label.
+   */
+  phaseRemainingMs?: number;
+  /**
+   * Autoscaler only: true while a scale-up decision is booked but its
+   * instances have not warmed up yet. Equivalent to `scalePhase === 'warming'`
+   * and kept because it reads well as a boolean at a call site.
    */
   scaling?: boolean;
-  /** Autoscaler only: the watched node's capacity right now, in slots. */
-  watchedCapacity?: number;
-  /** Autoscaler only: the watched node's smoothed utilisation, 0..1. */
-  watchedUtil?: number;
 
   /* ---- region readouts -------------------------------------------- */
 
@@ -288,6 +752,13 @@ export interface NodeStats {
   activeRegion?: number;
   /** Region only: true while mid-failover, when traffic is being dropped. */
   failingOver?: boolean;
+  /**
+   * Region only: the id of the outgoing edge traffic is actually taking right
+   * now, or undefined when none is -- every region down, or mid-failover.
+   * The standby edges are the node's other outgoing edges; they are also
+   * marked individually in SimSnapshot.edgeState.
+   */
+  liveEdgeId?: string;
   /**
    * Fraction of reads served from a replica that had not yet caught up with
    * the latest write to that key, 0..1, over the current window. Replica
@@ -341,6 +812,196 @@ export interface NodeStats {
   rejectedRate?: number;
   /** Breaker only: times the circuit has tripped OPEN since sim start. */
   breakerTrips?: number;
+
+  /* ---- searchindex readouts ----------------------------------------- */
+
+  /**
+   * Search index only: fraction of searches over the current window that
+   * hit a key whose latest write had committed but was NOT yet searchable
+   * (still inside `indexLagMs`), 0..1. This is the indexing lag made
+   * visible: it rises with the lag and with write volume.
+   */
+  staleSearchRate?: number;
+  /** Search index only: searches served per second over the window. */
+  searchRate?: number;
+  /** Search index only: writes (documents indexed) per second over the window. */
+  indexWriteRate?: number;
+
+  /* ---- timeseriesdb readouts ---------------------------------------- */
+
+  /** Time-series store only: appends served per second over the window. */
+  appendRate?: number;
+  /** Time-series store only: range queries served per second over the window. */
+  rangeQueryRate?: number;
+
+  /* ---- graphdb readouts ---------------------------------------------- */
+
+  /**
+   * Graph database only: MEASURED mean service milliseconds per traversal
+   * over the current window, including the depth multiplier. Compare it to
+   * `serviceMs` to see what the configured depth is actually costing.
+   */
+  traversalCostMs?: number;
+
+  /* ---- vectordb readouts ---------------------------------------------- */
+
+  /**
+   * Vector database only: MEASURED mean service milliseconds per query over
+   * the current window, including the index-size and recall multipliers.
+   * This is the number that moves when the recall slider does.
+   */
+  queryCostMs?: number;
+
+  /* ---- streambroker readouts ---------------------------------------- */
+
+  /**
+   * Stream broker only: how many messages the WORST consumer group is
+   * behind the head of the log, in messages, including deliveries still in
+   * flight. This is the headline metric of a partitioned log: it grows
+   * while a group's consumers are slower than the producers and drains
+   * back toward zero when they catch up. Also mirrored into `queued` so
+   * the generic backlog meter shows it against `queueLimit` (retention).
+   */
+  consumerLag?: number;
+  /**
+   * Stream broker only: lag per consumer group, in messages, indexed by
+   * the group's outgoing-edge order. Length tracks the number of non-cut
+   * outgoing edges; groups are independent, which is the point.
+   */
+  consumerLagByGroup?: number[];
+  /** Stream broker only: messages delivered to consumers per second, all groups. */
+  deliveryRate?: number;
+  /**
+   * Stream broker only: messages per second a lagging group SKIPPED because
+   * they aged out of retention (`queueLimit`) before it reached them. Data
+   * loss for that group, invisible to the producer. Nonzero means a consumer
+   * is not merely behind; it is losing data.
+   */
+  retentionDropRate?: number;
+
+  /* ---- pubsub readouts ----------------------------------------------- */
+
+  /** Pub/sub only: subscriber edges currently fanned out to. */
+  fanout?: number;
+  /**
+   * Pub/sub only: deliveries per second across all subscribers. With N
+   * subscribers this reads N times the publish rate, and that
+   * amplification is the entire lesson of the component.
+   */
+  publishAmplification?: number;
+
+  /* ---- websocket readouts -------------------------------------------- */
+
+  /** Websocket only: connections held open right now. */
+  connectionsOpen?: number;
+  /** Websocket only: the connection ceiling, `instances * capacity`. */
+  maxConnections?: number;
+  /** Websocket only: connections accepted per second over the window. */
+  connectRate?: number;
+  /** Websocket only: connections refused per second because the ceiling was hit. */
+  connectionRejectRate?: number;
+
+  /* ---- apigateway readouts ------------------------------------------- */
+
+  /**
+   * API gateway only: requests per second refused as 'unauthorized'. The
+   * gateway's throttle readouts reuse `admittedRate`, `throttledRate` and
+   * `tokens` above.
+   */
+  authRejectRate?: number;
+
+  /* ---- sidecar readouts ----------------------------------------------- *
+   * The sidecar's circuit readouts reuse `breakerState` and `rejectedRate`
+   * above; its policy differs (consecutive failures, not a windowed rate)
+   * but the states mean the same thing.
+   * -------------------------------------------------------------------- */
+
+  /** Sidecar only: consecutive downstream failures observed right now. */
+  consecutiveFails?: number;
+  /** Sidecar only: downstream call failures per second it observed. */
+  upstreamFailRate?: number;
+
+  /* ---- lambda readouts ------------------------------------------------ */
+
+  /**
+   * Lambda only: fraction of invocations over the window that paid a cold
+   * start, 0..1. High after idling (the pool went cold) and during bursts
+   * (arrivals outrun the warm pool); near zero under steady traffic.
+   */
+  coldStartRate?: number;
+  /** Lambda only: cold starts per second over the window. */
+  coldStartsPerSec?: number;
+  /** Lambda only: warm instances sitting idle, ready to serve instantly. */
+  warmIdle?: number;
+  /** Lambda only: invocations running right now, against `maxConcurrency`. */
+  runningNow?: number;
+
+  /* ---- cron readouts --------------------------------------------------- */
+
+  /** Cron only: ms until the job fires next. */
+  nextFireInMs?: number;
+  /** Cron only: total requests emitted since sim start, all firings. */
+  batchEmitted?: number;
+
+  /* ---- bulkhead readouts ---------------------------------------------- */
+
+  /** Bulkhead only: downstream calls in flight through the pool right now. */
+  bulkheadInFlight?: number;
+  /** Bulkhead only: the pool's concurrency ceiling, mirrored from config. */
+  bulkheadLimit?: number;
+  /** Bulkhead only: requests per second refused because the pool was full. */
+  bulkheadRejectedRate?: number;
+
+  /* ---- retryqueue readouts --------------------------------------------- */
+
+  /** Retry queue only: messages per second delivered downstream successfully. */
+  deliveredRate?: number;
+  /**
+   * Retry queue only: failed delivery attempts per second that were given
+   * another try. Rises before dead letters do, so it is the early warning.
+   */
+  redeliveryRate?: number;
+  /** Retry queue only: messages per second exhausting their retries. */
+  deadLetterRate?: number;
+  /**
+   * Retry queue only: messages that exhausted every retry since sim start.
+   * This is the dead letter shelf: failures with somewhere to go, counted
+   * instead of vanished.
+   */
+  deadLetters?: number;
+
+  /* ---- writebehind readouts -------------------------------------------- */
+
+  /**
+   * Write-behind cache only: acknowledged writes sitting dirty in the
+   * buffer right now (buffered plus mid-flush). Every one of these is a
+   * write the caller believes is safe and a crash of this node would lose.
+   */
+  dirtyWrites?: number;
+  /** Write-behind cache only: writes per second landing on the backing store. */
+  flushedRate?: number;
+
+  /* ---- edgecompute readouts -------------------------------------------- */
+
+  /** Edge compute only: requests per second answered entirely at the edge. */
+  edgeHandledRate?: number;
+  /** Edge compute only: requests per second passed through to the origin path. */
+  passedThroughRate?: number;
+
+  /* ---- loadshedder readouts --------------------------------------------- *
+   * The shedder's bucket readouts reuse `admittedRate` and `tokens` above;
+   * the fields below split admissions and drops by priority, which is the
+   * readout that shows graceful degradation actually happening.
+   * ---------------------------------------------------------------------- */
+
+  /** Load shedder only: high-priority requests per second admitted. */
+  highAdmittedRate?: number;
+  /** Load shedder only: low-priority requests per second admitted. */
+  lowAdmittedRate?: number;
+  /** Load shedder only: high-priority requests per second dropped ('throttled'). */
+  highSheddedRate?: number;
+  /** Load shedder only: low-priority requests per second dropped ('deprioritized'). */
+  lowSheddedRate?: number;
 }
 
 /** End-to-end results measured at the client. */
@@ -371,7 +1032,15 @@ export type FailureReason =
   /** The edge the call needed is cut by an injected network partition. */
   | 'partitioned'
   /** No region was serving: the active one is down and failover has not landed. */
-  | 'region-down';
+  | 'region-down'
+  /** Refused by a websocket gateway: every connection slot was already held. */
+  | 'conn-refused'
+  /** Refused by an API gateway: the request failed authentication. */
+  | 'unauthorized'
+  /** Refused by a bulkhead: its concurrency pool was already full. */
+  | 'bulkhead-full'
+  /** Dropped by a load shedder protecting higher-priority traffic. */
+  | 'deprioritized';
 
 /* ------------------------------------------------------------------ *
  * Failure injection
@@ -425,6 +1094,38 @@ export interface ActiveFailure {
   edgeIds?: string[];
 }
 
+/**
+ * Why an edge is or is not carrying traffic right now.
+ *
+ * `edgeFlow` alone cannot answer this. An edge at 0 rps because a breaker in
+ * front of it is OPEN and an edge at 0 rps because nobody happens to be
+ * calling look identical as numbers, and they mean opposite things: the first
+ * is a component doing its job, the second is an idle link. Drawing them the
+ * same is precisely the dishonesty this field exists to remove -- a severed
+ * wire should look severed.
+ *
+ * Exactly one state applies per edge, resolved in the order listed here:
+ * a cut link is reported as 'cut' even if a breaker upstream is also open,
+ * because the injected fault is the more specific truth about that wire.
+ */
+export type EdgeState =
+  /** Cut by an injected 'partition' failure. Nothing crosses it at all. */
+  | 'cut'
+  /**
+   * The source node is refusing to send: a breaker OPEN or half-open past its
+   * probe budget. The link is fine; the component decided not to use it.
+   */
+  | 'blocked'
+  /**
+   * A region node's non-active edge. Wired, healthy, deliberately unused --
+   * this is the standby region, and it must not look like a dead link.
+   */
+  | 'standby'
+  /** Carrying traffic now. */
+  | 'live'
+  /** Wired and permitted, but nothing is flowing. Ordinary idleness. */
+  | 'idle';
+
 export interface SimSnapshot {
   system: SystemStats;
   nodes: Record<string, NodeStats>;
@@ -432,6 +1133,17 @@ export interface SimSnapshot {
   history: HistoryPoint[];
   /** Per-edge requests/sec, keyed by edge id. */
   edgeFlow: Record<string, number>;
+  /**
+   * Why each edge is in the state it is, keyed by edge id -- one entry per
+   * edge in the topology, always populated. Read alongside `edgeFlow`: the
+   * rate says how much, this says whether the wire is even usable.
+   *
+   * 'live' vs 'idle' is decided from the edge's own rate, so it flickers with
+   * traffic and is only a hint; 'cut', 'blocked' and 'standby' are structural
+   * assertions the engine stands behind, and are the ones worth drawing
+   * differently.
+   */
+  edgeState: Record<string, EdgeState>;
   failuresByReason: Record<FailureReason, number>;
   /**
    * Injected failures in force right now, one entry per faulted node. Empty

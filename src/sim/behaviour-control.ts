@@ -40,10 +40,16 @@ import { clamp01 } from './behaviour';
  */
 const DEAD_BAND = 0.1;
 
-/** Fallbacks for the optional config knobs, so an unset field is never NaN. */
+/**
+ * Fallbacks for the optional config knobs, so an unset field is never NaN.
+ *
+ * The timings are chosen so a student dragging the load slider sees the whole
+ * story inside a few seconds of watching -- see the note on `warmupMs` in
+ * presets.ts for the measured timeline.
+ */
 const DEFAULT_TARGET_UTIL = 0.7;
-const DEFAULT_MIN_CAPACITY = 1;
-const DEFAULT_MAX_CAPACITY = 64;
+const DEFAULT_MIN_INSTANCES = 1;
+const DEFAULT_MAX_INSTANCES = 64;
 const DEFAULT_COOLDOWN_MS = 5000;
 const DEFAULT_STEP_PCT = 0.5;
 const DEFAULT_WARMUP_MS = 0;
@@ -52,19 +58,19 @@ interface AutoscalerState {
   /** Simulated time of the last decision; -Infinity means "never decided". */
   lastDecisionMs: number;
   /**
-   * Capacity the controller believes the watched node should have. Tracked
-   * separately from the node's live capacity because during a warm-up the two
-   * deliberately disagree, and that gap is the thing worth showing.
+   * Instance count the controller believes the watched node should have.
+   * Tracked separately from the node's live count because during a warm-up
+   * the two deliberately disagree, and that gap is the thing worth showing.
    */
-  targetCapacity: number;
+  targetInstances: number;
   /**
    * Simulated time at which a pending scale-UP lands, or -1 when nothing is
    * warming up. Holding a granted decision here instead of applying it at once
    * is the entire point of this component.
    */
   warmupDueMs: number;
-  /** Capacity to write when the warm-up completes. */
-  pendingCapacity: number;
+  /** Instance count to write when the warm-up completes. */
+  pendingInstances: number;
   /** Node being driven, resolved from the controller's first out edge. */
   watchedId: string;
   /**
@@ -87,12 +93,23 @@ function asAutoscaler(state: NodeStateLike): AutoscalerState | null {
 }
 
 /**
- * A capacity controller.
+ * A fleet controller: it adds and removes INSTANCES.
  *
- * It sits BESIDE the node it scales rather than in front of it: its outgoing
- * edge names its target and carries no traffic. Once per `cooldownMs` it
- * compares the watched node's utilisation against `targetUtil` and steps
- * capacity by `scaleStepPct`, clamped to [minCapacity, maxCapacity].
+ * It sits BESIDE the node it scales rather than in front of it, joined to it
+ * by a CONTROL EDGE that carries no requests -- the engine keeps control
+ * edges out of routing entirely, so a request can never be dispatched down
+ * one. Once per `cooldownMs` it compares the watched node's utilisation
+ * against `targetUtil` and steps its instance count by `scaleStepPct`,
+ * clamped to [minCapacity, maxCapacity] instances.
+ *
+ * WHAT IT WRITES, AND WHY THAT CHANGED. It used to write the watched node's
+ * `capacity` -- its thread count. That was numerically fine and pedagogically
+ * useless: "traffic went up so we added threads" is not the sentence anyone
+ * means, and because nothing on the canvas counted threads, the controller
+ * appeared to do nothing at all. It now writes `instances`, so the drawn
+ * stack of machines grows by exactly the number of machines it decided to
+ * add. `capacity` -- how big one machine is -- belongs to the student and the
+ * controller never touches it.
  *
  * The teaching point is the lag. A scale-UP does not take effect until
  * `warmupMs` after the decision -- machines boot, images pull, JITs warm --
@@ -115,6 +132,11 @@ const autoscaler: ComponentBehaviour = {
   // integration, so it renders as a control box rather than an idle server.
   servesRequests: false,
   generatesLoad: false,
+  // Every edge out of an autoscaler names the node it drives, never a hop.
+  // The engine reads this at wiring time and leaves those edges out of the
+  // routing set, so "requests are never routed down a control edge" is a
+  // structural property rather than something enforced request by request.
+  controlsTarget: true,
   pullsFromQueues: false,
   buffersForConsumers: false,
   pump: 'none',
@@ -122,17 +144,19 @@ const autoscaler: ComponentBehaviour = {
 
   initState: (): AutoscalerState => ({
     lastDecisionMs: -Infinity,
-    targetCapacity: 0,
+    targetInstances: 0,
     warmupDueMs: -1,
-    pendingCapacity: 0,
+    pendingInstances: 0,
     watchedId: '',
     observeUntilMs: -1,
   }),
 
   /**
    * Traffic reaching an autoscaler means the student wired requests INTO the
-   * controller. Refusing explicitly is far more legible than serving it, which
-   * would make the controller look like a hop that mysteriously adds latency.
+   * controller -- which now takes deliberate effort, since the edges the
+   * controller itself owns are control edges and carry nothing. Refusing
+   * explicitly is far more legible than serving it, which would make the
+   * controller look like a hop that mysteriously adds latency.
    */
   onAdmit: (ctx, state, req) => {
     ctx.reject(state, req, 'no-route');
@@ -148,13 +172,15 @@ const autoscaler: ComponentBehaviour = {
     if (!st) return;
 
     // The watched node is whatever this controller points at, re-resolved each
-    // tick so rewiring the edge on the canvas retargets it live.
-    const watched = state.out.length > 0 ? state.out[0].to : '';
+    // tick so rewiring the edge on the canvas retargets it live. Its target
+    // arrives on a CONTROL edge, which is a separate list from `out` precisely
+    // because it is not a traffic path.
+    const watched = ctx.controlTargetOf(state);
     if (watched !== st.watchedId) {
       st.watchedId = watched;
       // A new target invalidates every decision made about the old one.
       st.warmupDueMs = -1;
-      st.targetCapacity = 0;
+      st.targetInstances = 0;
       st.lastDecisionMs = -Infinity;
       // ...and starts a fresh observation window, because the new node's
       // smoothed utilisation is not a signal yet.
@@ -162,18 +188,21 @@ const autoscaler: ComponentBehaviour = {
     }
     if (watched === '') return;
 
-    const liveCapacity = ctx.capacityOf(watched);
-    if (liveCapacity === null) return;
+    // How many instances the target is running. Null means the target is a
+    // kind with no fleet to move (a queue, a breaker): the controller stays
+    // put rather than ramping a number nothing reads.
+    const liveInstances = ctx.scaleOf(watched);
+    if (liveInstances === null) return;
 
     // First tick: adopt what the node already has, so the controller never
-    // yanks capacity to a default the student did not ask for.
-    if (st.targetCapacity === 0) st.targetCapacity = liveCapacity;
+    // yanks the fleet to a default the student did not ask for.
+    if (st.targetInstances === 0) st.targetInstances = liveInstances;
 
     // A pending scale-up whose warm-up elapsed becomes real capacity now.
     if (st.warmupDueMs >= 0 && ctx.now >= st.warmupDueMs) {
       st.warmupDueMs = -1;
-      st.targetCapacity = st.pendingCapacity;
-      ctx.setCapacity(watched, st.pendingCapacity);
+      st.targetInstances = st.pendingInstances;
+      ctx.setScale(watched, st.pendingInstances);
     }
 
     // A scale-up already booked and still warming up blocks further decisions.
@@ -207,73 +236,111 @@ const autoscaler: ComponentBehaviour = {
     const util = ctx.utilizationOf(watched);
     if (util === null) return;
 
-    const minCap = Math.max(1, Math.floor(cfg.minCapacity ?? DEFAULT_MIN_CAPACITY));
-    const maxCap = Math.max(minCap, Math.floor(cfg.maxCapacity ?? DEFAULT_MAX_CAPACITY));
+    // minCapacity/maxCapacity keep their field names for compatibility, but
+    // the unit they bound is now INSTANCES -- the fleet size, not the thread
+    // count. For every topology written before instances existed the two
+    // readings coincide, because those nodes run exactly one instance.
+    const minInst = Math.max(1, Math.floor(cfg.minCapacity ?? DEFAULT_MIN_INSTANCES));
+    const maxInst = Math.max(minInst, Math.floor(cfg.maxCapacity ?? DEFAULT_MAX_INSTANCES));
     const target = clamp01(cfg.targetUtil ?? DEFAULT_TARGET_UTIL);
     const step = Math.max(0.01, cfg.scaleStepPct ?? DEFAULT_STEP_PCT);
-    // Capacity is integral, so a step must move at least one slot: a small
-    // percentage of a small capacity would otherwise round to a permanent
+    // An instance count is integral, so a step must move at least one machine:
+    // a small percentage of a small fleet would otherwise round to a permanent
     // no-op and the controller would silently do nothing forever.
-    const delta = Math.max(1, Math.round(st.targetCapacity * step));
+    const delta = Math.max(1, Math.round(st.targetInstances * step));
 
-    // The capacity that would put utilisation exactly on the setpoint, given
-    // that busy slots are (util * currentCapacity) right now. Used to bound a
-    // step so the controller cannot overshoot THROUGH its own setpoint: a
-    // fixed percentage step alone will happily take a node from 40%
-    // utilisation straight into saturation, and then have to scale back up,
-    // which is self-inflicted oscillation on top of the real kind.
-    const busySlots = util * st.targetCapacity;
-    const idealCapacity = Math.max(1, Math.ceil(busySlots / (target > 0 ? target : 1)));
+    // The fleet size that would put utilisation exactly on the setpoint, given
+    // that (util * currentInstances) instance-equivalents are busy right now.
+    // Used to bound a step so the controller cannot overshoot THROUGH its own
+    // setpoint: a fixed percentage step alone will happily take a node from
+    // 40% utilisation straight into saturation, and then have to scale back
+    // up, which is self-inflicted oscillation on top of the real kind.
+    //
+    // Utilisation is dimensionless -- busy slots over total slots -- so this
+    // arithmetic is identical whether the fleet is counted in machines or in
+    // threads, which is why moving the controller onto instances changed the
+    // unit without changing the control law.
+    const busyInstances = util * st.targetInstances;
+    const idealInstances = Math.max(1, Math.ceil(busyInstances / (target > 0 ? target : 1)));
 
-    let want = st.targetCapacity;
+    let want = st.targetInstances;
     if (util > target) {
       // Scale up by a step, but never past what the setpoint actually needs.
-      want = Math.min(st.targetCapacity + delta, Math.max(idealCapacity, st.targetCapacity + 1));
+      want = Math.min(st.targetInstances + delta, Math.max(idealInstances, st.targetInstances + 1));
     } else if (util < target - DEAD_BAND) {
       // Scale down by a step, but never below what the setpoint needs. The
       // asymmetry with scale-up is deliberate: shedding too much capacity
       // causes an immediate outage, while adding too much only costs money.
-      want = Math.max(st.targetCapacity - delta, idealCapacity);
+      want = Math.max(st.targetInstances - delta, idealInstances);
     }
 
-    want = want < minCap ? minCap : want > maxCap ? maxCap : want;
-    if (want === st.targetCapacity) return;
+    want = want < minInst ? minInst : want > maxInst ? maxInst : want;
+    if (want === st.targetInstances) return;
 
     st.lastDecisionMs = ctx.now;
 
-    if (want < st.targetCapacity) {
-      // Removing capacity is immediate; nothing has to boot. Any pending
+    if (want < st.targetInstances) {
+      // Removing instances is immediate; nothing has to boot. Any pending
       // scale-up is cancelled outright rather than left half-set, so a later
-      // read of pendingCapacity cannot resurrect a decision this one reversed.
-      st.targetCapacity = want;
+      // read of pendingInstances cannot resurrect a decision this one reversed.
+      st.targetInstances = want;
       st.warmupDueMs = -1;
-      st.pendingCapacity = want;
-      ctx.setCapacity(watched, want);
+      st.pendingInstances = want;
+      ctx.setScale(watched, want);
       return;
     }
 
     const warmup = Math.max(0, cfg.warmupMs ?? DEFAULT_WARMUP_MS);
     if (warmup === 0) {
-      st.targetCapacity = want;
-      ctx.setCapacity(watched, want);
+      st.targetInstances = want;
+      ctx.setScale(watched, want);
       return;
     }
-    // Book the decision. The slots do not exist yet -- this is the lag.
-    st.pendingCapacity = want;
+    // Book the decision. The machines do not exist yet -- this is the lag.
+    st.pendingInstances = want;
     st.warmupDueMs = ctx.now + warmup;
   },
 
+  /**
+   * Publish everything needed to say, in one sentence, what this controller
+   * is doing and why. A student should never have to open the config panel to
+   * find out that the box is sitting in a cooldown.
+   */
   decorateStats: (ctx, state, stats: NodeStats) => {
     const st = asAutoscaler(state);
     if (!st) return;
     const scaling = st.warmupDueMs >= 0;
-    // While warming up, report the capacity being BOOKED rather than the one
-    // in force: paired with watchedCapacity, the gap between the two numbers
+    const live = st.watchedId ? ctx.scaleOf(st.watchedId) ?? 0 : 0;
+    // While warming up, report the fleet size being BOOKED rather than the one
+    // in force: paired with watchedInstances, the gap between the two numbers
     // is the visible form of the lag this component exists to teach.
-    stats.targetCapacity = scaling ? st.pendingCapacity : st.targetCapacity;
+    const wanted = scaling ? st.pendingInstances : st.targetInstances;
+
+    stats.watchedId = st.watchedId;
+    stats.targetInstances = wanted;
+    stats.watchedInstances = live;
+    stats.pendingInstances = scaling ? Math.max(0, wanted - live) : 0;
     stats.scaling = scaling;
-    stats.watchedCapacity = st.watchedId ? ctx.capacityOf(st.watchedId) ?? 0 : 0;
     stats.watchedUtil = st.watchedId ? ctx.utilizationOf(st.watchedId) ?? 0 : 0;
+    stats.setpoint = clamp01(state.config.targetUtil ?? DEFAULT_TARGET_UTIL);
+
+    // Which of the three waits it is in, and how much of it is left. Resolved
+    // in the same order onTick() applies them, so the label never claims the
+    // controller is free to act when the next tick will find it blocked.
+    const cooldown = Math.max(0, state.config.cooldownMs ?? DEFAULT_COOLDOWN_MS);
+    if (scaling) {
+      stats.scalePhase = 'warming';
+      stats.phaseRemainingMs = Math.max(0, st.warmupDueMs - ctx.now);
+    } else if (st.observeUntilMs >= 0 && ctx.now < st.observeUntilMs) {
+      stats.scalePhase = 'observing';
+      stats.phaseRemainingMs = Math.max(0, st.observeUntilMs - ctx.now);
+    } else if (ctx.now - st.lastDecisionMs < cooldown) {
+      stats.scalePhase = 'cooldown';
+      stats.phaseRemainingMs = Math.max(0, cooldown - (ctx.now - st.lastDecisionMs));
+    } else {
+      stats.scalePhase = 'steady';
+      stats.phaseRemainingMs = 0;
+    }
   },
 };
 
@@ -438,14 +505,95 @@ const region: ComponentBehaviour = {
     return null; // dark for the length of the failover window
   },
 
+  /**
+   * Which outgoing edge is live, and which are merely standing by.
+   *
+   * A standby region is wired, healthy and deliberately unused. Left to the
+   * engine's flow-based fallback it would read 'idle' -- indistinguishable
+   * from a dead link -- and the entire point of the component (there is a
+   * second region sitting there ready) would be invisible on the canvas.
+   *
+   * Strictly a read: `pickEdge` is where the state machine advances, and
+   * duplicating any of that here would let the number of times the UI polled
+   * change the simulation.
+   */
+  edgeStateFor: (ctx, state, _edge, index) => {
+    const st = asRegion(state);
+    if (!st) return null;
+    const count = regionCount(state);
+    // Edges past `regions` are not regions at all; the engine's flow-based
+    // fallback describes them better than this hook can.
+    if (index >= count) return null;
+
+    const live = liveRegionIndex(ctx, state, st);
+    // Nothing is serving -- mid-failover, or every region down. No edge is
+    // live, and calling the others 'standby' would still be true.
+    if (live === -1) return 'standby';
+    return index === live ? 'live' : 'standby';
+  },
+
   decorateStats: (ctx, state, stats: NodeStats) => {
     const st = asRegion(state);
     if (!st) return;
     const failingOver = st.failoverDueMs >= 0 && ctx.now < st.failoverDueMs;
     stats.activeRegion = st.active < 0 ? 0 : st.active;
     stats.failingOver = failingOver;
+    const live = liveRegionIndex(ctx, state, st);
+    stats.liveEdgeId = live === -1 ? undefined : state.out[live]?.id;
   },
 };
+
+/**
+ * The region index traffic would take if a request arrived right now, or -1
+ * when none would: mid-failover, or with every region unreachable.
+ *
+ * A pure mirror of the decision `pickEdge` makes, and it must stay pure --
+ * this is called from snapshot(), so advancing `active` or landing a failover
+ * from here would make the simulation depend on the UI's polling rate. It
+ * therefore reads the failover deadline without clearing it and scans for a
+ * healthy region without adopting one; `pickEdge` does the committing when a
+ * real request turns up.
+ *
+ * It intentionally does NOT re-apply the config-adoption step. That step is
+ * driven by the student changing the Inspector value, and running it here
+ * would consume the change -- pickEdge would then never see it, and a manual
+ * region switch would silently do nothing whenever the UI happened to
+ * snapshot first.
+ */
+function liveRegionIndex(ctx: BehaviourCtx, state: NodeStateLike, st: RegionState): number {
+  const count = regionCount(state);
+
+  // A failover still inside its window: the node is dark, exactly as
+  // pickEdge would report by returning null.
+  if (st.failoverDueMs >= 0 && ctx.now < st.failoverDueMs) return -1;
+
+  // The window elapsed but no request has arrived to land it yet. The next
+  // one will land on failoverTarget, so that is the honest answer now.
+  const active = st.failoverDueMs >= 0 ? st.failoverTarget : st.active;
+  if (active < 0) {
+    // Nothing has been adopted yet; pickEdge would take the configured region.
+    const configured = Math.floor(state.config.activeRegion ?? 0);
+    const wanted = configured < 0 ? 0 : configured >= count ? count - 1 : configured;
+    return regionHealthy(ctx, state, wanted) ? wanted : -1;
+  }
+
+  if (regionHealthy(ctx, state, active)) return active;
+
+  // The active region is down. pickEdge would begin a failover, which is a
+  // dark window before the next region takes over -- so report dark, in the
+  // same fixed scan order, only conceding a live edge when failoverMs is 0
+  // and the cutover really is instant.
+  let next = -1;
+  for (let i = 1; i <= count; i++) {
+    const candidate = (active + i) % count;
+    if (regionHealthy(ctx, state, candidate)) {
+      next = candidate;
+      break;
+    }
+  }
+  if (next === -1) return -1;
+  return Math.max(0, state.config.failoverMs ?? 0) === 0 ? next : -1;
+}
 
 /** The behaviours defined in this module, for registration in behaviour.ts. */
 export const CONTROL_BEHAVIOURS: ComponentBehaviour[] = [autoscaler, region];

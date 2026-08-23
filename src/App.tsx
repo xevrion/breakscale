@@ -3,6 +3,7 @@ import type {
   NodeConfig,
   NodeKind,
   NodeStats,
+  SimNode,
   SimSnapshot,
   Topology,
 } from './sim/types';
@@ -91,6 +92,32 @@ const NODE_KINDS: readonly NodeKind[] = [
   'shard',
   'autoscaler',
   'region',
+  // This list gates what loads back out of localStorage, so every kind the
+  // registry knows must appear here or a student's saved topology that uses
+  // it is silently thrown away on reload. The three edge kinds below were
+  // missing since they shipped; the rest arrived with their tiers.
+  'cdn',
+  'ratelimiter',
+  'breaker',
+  'objectstore',
+  'searchindex',
+  'timeseriesdb',
+  'graphdb',
+  'coldstorage',
+  'vectordb',
+  'streambroker',
+  'pubsub',
+  'websocket',
+  'apigateway',
+  'sidecar',
+  'lambda',
+  'cron',
+  'bulkhead',
+  'retryqueue',
+  'transcoder',
+  'edgecompute',
+  'writebehind',
+  'loadshedder',
 ];
 
 /**
@@ -447,6 +474,15 @@ export default function App() {
     [handleDeleteSelection],
   );
 
+  /**
+   * Delete every node in a multi-selection. Routes through the same single
+   * topology edit as everything else, so orphaned edges go with it.
+   */
+  const handleDeleteMany = useCallback(
+    (ids: readonly string[]) => handleDeleteSelection(ids, []),
+    [handleDeleteSelection],
+  );
+
   /* ---------------- live config edits ---------------- */
 
   /**
@@ -466,6 +502,35 @@ export default function App() {
       if (patch.rps !== undefined) setRps(patch.rps);
     },
     [engine],
+  );
+
+  /**
+   * Apply ONE patch to MANY nodes. Deliberately not a loop over
+   * handleConfigChange: each call would close over the topology as it was at
+   * render time, so the second write would resurrect the first node's old
+   * config. The engine is told node-by-node (its API is per-node and applies
+   * in place, so that part is safe to iterate), but React state is rebuilt in
+   * a single pass over one `Set`.
+   */
+  const handleConfigChangeMany = useCallback(
+    (ids: readonly string[], patch: Partial<NodeConfig>) => {
+      if (ids.length === 0) return;
+      const targets = new Set(ids);
+      for (const id of targets) engine.updateNodeConfig(id, patch);
+      setTopology((t) => ({
+        ...t,
+        nodes: t.nodes.map((n) =>
+          targets.has(n.id) ? { ...n, config: { ...n.config, ...patch } } : n,
+        ),
+      }));
+      // If the traffic source was in the selection, the load slider must
+      // follow it — the bar and the client's rps knob are one value.
+      if (patch.rps !== undefined) {
+        const client = findClient(topology);
+        if (client && targets.has(client.id)) setRps(patch.rps);
+      }
+    },
+    [engine, topology],
   );
 
   const handleRename = useCallback((id: string, label: string) => {
@@ -566,15 +631,33 @@ export default function App() {
   /* ---------------- derived ---------------- */
 
   /**
-   * The Inspector edits one node. A multi-selection has no single subject, so
-   * it shows the empty state rather than picking an arbitrary member — which
-   * would make edits land somewhere the user did not point at.
+   * The selection, split into the two things the Inspector understands.
+   *
+   * Node ids and edge ids share `selectedIds`, so the split is simply "is
+   * there a node with this id". Anything left over is an edge — the canvas
+   * only ever puts those two kinds of id in the set.
+   *
+   * Kept in ONE memo rather than three so the panel can never be handed a
+   * node list and an edge count computed from different renders.
    */
-  const selectedNode = useMemo(() => {
-    if (selectedIds.size !== 1) return null;
-    const [only] = selectedIds;
-    return topology.nodes.find((n) => n.id === only) ?? null;
+  const { selectedNodes, selectedEdgeCount } = useMemo(() => {
+    if (selectedIds.size === 0) {
+      return { selectedNodes: EMPTY_NODES, selectedEdgeCount: 0 };
+    }
+    const nodes = topology.nodes.filter((n) => selectedIds.has(n.id));
+    return {
+      selectedNodes: nodes,
+      // Whatever in the set is not a node id is an edge id.
+      selectedEdgeCount: selectedIds.size - nodes.length,
+    };
   }, [topology.nodes, selectedIds]);
+
+  /**
+   * The single-node subject. Still resolved separately because the Inspector's
+   * `node` prop drives the whole single-node view; `selectedNodes` only takes
+   * over when it holds two or more.
+   */
+  const selectedNode = selectedNodes.length === 1 ? selectedNodes[0]! : null;
 
   const selectedStats =
     selectedNode && snapshot ? (snapshot.nodes[selectedNode.id] ?? null) : null;
@@ -600,7 +683,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-bar">
-        <h1 className="app-title">sys-sim</h1>
+        {/* The wordmark is the one place the product speaks in its own
+            voice. Two words, sentence case, no abbreviation — a student
+            opening this should be able to say what it is out loud. */}
+        <div className="app-brand">
+          <h1 className="app-title">System design</h1>
+          <p className="app-tagline">Build it, load it, watch it break</p>
+        </div>
         <TrafficControl
           rps={rps}
           onRpsChange={handleRpsChange}
@@ -642,11 +731,22 @@ export default function App() {
           onChange={handleConfigChange}
           onDelete={handleDeleteNode}
           onRename={handleRename}
+          selectedNodes={selectedNodes}
+          selectedEdgeCount={selectedEdgeCount}
+          onChangeMany={handleConfigChangeMany}
+          onDeleteMany={handleDeleteMany}
         />
       </div>
     </div>
   );
 }
+
+/**
+ * Stable empty array for the no-selection case. A fresh `[]` each render
+ * would give the Inspector a new prop identity every 100ms and defeat any
+ * memoisation it does.
+ */
+const EMPTY_NODES: readonly SimNode[] = [];
 
 /** Shown for the single frame before the first snapshot exists. */
 const EMPTY_SYSTEM = {

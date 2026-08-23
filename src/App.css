@@ -5,9 +5,10 @@
    overflow scrolls inside itself, so the top bar and the metrics strip stay
    put no matter how long the topology or the config form gets.
 
-   This file owns the GRID ONLY. Each panel paints its own surface, border
-   and padding in its own stylesheet, so a panel can be moved between grid
-   slots without dragging its appearance along with it.
+   This file owns the GRID ONLY, plus the wordmark that lives in the bar.
+   Each panel paints its own surface, border and padding in its own
+   stylesheet, so a panel can be moved between grid slots without dragging
+   its appearance along with it.
    ========================================================================== */
 
 .app {
@@ -23,34 +24,61 @@
 /* --------------------------------------------------------------------------
    Top bar.
 
-   56px per the layout spec. The traffic control measures 44px, so the bar
-   has real slack rather than the 24px overflow that used to push the
-   primary control off the top of the viewport.
-
-   The bar owns the background and the border; .traffic is a plain flex
-   child that declares none of the four, which is what fixed that overflow.
+   Sized to its contents rather than to a magic number. The traffic control
+   carries a 34px hero over a caption plus a slider with a scale row beneath
+   it; the old fixed 56px could not hold that and the panel had to defend
+   itself with a compensating margin. A min-height with real vertical padding
+   lets the bar be as tall as the type honestly needs, and nothing inside it
+   has to work around the container any more.
    -------------------------------------------------------------------------- */
 
 .app-bar {
   display: flex;
   align-items: center;
-  gap: var(--sp-8);
-  height: 56px;
+  gap: var(--sp-10);
+  min-height: 72px;
   /* flex-none against the shrink that a long headline would otherwise cause. */
   flex: none;
-  padding: 0 var(--sp-4);
-  border-bottom: 1px solid var(--border);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: var(--bw) solid var(--border);
   background: var(--surface);
 }
 
-.app-title {
+/* --------------------------------------------------------------------------
+   Wordmark.
+
+   Name over tagline, set tight so the pair reads as one block and the bar
+   does not grow to accommodate two separate lines of leading.
+   -------------------------------------------------------------------------- */
+
+.app-brand {
+  display: flex;
   flex: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.app-title {
   margin: 0;
   font-size: var(--fs-base);
-  line-height: var(--lh-base);
+  line-height: var(--lh-label);
   font-weight: var(--fw-num);
-  letter-spacing: var(--ls-base);
+  letter-spacing: var(--tr-base);
   color: var(--text);
+  white-space: nowrap;
+}
+
+/* The tagline is the friendliest sentence in the app, so it gets real prose
+   sizing rather than being shrunk into a caption. --text-dim, not
+   --text-faint: this is a sentence to be read, not a unit annotation. */
+.app-tagline {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-label);
+  font-weight: var(--fw-body);
+  letter-spacing: var(--tr-sm);
+  color: var(--text-dim);
   white-space: nowrap;
 }
 
@@ -64,10 +92,10 @@
 /* --------------------------------------------------------------------------
    Body: palette | stage | inspector.
 
-   The rails are FIXED. They hold a 12-item list and a config form; neither
-   reads better wider, and letting them grow is exactly what makes a large
-   display feel empty. Every extra pixel goes to the stage, which is the
-   subject of the app.
+   The rails are FIXED. They hold a grouped component list and a config form;
+   neither reads better wider, and letting them grow is exactly what makes a
+   large display feel empty. Every extra pixel goes to the stage, which is
+   the subject of the app.
    -------------------------------------------------------------------------- */
 
 .app-body {
@@ -81,7 +109,7 @@
    their own surface. The grid only supplies the separating hairline, so
    the rule that draws it lives with the layout that needs it. */
 .app-body > .pal {
-  border-right: 1px solid var(--border);
+  border-right: var(--bw) solid var(--border);
   background: var(--surface);
 }
 
@@ -94,6 +122,11 @@
 
 .app-stage {
   display: grid;
+  /* The strip's track is `auto` but CAPPED (see .mx below). An uncapped
+     auto track sizes to the strip's intrinsic content, and when the charts
+     reflow to two rows that content is ~520px — which starved the canvas,
+     the actual subject of the app, down to 170px. The canvas takes what is
+     left over, and it is guaranteed the larger share. */
   grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
@@ -106,11 +139,23 @@
   container-name: stage;
 }
 
-/* min-height, not height: a fixed height with a few px of slack is one
-   type-scale change away from silently clipping its own charts. */
+/* The strip gets a floor AND a ceiling.
+
+   min-height keeps the charts from being crushed when the window is short.
+   max-height is the part that was missing: `min-height` alone is only a
+   floor, so an `auto` track still grows to whatever the content wants, and
+   a two-row chart reflow made the strip 521px against a 172px canvas. The
+   canvas must always be the bigger half of the stage.
+
+   40vh is deliberately below half the stage's height at every window size
+   the app is used at, so the diagram always dominates. */
 .app-stage > .mx {
   min-height: clamp(196px, 26vh, 260px);
-  border-top: 1px solid var(--border);
+  max-height: 40vh;
+  /* The cap can only be honoured if the strip is allowed to scroll rather
+     than spill its charts over the canvas above it. */
+  overflow-y: auto;
+  border-top: var(--bw) solid var(--border);
   background: var(--surface);
 }
 
@@ -126,5 +171,19 @@
 @media (max-width: 1360px) {
   .app-body {
     grid-template-columns: 200px minmax(0, 1fr) 288px;
+  }
+
+  /* The bar's own regions tighten before anything inside them has to. */
+  .app-bar {
+    gap: var(--sp-5);
+    padding: var(--sp-3) var(--sp-4);
+  }
+}
+
+/* The tagline is the first thing to go: it is charm, not information, and
+   the slider needs the width more than the sentence does. */
+@media (max-width: 1180px) {
+  .app-tagline {
+    display: none;
   }
 }
