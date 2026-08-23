@@ -33,9 +33,20 @@
    latency plot collapsed to ~163px — 2.7px per sample.
 
    .app-stage declares `container-type: inline-size` (App.css).
+
+   The threshold is 900px, not 1040px, because the stage is always much
+   narrower than the viewport that contains it:
+
+     1280 viewport -> 1280 - 200 - 288 =  792px stage  -> must reflow
+     1512 viewport -> 1512 - 224 - 320 =  968px stage  -> must NOT reflow
+     2560 viewport -> 2560 - 224 - 320 = 2016px stage  -> must NOT reflow
+
+   A 1040px threshold caught the 968px stage too, dropping a 1512 display
+   to two rows when three columns fit there comfortably (~456px a chart).
+   900 sits clear of both neighbours with ~100px of margin either side.
    -------------------------------------------------------------------------- */
 
-@container stage (max-width: 1040px) {
+@container stage (max-width: 900px) {
   .mx {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
