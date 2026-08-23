@@ -96,6 +96,43 @@ const HEAD_H = 30;
 /** Horizontal inset for everything inside the body. */
 const PAD_X = 12;
 
+/**
+ * Width budget for ONE side of the two-cell secondary row.
+ *
+ * The row is two texts anchored to opposite edges of the node, so they grow
+ * toward each other. Half the interior each, minus a gutter so they never
+ * touch even when both are at their limit.
+ */
+const SEC_HALF = (NODE_W - PAD_X * 2 - 14) / 2;
+
+/** Rough advance width per character at the secondary row's font size. */
+const SEC_CHAR_W = 6.1;
+
+/** The full string a secondary cell will render, for width estimation. */
+function secText(cell: { value: string; label: string }): string {
+  return cell.value && cell.label
+    ? `${cell.value} ${cell.label}`
+    : cell.value || cell.label;
+}
+
+/**
+ * Constrain a text run to a width budget.
+ *
+ * Returns `textLength` only when the estimate says the string would overflow,
+ * because applying it unconditionally makes short strings render subtly wrong
+ * (the browser redistributes spacing to hit the exact length even when it did
+ * not need to). `lengthAdjust` condenses the glyphs themselves rather than
+ * only the gaps, which stays readable far longer.
+ */
+function fitWidth(
+  text: string,
+  budget: number,
+): { textLength?: number; lengthAdjust?: 'spacingAndGlyphs' } {
+  const estimate = text.length * SEC_CHAR_W;
+  if (estimate <= budget) return {};
+  return { textLength: budget, lengthAdjust: 'spacingAndGlyphs' };
+}
+
 const SPARK_X = 108;
 const SPARK_Y = 38;
 const SPARK_W = 64;
@@ -410,13 +447,16 @@ function readoutFor(
       // the controller has converged and hot when it is chasing a spike.
       const drift = setpoint > 0 ? clamp(watched / setpoint, 0, 1) : 0;
 
+      /* The secondary row is two texts anchored to opposite edges of the node,
+         so they grow toward each other and collide if either is wordy. Both
+         cells here must stay about as short as "23ms" and "p99". An earlier
+         version put the phase word in the value slot AND a "scaling up" label
+         beside it, which overlapped into mush at real fleet sizes. */
+      const phase = s.scalePhase ?? 'idle';
       return {
         primary: { value: formatPct(watched), label: 'watching' },
-        a: { value: `${have}/${want}`, label: 'fleet' },
-        b: {
-          value: s.scalePhase ?? 'idle',
-          label: want > have ? 'scaling up' : want < have ? 'scaling down' : 'steady',
-        },
+        a: { value: `${have}/${want}`, label: 'pods' },
+        b: { value: '', label: phase },
         load: drift,
         health: healthOfLoad(drift),
         spark: watched,
@@ -1454,22 +1494,43 @@ const NodeView = memo(function NodeView({
               figures remain one click away in the Inspector. */}
           {structure !== 'strip' && (
             <>
-              <text className="cv-node-sec" x={PAD_X} y={70}>
+              {/* Each half gets a hard width budget and textLength forces the
+                  glyphs to fit it. SVG text neither wraps nor ellipsises, so
+                  without this a wordy readout simply grows across the node and
+                  collides with its neighbour, which is exactly what happened
+                  when the autoscaler printed a phase word here. Condensing is
+                  ugly at extremes but it is always legible, and it can never
+                  overlap. */}
+              <text
+                className="cv-node-sec"
+                x={PAD_X}
+                y={70}
+                {...fitWidth(secText(readout.a), SEC_HALF)}
+              >
                 <tspan className="cv-val">{readout.a.value}</tspan>
-                <tspan className="cv-cap" dx={3}>
-                  {readout.a.label}
-                </tspan>
+                {readout.a.value && readout.a.label ? (
+                  <tspan className="cv-cap" dx={3}>
+                    {readout.a.label}
+                  </tspan>
+                ) : (
+                  <tspan className="cv-cap">{readout.a.label}</tspan>
+                )}
               </text>
               <text
                 className="cv-node-sec"
                 x={NODE_W - PAD_X}
                 y={70}
                 textAnchor="end"
+                {...fitWidth(secText(readout.b), SEC_HALF)}
               >
                 <tspan className="cv-val">{readout.b.value}</tspan>
-                <tspan className="cv-cap" dx={3}>
-                  {readout.b.label}
-                </tspan>
+                {readout.b.value && readout.b.label ? (
+                  <tspan className="cv-cap" dx={3}>
+                    {readout.b.label}
+                  </tspan>
+                ) : (
+                  <tspan className="cv-cap">{readout.b.label}</tspan>
+                )}
               </text>
             </>
           )}

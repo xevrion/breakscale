@@ -663,15 +663,34 @@ export default function App() {
     selectedNode && snapshot ? (snapshot.nodes[selectedNode.id] ?? null) : null;
 
   /**
-   * Requests actually lost per second, summed from the engine's own
-   * per-reason counters. This is the single source of truth for "dropped":
-   * the top bar and the throughput chart previously derived it two different
-   * ways (`errorRate * offeredRps` and `offered - goodput`) and disagreed with
+   * Requests actually lost PER SECOND, derived from the engine's per-reason
+   * counters. This is the single source of truth for "dropped": the top bar
+   * and the throughput chart previously derived it two different ways
+   * (`errorRate * offeredRps` and `offered - goodput`) and disagreed with
    * each other and with the failures panel. Neither derivation is loss —
    * `offered - goodput` counts in-flight work, and the errorRate product
    * rides a smoothed fraction against an instantaneous rate.
+   *
+   * `failuresByReason` is a LIFETIME COUNT, not a rate: the engine does
+   * `this.failures[reason]++` per failure and zeroes it only on reset().
+   * Summing it and labelling the total `/s` was wrong three ways — the unit
+   * was a lie, the figure could only ever grow, and a recovered system still
+   * read hundreds of thousands "dropped per second" because a counter cannot
+   * fall. Observed directly: goodput 76/s and ERRORS 0% next to DROPPED
+   * 218k/s.
+   *
+   * Differencing successive samples against elapsed SIM time turns the
+   * counter into the rate this claims to be. Sim time is the right clock —
+   * it follows pause, step and reset, where a wall clock would invent
+   * traffic while the simulation is stopped. This mirrors the identical
+   * derivation in Metrics.tsx, which fixed this same bug for the failures
+   * panel.
    */
-  const lostRps = useMemo(() => {
+  const lostPrevRef = useRef<number | null>(null);
+  const lostPrevTimeRef = useRef(0);
+  const [lostRps, setLostRps] = useState(0);
+
+  const cumulativeLost = useMemo(() => {
     if (!snapshot) return 0;
     let s = 0;
     for (const v of Object.values(snapshot.failuresByReason)) {
@@ -679,6 +698,32 @@ export default function App() {
     }
     return s;
   }, [snapshot]);
+
+  const simTimeMs = snapshot?.system.timeMs ?? 0;
+
+  useEffect(() => {
+    if (!Number.isFinite(simTimeMs)) return;
+    const prev = lostPrevRef.current;
+    const dtMs = simTimeMs - lostPrevTimeRef.current;
+
+    // First sample, or a reset (sim time or the counter moved backwards):
+    // adopt the count as the new baseline and report nothing this frame.
+    if (prev === null || dtMs < 0 || cumulativeLost < prev) {
+      lostPrevRef.current = cumulativeLost;
+      lostPrevTimeRef.current = simTimeMs;
+      setLostRps(0);
+      return;
+    }
+
+    // Sample no faster than 250ms of sim time: below that the divisor is
+    // tiny and the quotient is mostly quantisation noise.
+    if (dtMs < 250) return;
+
+    const delta = cumulativeLost - prev;
+    lostPrevRef.current = cumulativeLost;
+    lostPrevTimeRef.current = simTimeMs;
+    setLostRps(delta > 0 ? (delta * 1000) / dtMs : 0);
+  }, [cumulativeLost, simTimeMs]);
 
   return (
     <div className="app">
