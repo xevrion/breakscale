@@ -305,11 +305,15 @@
    plain grey node rather than as a transparent hole.
    -------------------------------------------------------------------------- */
 
+/* No --k-* declarations here on purpose.
+   [data-kind='cache'] and .cv-node have the SAME specificity (0-1-0), so
+   declaring the neutral fallback on this class did not lose to the kind rule,
+   it BEAT it: Canvas.css is imported after index.css and source order breaks
+   the tie. Every node on the canvas rendered the same grey while the palette
+   rows, which carry data-kind without this class, coloured correctly.
+   The fallback now lives in each var() below, which applies only when the
+   token is genuinely unset. */
 .cv-node {
-  --k-fill: var(--surface-2);
-  --k-line: var(--border-strong);
-  --k-stroke: var(--border-strong);
-  --k-ink: var(--text-dim);
   cursor: grab;
 }
 
@@ -321,8 +325,8 @@
    the outline at 1.5px. Measured: --text on every one of the 14 fills is
    13.69-13.94, and every fill's stroke is 3.49-3.95 on --bg (AA graphical). */
 .cv-node-body {
-  fill: var(--k-fill);
-  stroke: var(--k-stroke);
+  fill: var(--k-fill, var(--surface-2));
+  stroke: var(--k-stroke, var(--border-strong));
   stroke-width: var(--bw-strong);
   transition:
     stroke var(--dur-fast) var(--ease),
@@ -383,7 +387,7 @@
 }
 
 .cv-node-icon {
-  color: var(--k-ink);
+  color: var(--k-ink, var(--text-dim));
 }
 
 /* The icon group's primitives, not the group: vector-effect is a
@@ -479,7 +483,7 @@
    contrast text in the system landing on a surface it was not measured
    against. --k-ink is measured at 6.91-7.40 on its own fill, all fourteen. */
 .cv-cap {
-  fill: var(--k-ink);
+  fill: var(--k-ink, var(--text-dim));
   font-family: var(--sans);
   font-size: var(--fs-label);
   font-weight: var(--fw-num);
@@ -510,7 +514,7 @@
    of being a neutral grey line laid across it. */
 .cv-spark {
   fill: none;
-  stroke: var(--k-ink);
+  stroke: var(--k-ink, var(--text-dim));
   stroke-opacity: 0.75;
   stroke-width: 1.5;
   stroke-linejoin: round;
@@ -573,7 +577,7 @@
 /* The warn threshold tick, drawn in the kind's ink so it stays legible over
    both the empty trough and the filled bar as the bar grows past it. */
 .cv-meter-tick {
-  fill: var(--k-ink);
+  fill: var(--k-ink, var(--text-dim));
   fill-opacity: 0.45;
 }
 
@@ -752,7 +756,7 @@
      same reason .cv-node-name uses it. */
   dominant-baseline: central;
   pointer-events: none;
-  fill: var(--k-ink);
+  fill: var(--k-ink, var(--text-dim));
   /* A plate behind the glyphs, painted first (paint-order), so the count
      stays legible where the offset instance-stack card edges pass behind
      the top-right corner. This was the only text in the app sitting on a
@@ -822,7 +826,7 @@
    cell, outside the fill's colour channel, so the write/read distinction
    survives every member of the set being pinned red. */
 .cv-cell-lead-notch {
-  fill: var(--k-ink);
+  fill: var(--k-ink, var(--text-dim));
 }
 
 /* --- queue vessel ------------------------------------------------------- */
