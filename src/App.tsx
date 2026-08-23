@@ -207,7 +207,18 @@ export default function App() {
   const [topology, setTopology] = useState<Topology>(initial.topology);
   const [rps, setRps] = useState<number>(initial.rps);
   const [presetId, setPresetId] = useState<string | null>(initial.presetId);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Canvas selection. Node ids and edge ids share this one set; an edge id is
+   * `from->to`, which can never collide with a node id, so the namespace is
+   * unambiguous and a single set covers both.
+   *
+   * The Inspector still edits exactly one node, so `selectedNode` below
+   * resolves the set down to a single node — a multi-selection simply shows
+   * the empty inspector rather than an arbitrary member.
+   */
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const [running, setRunning] = useState(true);
 
   /**
@@ -369,7 +380,7 @@ export default function App() {
         ...topology,
         nodes: [...topology.nodes, node],
       });
-      setSelectedId(node.id);
+      setSelectedIds(new Set([node.id]));
     },
     [applyTopology, topology],
   );
@@ -396,27 +407,44 @@ export default function App() {
     [applyTopology, topology],
   );
 
-  const handleDeleteNode = useCallback(
-    (id: string) => {
+  /**
+   * Delete a whole selection in ONE topology edit.
+   *
+   * Deleting N items with N sequential single-item calls is a bug waiting to
+   * happen: each call closes over the topology as it was at render time, so
+   * the second delete would resurrect what the first removed. Partitioning
+   * up front and filtering once is both correct and cheaper.
+   */
+  const handleDeleteSelection = useCallback(
+    (nodeIds: readonly string[], edgeIds: readonly string[]) => {
+      if (nodeIds.length === 0 && edgeIds.length === 0) return;
+      const dropNodes = new Set(nodeIds);
+      const dropEdges = new Set(edgeIds);
       applyTopology({
-        nodes: topology.nodes.filter((n) => n.id !== id),
-        // Drop edges that would otherwise dangle.
-        edges: topology.edges.filter((e) => e.from !== id && e.to !== id),
+        nodes: topology.nodes.filter((n) => !dropNodes.has(n.id)),
+        edges: topology.edges.filter(
+          (e) =>
+            // Explicitly deleted, or orphaned by a node that just went away.
+            !dropEdges.has(e.id) &&
+            !dropNodes.has(e.from) &&
+            !dropNodes.has(e.to),
+        ),
       });
-      setSelectedId((cur) => (cur === id ? null : cur));
+      setSelectedIds((cur) => {
+        if (cur.size === 0) return cur;
+        const next = new Set(cur);
+        for (const id of dropNodes) next.delete(id);
+        for (const id of dropEdges) next.delete(id);
+        return next;
+      });
     },
     [applyTopology, topology],
   );
 
-  const handleDeleteEdge = useCallback(
-    (id: string) => {
-      applyTopology({
-        ...topology,
-        edges: topology.edges.filter((e) => e.id !== id),
-      });
-      setSelectedId((cur) => (cur === id ? null : cur));
-    },
-    [applyTopology, topology],
+  /** The Inspector's single-node delete routes through the same path. */
+  const handleDeleteNode = useCallback(
+    (id: string) => handleDeleteSelection([id], []),
+    [handleDeleteSelection],
   );
 
   /* ---------------- live config edits ---------------- */
@@ -467,7 +495,7 @@ export default function App() {
       setTopology(fresh);
       setRps(clientRps(fresh));
       setPresetId(preset.id);
-      setSelectedId(null);
+      setSelectedIds(new Set<string>());
       engine.setTopology(fresh);
       engine.reset();
       setSnapshot(engine.snapshot());
@@ -526,31 +554,27 @@ export default function App() {
         return;
       }
 
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        setSelectedId((cur) => {
-          if (cur === null) return cur;
-          // Selection ids are shared between nodes and edges; an edge id is
-          // never also a node id, so this dispatch is unambiguous.
-          if (topology.nodes.some((n) => n.id === cur)) {
-            handleDeleteNode(cur);
-          } else if (topology.edges.some((edge) => edge.id === cur)) {
-            handleDeleteEdge(cur);
-          }
-          return null;
-        });
-      }
+      // Delete/Backspace, Escape and Ctrl/Cmd+A belong to the canvas, which
+      // owns the selection and knows how to partition it. Handling them here
+      // too would double-fire.
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleDeleteNode, handleDeleteEdge, handleStep, topology.nodes, topology.edges]);
+  }, [handleStep]);
 
   /* ---------------- derived ---------------- */
 
-  const selectedNode = useMemo(
-    () => topology.nodes.find((n) => n.id === selectedId) ?? null,
-    [topology.nodes, selectedId],
-  );
+  /**
+   * The Inspector edits one node. A multi-selection has no single subject, so
+   * it shows the empty state rather than picking an arbitrary member — which
+   * would make edits land somewhere the user did not point at.
+   */
+  const selectedNode = useMemo(() => {
+    if (selectedIds.size !== 1) return null;
+    const [only] = selectedIds;
+    return topology.nodes.find((n) => n.id === only) ?? null;
+  }, [topology.nodes, selectedIds]);
 
   const selectedStats =
     selectedNode && snapshot ? (snapshot.nodes[selectedNode.id] ?? null) : null;
@@ -601,12 +625,11 @@ export default function App() {
           <Canvas
             topology={topology}
             snapshot={snapshot}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
             onMoveNode={handleMoveNode}
             onConnect={handleConnect}
-            onDeleteNode={handleDeleteNode}
-            onDeleteEdge={handleDeleteEdge}
+            onDeleteSelection={handleDeleteSelection}
             onDropNode={handleAddNode}
             spark={spark}
           />

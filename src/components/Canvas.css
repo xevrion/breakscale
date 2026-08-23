@@ -22,18 +22,38 @@
   height: 100%;
   overflow: hidden;
   background: var(--bg);
-  touch-action: none;
   /* Dragging a node must never start a native text selection. */
   user-select: none;
   -webkit-user-select: none;
 }
 
-.cv-host[data-cursor='grab'] {
+/* --------------------------------------------------------------------------
+   Interaction surface.
+
+   The host is a positioning root and nothing else. This element owns every
+   pointer handler, and the overlay chrome (zoom controls, ledger, hint) are
+   its SIBLINGS, not its children. A press on a button therefore never enters
+   the pan/select router at all, which is the structural reason those buttons
+   work: the router used to sit on the host and capture the pointer before it
+   knew what had been pressed, which suppressed the button's click entirely.
+   -------------------------------------------------------------------------- */
+
+.cv-surface {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+
+.cv-surface[data-cursor='grab'] {
   cursor: grab;
 }
 
-.cv-host[data-cursor='grabbing'] {
+.cv-surface[data-cursor='grabbing'] {
   cursor: grabbing;
+}
+
+.cv-surface[data-cursor='crosshair'] {
+  cursor: crosshair;
 }
 
 /* Drop target feedback: an inset hairline, not a glow or a tint. */
@@ -89,6 +109,19 @@
   stroke: transparent;
   stroke-width: 14;
   cursor: pointer;
+}
+
+/* The painted layers of an edge are decoration ONLY. `.cv-edge-hit` above is
+   the sole hit target, and it is a SIBLING of these paths rather than their
+   ancestor — so if the visible line were hit-testable it would sit on top of
+   the fat invisible one, and `closest('[data-hit]')` from the pointer's
+   target would walk up past the whole edge group and find nothing. That is
+   exactly how clicking an edge silently did nothing. */
+.cv-edge-line,
+.cv-edge-arrow,
+.cv-edge-flow,
+.cv-edge-label {
+  pointer-events: none;
 }
 
 .cv-edge-line {
@@ -199,9 +232,11 @@
   fill: var(--text-dim);
 }
 
-/* Delete affordance on a selected edge. */
+/* Delete affordance on a selected edge. Explicitly re-enabled: it carries its
+   own data-hit and must be pressable. */
 .cv-edge-del {
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .cv-edge-del rect {
@@ -231,6 +266,24 @@
   stroke: var(--accent);
   stroke-width: 1.5;
   stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+
+/* The preview has locked onto a legal target: solid, because the dashes mean
+   "not yet attached" and it now is, pending only the release. */
+.cv-link-preview.is-snapped {
+  stroke-dasharray: none;
+  stroke-width: 2;
+}
+
+/* Marquee box-select. A hairline rect with a faint wash, drawn in world
+   space so it tracks the content rather than the screen. */
+.cv-marquee {
+  fill: var(--accent);
+  fill-opacity: 0.08;
+  stroke: var(--accent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
 
@@ -479,11 +532,21 @@
    Ports
    -------------------------------------------------------------------------- */
 
+/* The real target. Three times the visual radius, invisible, and drawn
+   beneath the dot so the dot still paints at its true size. Always hit-
+   testable — a port you must first hover to aim at is a port you cannot
+   aim at. */
+.cv-port-hit {
+  fill: transparent;
+  stroke: none;
+}
+
 .cv-port {
   fill: var(--bg);
   stroke: var(--line-2);
   stroke-width: 1.5;
   opacity: 0;
+  pointer-events: none;
   transition:
     opacity var(--dur-fast) var(--ease),
     stroke var(--dur-fast) var(--ease),
@@ -496,11 +559,11 @@
 .cv-node:hover .cv-port,
 .cv-node:focus-visible .cv-port,
 .cv-node.is-selected .cv-port,
-.cv-nodes:has(.cv-port:active) .cv-port {
+.cv-node.is-linking .cv-port {
   opacity: 1;
 }
 
-.cv-port-out {
+.cv-port-hit {
   cursor: crosshair;
 }
 
@@ -508,18 +571,45 @@
   stroke: var(--text-faint);
 }
 
-.cv-port-out:hover {
+.cv-port-hit:hover + .cv-port {
   fill: var(--accent);
   stroke: var(--accent);
 }
 
-.cv-port-in:hover {
+/* --------------------------------------------------------------------------
+   Link states.
+
+   While a link is in flight the canvas answers one question for every node:
+   can this receive the wire? A legal target lifts to a full-strength border;
+   an illegal one (the source itself, or a node already fed by this source)
+   dims out of contention. Both are border/opacity changes only — no glow.
+   -------------------------------------------------------------------------- */
+
+.cv-node.is-link-source .cv-node-body {
   stroke: var(--accent);
+  stroke-width: 1.5;
 }
 
-/* While a link is in flight every port must be targetable. */
-.cv-host:has(.cv-link-preview) .cv-port {
+.cv-node.is-link-invalid {
+  opacity: 0.4;
+}
+
+.cv-node.is-link-valid .cv-node-body {
+  stroke: var(--line-3);
+  stroke-dasharray: 3 3;
+}
+
+/* The one node the release will actually connect to. */
+.cv-node.is-link-target .cv-node-body {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: none;
+}
+
+.cv-node.is-link-target .cv-port-in {
   opacity: 1;
+  fill: var(--accent);
+  stroke: var(--accent);
 }
 
 /* --------------------------------------------------------------------------
@@ -533,6 +623,22 @@
   transform: translate(-50%, -50%);
   color: var(--text-faint);
   font-size: var(--fs-base);
+  pointer-events: none;
+}
+
+/* Shown only while a click-to-link is armed. Top-center, out of the way of
+   both the ledger and the zoom controls. */
+.cv-hint {
+  position: absolute;
+  top: var(--sp-3);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
   pointer-events: none;
 }
 

@@ -121,6 +121,20 @@ const replica: ComponentBehaviour = {
     return 'handled';
   },
 
+  onTick(ctx: BehaviourCtx, state: NodeStateLike, _dtMs: number): void {
+    // Publish occupancy on the engine's clock. Reads and writes draw from two
+    // different pools held in `ext`, so state.busy stays 0 and the engine
+    // would otherwise integrate this node's utilisation as permanently idle --
+    // which does not merely blank the meter, it tells an autoscaler watching
+    // this node to scale it DOWN while its queue is overflowing.
+    const ext = replicaExt(state);
+    ctx.reportOccupancy(
+      state,
+      ext.readBusy + ext.writeBusy,
+      readCapacity(state) + writeCapacity(state),
+    );
+  },
+
   decorateStats(ctx: BehaviourCtx, state: NodeStateLike, stats: NodeStats): void {
     const fresh = ctx.counterRate(state, 'freshRead');
     const stale = ctx.counterRate(state, 'staleRead');
@@ -308,6 +322,9 @@ const shard: ComponentBehaviour = {
   buffersForConsumers: false,
   pump: 'none',
   creditsJoinCompletion: true,
+  // A shard serves from shardCapacity (per partition), never from `capacity`.
+  // Without this an autoscaler pointed here writes a field this kind ignores.
+  capacityField: 'shardCapacity',
 
   initState(state: NodeStateLike): ShardExt {
     return makeShardExt(clampInt(state.config.shardCount, 1));
@@ -342,10 +359,16 @@ const shard: ComponentBehaviour = {
     if (dt <= 0) return;
     const capacity = clampInt(state.config.shardCapacity, 1);
     const alpha = 1 - Math.exp(-dt / 500);
+    let busy = 0;
     for (let i = 0; i < ext.sized; i++) {
       const instant = Math.min(ext.busy[i] / capacity, 1);
       ext.utilization[i] += (instant - ext.utilization[i]) * alpha;
+      busy += ext.busy[i];
     }
+    // Slots live per-shard in `ext`, so state.busy is 0 and the engine would
+    // integrate this node as idle. Report the real total, or an autoscaler
+    // watching a melting sharded store reads 0.0 and scales it down.
+    ctx.reportOccupancy(state, busy, ext.sized * capacity);
   },
 
   decorateStats(ctx: BehaviourCtx, state: NodeStateLike, stats: NodeStats): void {

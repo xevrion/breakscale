@@ -395,6 +395,18 @@ interface NodeState {
    * node, so two behaviours can never collide over a name.
    */
   custom: Map<string, RateCounter> | null;
+
+  /**
+   * Occupancy reported by a kind that runs its own slot discipline, or null
+   * for every kind the engine slots itself.
+   *
+   * Set through reportOccupancy(). When present it replaces `state.busy` in
+   * the utilisation integration, which is what stops a replica set or a
+   * sharded store -- whose slots live in `ext`, invisible to state.busy --
+   * from reporting 0.0 while saturated and fooling an autoscaler into
+   * scaling it down.
+   */
+  ownOccupancy: { busy: number; capacity: number } | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -478,6 +490,8 @@ export class Engine implements BehaviourCtx {
    * time the student states an intent -- lets reset() put it back.
    */
   private authoredCapacity = new Map<string, number>();
+  /** Same, for the per-shard knob a sharded store is scaled through. */
+  private authoredShardCapacity = new Map<string, number>();
 
   constructor(topology: Topology, seed = 1) {
     this.seed = seed >>> 0;
@@ -487,11 +501,20 @@ export class Engine implements BehaviourCtx {
     this.buildNodes(null);
   }
 
-  /** Snapshot the authored capacity of every node, for reset() to restore. */
+  /**
+   * Snapshot the authored capacity of every node, for reset() to restore.
+   *
+   * Both scalable knobs are recorded, because a controller may write either
+   * one depending on the target kind's `capacityField`. Restoring only
+   * `capacity` would let a controller-scaled sharded store carry its grown
+   * `shardCapacity` across a reset, so the same seed would not replay.
+   */
   private recordAuthoredCapacity(): void {
     this.authoredCapacity.clear();
+    this.authoredShardCapacity.clear();
     for (const n of this.topology.nodes) {
       this.authoredCapacity.set(n.id, n.config.capacity);
+      this.authoredShardCapacity.set(n.id, n.config.shardCapacity);
     }
   }
 
@@ -520,6 +543,9 @@ export class Engine implements BehaviourCtx {
     // NOT land here.
     if (patch.capacity !== undefined) {
       this.authoredCapacity.set(id, Math.max(1, Math.floor(patch.capacity)));
+    }
+    if (patch.shardCapacity !== undefined) {
+      this.authoredShardCapacity.set(id, Math.max(1, Math.floor(patch.shardCapacity)));
     }
     const state = this.nodes.get(id);
     if (!state) return;
@@ -816,6 +842,8 @@ export class Engine implements BehaviourCtx {
     for (const n of this.topology.nodes) {
       const authored = this.authoredCapacity.get(n.id);
       if (authored !== undefined) n.config.capacity = authored;
+      const authoredShard = this.authoredShardCapacity.get(n.id);
+      if (authoredShard !== undefined) n.config.shardCapacity = authoredShard;
     }
     this.buildNodes(null);
   }
@@ -1711,7 +1739,14 @@ export class Engine implements BehaviourCtx {
 
   capacityOf(nodeId: string): number | null {
     const state = this.nodes.get(nodeId);
-    return state ? this.effectiveCapacity(state) : null;
+    if (!state) return null;
+    // Report the knob this kind actually serves from, so a controller reads
+    // back the same quantity it writes through setCapacity().
+    const field = state.behaviour.capacityField;
+    if (field === 'shardCapacity') {
+      return Math.max(1, Math.floor(state.config.shardCapacity));
+    }
+    return this.effectiveCapacity(state);
   }
 
   /**
@@ -1724,10 +1759,14 @@ export class Engine implements BehaviourCtx {
     const next = Math.max(1, Math.floor(capacity));
     const state = this.nodes.get(nodeId);
     if (!state) return;
-    if (state.config.capacity === next) return;
-    state.config.capacity = next;
+    // Write whichever knob this kind serves from. A sharded store ignores
+    // `capacity` entirely, so writing it there would make the controller a
+    // silent no-op that ramps to maxCapacity while nothing improves.
+    const field = state.behaviour.capacityField ?? 'capacity';
+    if (state.config[field] === next) return;
+    state.config[field] = next;
     const node = this.topology.nodes.find((n) => n.id === nodeId);
-    if (node) node.config.capacity = next;
+    if (node) node.config[field] = next;
     this.pumpQueue(state);
   }
 
@@ -1783,6 +1822,25 @@ export class Engine implements BehaviourCtx {
     for (let i = 0; i < perShard.length; i++) dst[i] = perShard[i];
   }
 
+  /**
+   * Record a self-managing kind's true occupancy, for the utilisation
+   * integration to use in place of state.busy. Stored rather than applied
+   * immediately so smoothing stays on the engine's clock and a behaviour
+   * cannot make its meter jump by reporting more often than another kind.
+   */
+  reportOccupancy(stateLike: NodeStateLike, busySlots: number, capacity: number): void {
+    const state = stateLike as NodeState;
+    const busy = busySlots > 0 ? busySlots : 0;
+    const cap = capacity > 0 ? capacity : 1;
+    const slot = state.ownOccupancy;
+    if (slot === null) {
+      state.ownOccupancy = { busy, capacity: cap };
+      return;
+    }
+    slot.busy = busy;
+    slot.capacity = cap;
+  }
+
   isEdgeCut(edgeId: string): boolean {
     return this.cutEdges.has(edgeId);
   }
@@ -1794,15 +1852,20 @@ export class Engine implements BehaviourCtx {
       const dt = this.now - state.lastIntegrateMs;
       state.lastIntegrateMs = this.now;
       if (dt <= 0) continue;
-      const capacity = this.effectiveCapacity(state);
+      // A kind that runs its own slot discipline reports occupancy itself,
+      // because serveWithin() never touches state.busy and the raw counter
+      // would read 0 however saturated the node really is.
+      const own = state.ownOccupancy;
+      const capacity = own !== null ? own.capacity : this.effectiveCapacity(state);
+      const busy = own !== null ? own.busy : state.busy;
       // A buffer's slot count is meaningless, so it reports zero utilisation.
       const instant = state.behaviour.servesRequests
-        ? Math.min(state.busy / capacity, 1)
+        ? Math.min(capacity > 0 ? busy / capacity : 0, 1)
         : 0;
       // Exponential smoothing over roughly a 1s window.
       const alpha = 1 - Math.exp(-dt / 500);
       state.utilization += (instant - state.utilization) * alpha;
-      state.busyMsAccum += state.busy * dt;
+      state.busyMsAccum += busy * dt;
     }
   }
 
@@ -1967,6 +2030,7 @@ function createNodeState(node: SimNode): NodeState {
     shardUtil: [],
     ext: null,
     custom: null,
+    ownOccupancy: null,
   };
 }
 

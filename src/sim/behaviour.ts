@@ -111,6 +111,19 @@ export interface ComponentBehaviour {
    * field load on a path that has already failed.
    */
   noRouteReason?: FailureReason;
+
+  /**
+   * Which NodeConfig knob actually controls this kind's serving capacity.
+   *
+   * Defaults to `capacity`, which is right for every kind the engine slots
+   * itself. A kind that serves from a different field must say so: a sharded
+   * store's slots are `shardCapacity` *per shard*, and it ignores `capacity`
+   * entirely -- so an autoscaler writing `capacity` at it would spin to
+   * maxCapacity while changing nothing at all, which looks to a student like
+   * a controller that simply does not work. Declared as a trait rather than
+   * tested for by kind, so the engine's setCapacity() stays kind-agnostic.
+   */
+  capacityField?: 'capacity' | 'shardCapacity';
   /**
    * Called after the node's own service time elapsed and its independent error
    * roll passed. Returning 'complete' answers the call here.

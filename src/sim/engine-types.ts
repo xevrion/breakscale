@@ -180,6 +180,21 @@ export interface BehaviourCtx {
    */
   reportShardUtilization(state: NodeStateLike, perShard: readonly number[]): void;
 
+  /**
+   * Report true occupancy for a kind that runs its own slot discipline.
+   *
+   * The engine integrates utilisation from `state.busy`, which serveWithin()
+   * deliberately never touches -- so a kind holding its slots in `ext` (a
+   * replica set's two pools, a sharded store's partitions) would otherwise
+   * report utilisation 0.0 no matter how saturated it actually is. That is not
+   * merely a dead meter: `utilizationOf()` is the signal an autoscaler acts
+   * on, so a permanently-zero reading makes a controller scale a melting node
+   * DOWN. `busySlots` and `capacity` are this kind's own notion of both, and
+   * the engine smooths the ratio exactly as it does for an ordinary server, so
+   * the number means the same thing on the meter and to a controller.
+   */
+  reportOccupancy(state: NodeStateLike, busySlots: number, capacity: number): void;
+
   /** Mark a request as a write, so downstream kinds see the classification. */
   markWrite(req: ReqLike, isWrite: boolean): void;
 }
