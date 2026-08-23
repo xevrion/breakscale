@@ -781,6 +781,7 @@ export default function App() {
           onReset={handleReset}
           system={snapshot?.system ?? EMPTY_SYSTEM}
           lost={lostRps}
+          empty={topology.nodes.length === 0}
         />
 
         {/*

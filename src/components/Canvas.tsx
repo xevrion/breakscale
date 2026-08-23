@@ -33,6 +33,7 @@ import {
 import { behaviourFor } from '../sim/behaviour';
 import {
   formatCount,
+  formatElapsed,
   formatMs,
   formatPct,
   formatRate,
@@ -2921,7 +2922,7 @@ export default function Canvas({
         });
       }
     },
-    [promote, toWorld, onMoveNode, nodeAt],
+    [promote, toWorld, onMoveNode, nodeAt, cancelGesture],
   );
 
   /* ---------------- pointerup: click, or finish the drag ---------------- */
@@ -3630,17 +3631,31 @@ export default function Canvas({
       </div>
 
       {topology.nodes.length === 0 && (
-        <p className="cv-empty">Drag a component here, or load an example system.</p>
+        <div className="cv-empty">
+          <p className="cv-empty-lead">Start with an empty canvas</p>
+          <p className="cv-empty-body">
+            Drag a component in from the left, or open Examples to load a system
+            that already works and take it apart.
+          </p>
+        </div>
       )}
 
       {/* Status ledger. A corner carrying a true number stops reading as
           dead space. */}
       {topology.nodes.length > 0 && (
+        /* Zoom is deliberately NOT here: the zoom control sits a few pixels
+           away and already states it, and a fact printed twice on one
+           surface reads as an oversight. */
         <div className="cv-ledger label" aria-hidden="true">
-          <span>{topology.nodes.length} nodes</span>
-          <span>{topology.edges.length} edges</span>
-          <span>zoom {Math.round(view.k * 100)}%</span>
-          <span>{elapsed.toFixed(1)}s</span>
+          <span>
+            {topology.nodes.length}{' '}
+            {topology.nodes.length === 1 ? 'component' : 'components'}
+          </span>
+          <span>
+            {topology.edges.length}{' '}
+            {topology.edges.length === 1 ? 'connection' : 'connections'}
+          </span>
+          <span>{formatElapsed(elapsed)}</span>
         </div>
       )}
 

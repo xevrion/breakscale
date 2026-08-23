@@ -229,3 +229,20 @@ export function formatCompact(n: number | null | undefined): string {
   if (a < 1_000_000) return `${sign}${Math.round(a / 1000)}k`;
   return `${sign}${trim((a / 1_000_000).toFixed(1))}M`;
 }
+
+/**
+ * Elapsed simulation time, as a human would say it.
+ *
+ * Under a minute reads as seconds with one decimal, because at that scale the
+ * tenths are the interesting part — a student stepping frame by frame wants
+ * to see the clock move. Past a minute the tenths are noise and the shape
+ * "2m 05s" is what a person would actually say out loud.
+ */
+export function formatElapsed(seconds: number | null | undefined): string {
+  const v = finite(seconds);
+  if (v === null || v < 0) return NA;
+  if (v < 60) return `${v.toFixed(1)}s`;
+  const m = Math.floor(v / 60);
+  const rest = Math.floor(v - m * 60);
+  return `${m}m ${String(rest).padStart(2, '0')}s`;
+}

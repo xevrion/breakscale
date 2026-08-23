@@ -135,36 +135,6 @@ const KIND_HINT: Record<NodeKind, string> = {
 };
 
 /**
- * What each example teaches, written as something a person would say.
- *
- * These used to be fragments — "Bottleneck: db", "Shed at the door" — which
- * read as tags on a config file rather than as an invitation to try
- * something. A student picking an example wants to know what they are about
- * to watch happen, so each line now says that in plain words.
- */
-const PRESET_NOTE: Record<string, string> = {
-  'single-server': 'Watch the database become the bottleneck',
-  'load-balanced': 'More servers, same database behind them',
-  'cache-aside': 'What happens when the hit rate falls',
-  'async-workers': 'A backlog that grows faster than it drains',
-  'retry-storm': 'Retries making an overload worse',
-  'cdn-origin': 'How much traffic never reaches you',
-  'rate-limited-api': 'Turning excess away before it queues',
-  'circuit-breaker': 'Giving a failing dependency room to recover',
-  'read-replicas': 'Reads that scale, and reads that go stale',
-  'sharded-database': 'One hot key undoing all the partitions',
-  'autoscaling-service': 'Capacity arriving after it was needed',
-  'multi-region': 'What a failover actually costs you',
-  'full-stack': 'Every piece at once, under real load',
-  'specialised-stores': 'The right store for each job, side by side',
-  'event-driven': 'Lag, fan-out, cold starts and a cron burst',
-  'resilient-delivery': 'Choosing what fails, and where failures go',
-  twitter: 'One tweet becoming a hundred thousand writes',
-  stripe: 'Refusing work rather than charging twice',
-  whatsapp: 'Messages that wait instead of failing',
-};
-
-/**
  * The same icon primitives the canvas draws, so a row in the palette is
  * visually the exact object that lands on the canvas. A bare stroked icon
  * in currentColor, never an icon inside a filled square. Sized in em so it
@@ -386,7 +356,6 @@ export function Palette({
           <ul className="pal-list">
             {presets.map((preset) => {
               const active = preset.id === activePresetId;
-              const note = PRESET_NOTE[preset.id];
               return (
                 <li key={preset.id}>
                   <button
@@ -405,7 +374,7 @@ export function Palette({
                     <span className="pal-mark" aria-hidden="true" />
                     <span className="pal-preset-text">
                       <span className="pal-name">{preset.name}</span>
-                      {note ? <span className="label pal-note">{note}</span> : null}
+                      <span className="pal-note">{preset.tagline}</span>
                     </span>
                   </button>
                 </li>

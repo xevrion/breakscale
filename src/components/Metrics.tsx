@@ -291,15 +291,33 @@ interface ChartHeadProps {
   extra?: React.ReactNode;
 }
 
-function ChartHead({ caption, value, unit, tone = 'ok', extra }: ChartHeadProps) {
+function ChartHead({
+  caption,
+  captionTerm,
+  value,
+  unit,
+  unitTerm,
+  tone = 'ok',
+  extra,
+}: ChartHeadProps) {
   return (
     <header className="mx-head">
-      <span className="label mx-eyebrow">{caption}</span>
+      <span className="label mx-eyebrow">
+        <Term id={captionTerm}>{caption}</Term>
+      </span>
       <span className="mx-head-right">
         {extra}
         <span className="mx-readout-wrap">
           <span className={`num num-lg mx-readout ${toneClass(tone)}`}>{value}</span>
-          <span className="unit mx-unit">{unit}</span>
+          {/*
+            The unit is only a trigger when it is genuinely a term a student
+            could fail to know. "p99" and "/s" are; a plain English word is
+            not, and underlining it would spend the affordance on something
+            that teaches nothing.
+          */}
+          <span className="unit mx-unit">
+            {unitTerm ? <Term id={unitTerm}>{unit}</Term> : unit}
+          </span>
         </span>
       </span>
     </header>
@@ -479,7 +497,14 @@ const LatencyChart = memo(function LatencyChart({
 
   return (
     <section className="mx-chart" aria-label="Latency over the last 60 seconds">
-      <ChartHead caption="Latency" unit="p99" value={formatMs(p99)} tone={tone} />
+      <ChartHead
+        caption="Latency"
+        captionTerm="latency"
+        unit="p99"
+        unitTerm="p99"
+        value={formatMs(p99)}
+        tone={tone}
+      />
 
       <div className="mx-plot" ref={ref} style={{ height: CHART_H }}>
         <PlotLayer w={w}>
@@ -497,9 +522,9 @@ const LatencyChart = memo(function LatencyChart({
       </div>
 
       <ul className="mx-legend">
-        <LegendKey className="mx-key-p50" name="p50" value={formatMs(p50)} />
-        <LegendKey className="mx-key-p95" name="p95" value={formatMs(p95)} />
-        <LegendKey className="mx-key-p99" name="p99" value={formatMs(p99)} />
+        <LegendKey className="mx-key-p50" name="p50" term="p50" value={formatMs(p50)} />
+        <LegendKey className="mx-key-p95" name="p95" term="p95" value={formatMs(p95)} />
+        <LegendKey className="mx-key-p99" name="p99" term="p99" value={formatMs(p99)} />
       </ul>
     </section>
   );
@@ -508,18 +533,23 @@ const LatencyChart = memo(function LatencyChart({
 function LegendKey({
   className,
   name,
+  term,
   value,
   dim,
 }: {
   className: string;
   name: string;
+  /** Glossary id. Every key in the strip has one; the affordance is uniform. */
+  term: string;
   value: string;
   dim?: boolean;
 }) {
   return (
     <li className="mx-key" data-dim={dim || undefined}>
       <span className={`mx-key-line ${className}`} aria-hidden="true" />
-      <span className="mx-key-name">{name}</span>
+      <span className="mx-key-name">
+        <Term id={term}>{name}</Term>
+      </span>
       <span className="num num-sm mx-key-value">{value}</span>
     </li>
   );
@@ -603,12 +633,16 @@ const ThroughputChart = memo(function ThroughputChart({
     <section className="mx-chart" aria-label="Throughput over the last 60 seconds">
       <ChartHead
         caption="Throughput"
+        captionTerm="throughput"
         unit="succeeding /s"
+        unitTerm="goodput"
         value={formatCompact(safeGoodput)}
         extra={
           live ? (
             <span className="mx-dropped">
-              <span className="label">Lost</span>
+              <span className="label">
+                <Term id="dropped">Lost</Term>
+              </span>
               <span className="num num-md is-danger">{formatCompact(dropped)}</span>
             </span>
           ) : undefined
@@ -631,16 +665,19 @@ const ThroughputChart = memo(function ThroughputChart({
         <LegendKey
           className="mx-key-offered"
           name="offered"
+          term="offered"
           value={formatCompact(safeOffered)}
         />
         <LegendKey
           className="mx-key-goodput"
           name="succeeded"
+          term="goodput"
           value={formatCompact(safeGoodput)}
         />
         <LegendKey
           className="mx-key-gap"
           name="lost"
+          term="dropped"
           value={formatCompact(dropped)}
           dim={!live}
         />
@@ -684,6 +721,36 @@ const REASON_LABEL: Record<FailureReason, string> = {
   'conn-refused': 'conn refused',
   unauthorized: 'unauthorized',
   'bulkhead-full': 'bulkhead full',
+  deprioritized: 'deprioritized',
+};
+
+/**
+ * Glossary id for each failure reason.
+ *
+ * Mostly the reason id itself, because the glossary was written against these
+ * names on purpose. The three exceptions are named here rather than papered
+ * over with a fallback: `error` is the general error-rate idea, `depth` is a
+ * hop limit and would collide with a graph query's traversal depth, and
+ * `region-down` is a failover gap rather than a region.
+ *
+ * Typed as Record<FailureReason, string> so a new reason added to the engine
+ * fails to compile until it has an explanation, which is the only way this
+ * mapping stays complete without anyone remembering to check it.
+ */
+const REASON_TERM: Record<FailureReason, string> = {
+  error: 'error-rate',
+  shed: 'shed',
+  timeout: 'timeout',
+  'no-route': 'no-route',
+  depth: 'depth-limit',
+  throttled: 'throttled',
+  rejected: 'rejected',
+  crashed: 'crashed',
+  partitioned: 'partitioned',
+  'region-down': 'region-down',
+  'conn-refused': 'conn-refused',
+  unauthorized: 'unauthorized',
+  'bulkhead-full': 'bulkhead-full',
   deprioritized: 'deprioritized',
 };
 
@@ -807,7 +874,9 @@ const FailureChart = memo(function FailureChart({
     >
       <ChartHead
         caption="Failures"
+        captionTerm="error-rate"
         unit="/s"
+        unitTerm="rps"
         value={healthy ? '0' : formatCompact(total)}
         tone={healthy ? 'ok' : 'danger'}
       />
@@ -863,7 +932,13 @@ const FailureChart = memo(function FailureChart({
                   className={`mx-key-swatch mx-fill-${r.reason}`}
                   aria-hidden="true"
                 />
-                <span className="mx-key-name">{REASON_LABEL[r.reason]}</span>
+                <span className="mx-key-name">
+                  {/* Every reason in the breakdown is explainable. This is
+                      the panel a student reads WHILE something is going
+                      wrong, so having to guess at "shed" or "throttled" is
+                      exactly the failure this feature exists to prevent. */}
+                  <Term id={REASON_TERM[r.reason]}>{REASON_LABEL[r.reason]}</Term>
+                </span>
                 {/* Share as a length as well as a figure: with up to ten
                     reasons the hues are not separable on their own, so the
                     bar is the channel that actually ranks them. */}

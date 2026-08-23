@@ -305,13 +305,16 @@
 /* The note is the reason to click this row, so it reads as prose in
    sentence case rather than as an uppercase tag. Overrides the .label
    defaults it inherits from the markup. */
+/* The one-line promise under a preset name.
+
+   Plain prose, and NOT built on .label: it used to carry that class and then
+   override every single property .label had set (size, weight, line-height,
+   tracking, transform, colour). A base class that has to be completely
+   neutralised was the wrong base class. */
 .pal-note {
-  margin-top: 2px;
+  margin-top: var(--sp-1);
   font-size: var(--fs-sm);
-  font-weight: var(--fw-body);
   line-height: var(--lh-sm);
-  letter-spacing: 0;
-  text-transform: none;
   color: var(--text-faint);
 }
 
