@@ -1,0 +1,28 @@
+# The full gate, matching CI exactly. Push is rare enough to afford a few
+# seconds, and catching a failure here is far cheaper than a red build on main.
+#
+# Everything below mirrors .github/workflows/ci.yml. If you change one, change
+# the other.
+
+echo "Typechecking..."
+bun run typecheck || {
+  echo ""
+  echo "Typecheck failed. Fix the errors above, or push with --no-verify if"
+  echo "you genuinely mean to push a broken build."
+  exit 1
+}
+
+echo "Linting..."
+bun run lint || exit 1
+
+echo "Checking formatting..."
+bun run format:check || {
+  echo ""
+  echo "Formatting is off. Run: bun run format"
+  exit 1
+}
+
+echo "Running tests..."
+bun run test || exit 1
+
+echo "All checks passed."
