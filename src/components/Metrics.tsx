@@ -3,6 +3,7 @@ import type { FailureReason, HistoryPoint, SimSnapshot } from '../sim/types';
 import {
   formatCompact,
   formatMs,
+  formatPct,
   formatRate,
   healthOfLatency,
   type Health,
@@ -23,8 +24,7 @@ import './Metrics.css';
  * The overlay needs to know its real pixel width to place a right-edge
  * label. It is measured with a ResizeObserver, NOT with calc() — calc()
  * is invalid in SVG geometry presentation attributes and silently
- * resolves to 0, which is what threw the old `now` label 726px out of
- * position while the identical calc() on a <line x2> happened to work.
+ * resolves to 0.
  * ------------------------------------------------------------------ */
 
 /** Internal coordinate space of the stretched plot layer. */
@@ -55,9 +55,13 @@ function niceCeil(v: number): number {
   if (!Number.isFinite(v) || v <= 0) return 1;
   const exp = Math.floor(Math.log10(v));
   const pow = 10 ** exp;
+  // A denormal or an absurd magnitude can make pow non-finite or zero;
+  // either would propagate NaN into every tick and every y coordinate.
+  if (!Number.isFinite(pow) || pow <= 0) return 1;
   const frac = v / pow;
   const nice = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
-  return nice * pow;
+  const out = nice * pow;
+  return Number.isFinite(out) && out > 0 ? out : 1;
 }
 
 /** Five ticks at 0, 25, 50, 75, 100% of the axis top. */
@@ -69,9 +73,8 @@ function ticksFor(top: number): number[] {
  * A y-axis top that rises immediately but falls only reluctantly.
  *
  * Without this the axis rescales under the student's cursor mid-drag and
- * the whole trace appears to jump — one of the biggest contributors to
- * the "unfinished" read. An increase applies at once; a decrease waits
- * until the observed max has stayed below half the current top for a
+ * the whole trace appears to jump. An increase applies at once; a decrease
+ * waits until the observed max has stayed below half the current top for a
  * continuous 5 seconds.
  */
 function useStickyAxis(max: number, fallback: number): { top: number; ticks: number[] } {
@@ -113,7 +116,11 @@ function useStickyAxis(max: number, fallback: number): { top: number; ticks: num
     }
   }, [target, top]);
 
-  return useMemo(() => ({ top, ticks: ticksFor(top) }), [top]);
+  /* `top` is the divisor for every y coordinate in the chart, so it is
+     guarded here rather than at each of the call sites. niceCeil already
+     returns > 0, but the fallback arrives from a caller. */
+  const safeTop = Number.isFinite(top) && top > 0 ? top : 1;
+  return useMemo(() => ({ top: safeTop, ticks: ticksFor(safeTop) }), [safeTop]);
 }
 
 /**
@@ -128,17 +135,18 @@ function useXScale(history: HistoryPoint[]) {
     const tEnd = history[n - 1]!.t;
     const tStart = tEnd - WINDOW_MS;
     const at = (t: number) => {
+      // WINDOW_MS is a non-zero constant, so this division is always safe.
       const f = (t - tStart) / WINDOW_MS;
-      return Math.max(0, Math.min(1, f)) * PLOT_W;
+      return Number.isFinite(f) ? Math.max(0, Math.min(1, f)) * PLOT_W : 0;
     };
     return { at };
   }, [history]);
 }
 
-/** Project a value into plot-space y. `top` is guaranteed > 0 by niceCeil. */
+/** Project a value into plot-space y. `top` is guaranteed > 0 by the caller. */
 function yOf(v: number, top: number): number {
   const safe = Number.isFinite(v) ? v : 0;
-  const denom = top > 0 ? top : 1;
+  const denom = Number.isFinite(top) && top > 0 ? top : 1;
   return PLOT_H - (Math.max(0, Math.min(denom, safe)) / denom) * PLOT_H;
 }
 
@@ -223,6 +231,8 @@ interface FrameProps {
   w: number;
   /** True when there is not enough data to draw a trace. */
   empty: boolean;
+  /** Overrides the default "AWAITING TRAFFIC" placeholder. */
+  emptyLabel?: string;
 }
 
 /**
@@ -230,10 +240,18 @@ interface FrameProps {
  * labels, x tick stubs and the two x captions. Every geometry attribute
  * here is a number — no calc(), ever.
  */
-const Frame = memo(function Frame({ ticks, top, format, w, empty }: FrameProps) {
+const Frame = memo(function Frame({
+  ticks,
+  top,
+  format,
+  w,
+  empty,
+  emptyLabel = 'AWAITING TRAFFIC',
+}: FrameProps) {
   const plotH = CHART_H - PAD_T - PAD_B;
   const right = Math.max(PAD_L + 1, w - PAD_R);
   const baseY = PAD_T + plotH;
+  const safeTop = Number.isFinite(top) && top > 0 ? top : 1;
 
   // Four x ticks: -60s, -40s, -20s, now.
   const xTicks = [0, 1, 2, 3].map((i) => PAD_L + ((right - PAD_L) * i) / 3);
@@ -242,7 +260,7 @@ const Frame = memo(function Frame({ ticks, top, format, w, empty }: FrameProps) 
     <>
       {ticks.map((t, i) => {
         // +0.5 so a 1px rule sits on a device pixel instead of straddling two.
-        const y = Math.round(PAD_T + plotH - (top > 0 ? (t / top) * plotH : 0)) + 0.5;
+        const y = Math.round(PAD_T + plotH - (t / safeTop) * plotH) + 0.5;
         const isZero = i === 0;
         return (
           <g key={t}>
@@ -298,7 +316,7 @@ const Frame = memo(function Frame({ ticks, top, format, w, empty }: FrameProps) 
           dy="0.32em"
           textAnchor="middle"
         >
-          AWAITING TRAFFIC
+          {emptyLabel}
         </text>
       )}
     </>
@@ -420,7 +438,7 @@ function LegendKey({
  * The most instructive visual in the app. The gap between offered and
  * goodput IS the dropped traffic, so it is drawn as literal area rather
  * than left for the eye to infer. When the system keeps up the two lines
- * coincide and the band has zero area; when it sheds, a red wedge opens.
+ * coincide and the band has zero area; when it sheds, a wedge opens.
  * ------------------------------------------------------------------ */
 
 interface ThroughputChartProps {
@@ -464,20 +482,18 @@ const ThroughputChart = memo(function ThroughputChart({
     // Closed band between the two traces: offered forward, goodput back.
     // A single sample has no area, so the fill is skipped entirely.
     let gap = '';
-    if (history.length > 1) {
-      // Only draw when traffic is actually being LOST. `offered - goodput`
-      // is not loss: it is also the in-flight backlog, which is non-zero in
-      // every healthy pipeline and spikes during warm-up. Gating on the
-      // engine's real failure total keeps a working system free of red haze.
-      if (lost > 0.5) {
-        const fwd = history.map(
-          (p) => `${at(p.t).toFixed(2)},${yOf(p.offered, top).toFixed(2)}`,
-        );
-        const rev = history
-          .map((p) => `${at(p.t).toFixed(2)},${yOf(p.goodput, top).toFixed(2)}`)
-          .reverse();
-        gap = [...fwd, ...rev].join(' ');
-      }
+    // Only draw when traffic is actually being LOST. `offered - goodput`
+    // is not loss: it is also the in-flight backlog, which is non-zero in
+    // every healthy pipeline and spikes during warm-up. Gating on the
+    // engine's real failure total keeps a working system free of red haze.
+    if (history.length > 1 && lost > 0.5) {
+      const fwd = history.map(
+        (p) => `${at(p.t).toFixed(2)},${yOf(p.offered, top).toFixed(2)}`,
+      );
+      const rev = history
+        .map((p) => `${at(p.t).toFixed(2)},${yOf(p.goodput, top).toFixed(2)}`)
+        .reverse();
+      gap = [...fwd, ...rev].join(' ');
     }
     return { offeredPts: o, goodputPts: g, gapPts: gap };
   }, [history, at, top, lost]);
@@ -556,13 +572,6 @@ const REASON_ORDER: FailureReason[] = [
   'region-down',
 ];
 
-/**
- * The first N entries of REASON_ORDER are the reasons ordinary traffic can
- * produce. They always hold a legend row. Everything after them is only
- * reachable through injected faults and appears on demand.
- */
-const CORE_REASONS = 5;
-
 const REASON_LABEL: Record<FailureReason, string> = {
   error: 'error',
   shed: 'shed',
@@ -598,27 +607,27 @@ const FailureChart = memo(function FailureChart({
 }: FailureChartProps) {
   const { ref, w } = useMeasuredWidth<HTMLDivElement>();
 
-  const all = useMemo(
-    () =>
-      REASON_ORDER.map((reason) => {
-        const raw = failures[reason];
-        return { reason, rate: Number.isFinite(raw) && raw > 0 ? raw : 0 };
-      }),
-    [failures],
-  );
+  /* Only reasons that are ACTUALLY CARRYING TRAFFIC get a row, sorted by
+     magnitude so the dominant cause is first.
 
-  // Total counts EVERY reason, including ones not given a legend row.
-  const total = all.reduce((s, r) => s + r.rate, 0);
+     The old panel always listed the five "core" reasons, which meant the
+     common healthy case rendered five rows of `0/s` — a permanent block of
+     dead space that also buried the one row that mattered when something
+     did fail, because that row appeared in a fixed alphabetical-ish slot
+     rather than at the top.
 
-  /* The engine defines ten failure reasons, but five of them only ever fire
-     under injected faults. Listing all ten would put a permanent column of
-     dead rows under the plot. The five core reasons always hold a row so the
-     legend does not reflow under a moving slider; the injected ones appear
-     only once they actually carry traffic. */
-  const rows = useMemo(
-    () => all.filter((r, i) => i < CORE_REASONS || r.rate > 0),
-    [all],
-  );
+     Sorting by rate is what makes a failing system legible at a glance:
+     the first row is the answer to "what is going wrong". */
+  const active = useMemo(() => {
+    const rows = REASON_ORDER.map((reason) => {
+      const raw = failures[reason];
+      return { reason, rate: Number.isFinite(raw) && raw > 0 ? raw : 0 };
+    }).filter((r) => r.rate > 0);
+    rows.sort((a, b) => b.rate - a.rate);
+    return rows;
+  }, [failures]);
+
+  const total = useMemo(() => active.reduce((s, r) => s + r.rate, 0), [active]);
 
   // Axis top tracks the largest stacked total in the window.
   const max = useMemo(() => {
@@ -641,8 +650,10 @@ const FailureChart = memo(function FailureChart({
     if (n === 0) return () => 0;
     const tEnd = samples[n - 1]!.t;
     const tStart = tEnd - WINDOW_MS;
-    return (t: number) =>
-      Math.max(0, Math.min(1, (t - tStart) / WINDOW_MS)) * PLOT_W;
+    return (t: number) => {
+      const f = (t - tStart) / WINDOW_MS;
+      return Number.isFinite(f) ? Math.max(0, Math.min(1, f)) * PLOT_W : 0;
+    };
   }, [samples]);
 
   /**
@@ -679,10 +690,16 @@ const FailureChart = memo(function FailureChart({
     return out;
   }, [samples, xAt, top]);
 
-  /* An idle failure chart is the HEALTHY state, not a missing one, so it
-     never says "awaiting traffic" once the sim has produced a sample —
-     it just draws a clean flat baseline, which is true information. */
+  /* Whether the window has ever carried a failure. This is what separates
+     "healthy" from "no data": a chart with 60 clean samples is a REPORT,
+     not an absence of one, and it should say so. */
+  const windowHadFailures = useMemo(
+    () => bands.length > 0,
+    [bands],
+  );
+
   const empty = samples.length === 0;
+  const healthy = total <= 0;
 
   return (
     <section
@@ -691,8 +708,8 @@ const FailureChart = memo(function FailureChart({
     >
       <ChartHead
         caption="Failures · /s"
-        value={formatCompact(total)}
-        tone={total > 0 ? 'danger' : 'ok'}
+        value={healthy ? '0' : formatCompact(total)}
+        tone={healthy ? 'ok' : 'danger'}
       />
 
       <div className="mx-plot" ref={ref} style={{ height: CHART_H }}>
@@ -707,22 +724,62 @@ const FailureChart = memo(function FailureChart({
         </PlotLayer>
 
         <svg className="mx-layer" aria-hidden="true">
-          <Frame ticks={ticks} top={top} format={formatCompact} w={w} empty={empty} />
+          <Frame
+            ticks={ticks}
+            top={top}
+            format={formatCompact}
+            w={w}
+            empty={empty}
+            emptyLabel="AWAITING TRAFFIC"
+          />
         </svg>
       </div>
 
-      {/* Zero rows stay at reduced opacity rather than unmounting: rows
-          appearing and vanishing under a moving slider is a major part of
-          what made this panel read as unfinished. */}
-      <ul className="mx-legend mx-legend-stack">
-        {rows.map((r) => (
-          <li key={r.reason} className="mx-key" data-dim={r.rate <= 0 || undefined}>
-            <span className={`mx-key-swatch mx-fill-${r.reason}`} aria-hidden="true" />
-            <span className="mx-key-name">{REASON_LABEL[r.reason]}</span>
-            <span className="num num-sm mx-key-value">{formatRate(r.rate)}</span>
-          </li>
-        ))}
-      </ul>
+      {/* THE HEALTHY CASE IS ONE LINE, NOT FIVE ZEROS.
+
+          A working system says so in a single calm sentence and spends no
+          further pixels. The old five-row legend of `0/s` was the largest
+          block of dead space in the app, and it also trained the eye to
+          skip the panel — so when a row finally went non-zero, nobody was
+          looking at it any more. */}
+      {healthy ? (
+        <p className="mx-clean">
+          {empty
+            ? 'No traffic yet.'
+            : windowHadFailures
+              ? 'Recovered — nothing failing now.'
+              : 'No failures in the last 60s.'}
+        </p>
+      ) : (
+        <ul className="mx-legend mx-legend-stack">
+          {active.map((r) => {
+            /* Share of the current failure mix. `total` is > 0 here by the
+               `healthy` guard above, but the division is still written
+               defensively because this is a rendered number. */
+            const share = total > 0 ? r.rate / total : 0;
+            return (
+              <li key={r.reason} className="mx-key mx-key-fail">
+                <span
+                  className={`mx-key-swatch mx-fill-${r.reason}`}
+                  aria-hidden="true"
+                />
+                <span className="mx-key-name">{REASON_LABEL[r.reason]}</span>
+                {/* Share as a length as well as a figure: with up to ten
+                    reasons the hues are not separable on their own, so the
+                    bar is the channel that actually ranks them. */}
+                <span className="mx-key-bar" aria-hidden="true">
+                  <span
+                    className={`mx-key-bar-fill mx-fill-${r.reason}`}
+                    style={{ width: `${Math.min(100, share * 100)}%` }}
+                  />
+                </span>
+                <span className="num num-sm mx-key-value">{formatRate(r.rate)}</span>
+                <span className="num num-sm mx-key-share">{formatPct(share)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 });
@@ -744,13 +801,12 @@ const EMPTY_BY: Record<FailureReason, number> = Object.fromEntries(
 export function Metrics({ snapshot }: MetricsProps) {
   const { system, history, failuresByReason } = snapshot;
 
-  /* Real loss, per second. The throughput chart must not infer drops from
-     `offered - goodput`: that difference is dominated by in-flight requests
-     and is large during warm-up, which made a perfectly healthy system
-     announce "Dropped 10/s" while every failure counter read zero. */
-  let totalLost = 0;
+  /* Lifetime failure COUNT, summed. Used only as a memo dependency that
+     changes as the engine records failures — never rendered, and never
+     treated as a rate. The per-second figure is derived below. */
+  let cumulativeFailures = 0;
   for (const v of Object.values(failuresByReason)) {
-    if (Number.isFinite(v)) totalLost += v;
+    if (Number.isFinite(v)) cumulativeFailures += v;
   }
 
   /* The engine returns THE SAME `failuresByReason` object on every snapshot
@@ -760,11 +816,76 @@ export function Metrics({ snapshot }: MetricsProps) {
      engine was reporting thousands of shed requests per second. Copying
      here gives both memo() and the child's useMemo a dependency that
      actually changes. `src/sim` is off-limits, so this is the right place. */
-  const failuresNow = useMemo(
+  const failuresCumulative = useMemo(
     () => ({ ...EMPTY_BY, ...failuresByReason }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [failuresByReason, totalLost, system.timeMs],
+    [failuresByReason, cumulativeFailures, system.timeMs],
   );
+
+  /* `failuresByReason` is a LIFETIME COUNT, not a rate.
+     Verified against the engine: `this.failures[reason]++` on each failure,
+     zeroed only by reset(). Rendering it directly labelled `/s` was wrong
+     three ways — the unit was a lie, the figure only ever grew, and a
+     system that had recovered still showed thousands "failing" because a
+     counter cannot fall. Dropping load to 1rps left it pinned at 8.9k/s.
+
+     Differencing successive samples against elapsed SIM time turns the
+     counter into the rate the panel claims to show. Sim time is the right
+     clock: it follows pause, step and reset, where a wall clock would
+     invent traffic while the simulation is stopped. */
+  const prevCounts = useRef<Record<FailureReason, number> | null>(null);
+  const prevTime = useRef<number>(0);
+  const [rates, setRates] = useState<Record<FailureReason, number>>(EMPTY_BY);
+
+  useEffect(() => {
+    const now = system.timeMs;
+    if (!Number.isFinite(now)) return;
+    const prev = prevCounts.current;
+    const dtMs = now - prevTime.current;
+
+    // First sample, or a reset (time or any counter moved backwards): adopt
+    // the counts as the new baseline and report nothing this frame.
+    const wentBackwards =
+      prev !== null &&
+      REASON_ORDER.some((r) => (failuresCumulative[r] ?? 0) < (prev[r] ?? 0));
+
+    if (prev === null || dtMs < 0 || wentBackwards) {
+      prevCounts.current = failuresCumulative;
+      prevTime.current = now;
+      setRates(EMPTY_BY);
+      return;
+    }
+
+    // Sample no faster than 250ms of sim time: below that the divisor is
+    // tiny and the quotient is mostly quantisation noise.
+    if (dtMs < 250) return;
+
+    const next = { ...EMPTY_BY };
+    const perSec = 1000 / dtMs; // dtMs >= 250 here, so never a divide by zero
+    for (const r of REASON_ORDER) {
+      const delta = (failuresCumulative[r] ?? 0) - (prev[r] ?? 0);
+      next[r] = delta > 0 ? delta * perSec : 0;
+    }
+    prevCounts.current = failuresCumulative;
+    prevTime.current = now;
+    setRates(next);
+  }, [failuresCumulative, system.timeMs]);
+
+  /** True per-second failure rates — what the panel labels and charts. */
+  const failuresNow = rates;
+
+  /* Loss per second, from the differenced rates. This drives the throughput
+     chart's dropped-traffic wedge, so it must be a rate: gating that fill on
+     a lifetime count would leave the wedge painted for the rest of the
+     session after a single early failure. */
+  const lostRate = useMemo(() => {
+    let s = 0;
+    for (const r of REASON_ORDER) {
+      const v = failuresNow[r];
+      if (Number.isFinite(v) && v > 0) s += v;
+    }
+    return s;
+  }, [failuresNow]);
 
   /* The engine returns THE SAME history array instance on every snapshot
      and mutates it in place (push + splice). Memoizing on `[history]`
@@ -773,8 +894,7 @@ export function Metrics({ snapshot }: MetricsProps) {
      matter how much traffic flows.
 
      Keying on the length and newest timestamp gives a dependency that
-     actually changes as the engine appends. `src/sim` is off-limits, so
-     this is the correct place to absorb that. */
+     actually changes as the engine appends. */
   const historyLen = history.length;
   const historyEnd = historyLen > 0 ? history[historyLen - 1]!.t : -1;
 
@@ -809,6 +929,7 @@ export function Metrics({ snapshot }: MetricsProps) {
     if (bucket < lastBucket.current) {
       failRef.current = [];
       lastBucket.current = -1;
+      setFailSamples(failRef.current);
     }
     if (bucket === lastBucket.current) return;
     lastBucket.current = bucket;
@@ -831,7 +952,7 @@ export function Metrics({ snapshot }: MetricsProps) {
         history={windowed}
         offered={system.offeredRps}
         goodput={system.goodputRps}
-        lost={totalLost}
+        lost={lostRate}
       />
       <FailureChart samples={failSamples} failures={failuresNow} />
     </div>

@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import type {
+  FailureKind,
   NodeKind,
   NodeStats,
   SimEdge,
@@ -56,25 +57,59 @@ import './Canvas.css';
 
 export const NODE_W = 184;
 export const NODE_H = 88;
-const NODE_R = 5;
+/** Radii come from the design scale (3/4/6). The node body is the 6. */
+const NODE_R = 6;
 
-/** Height of the title block. The body is the remaining 64px. */
-const HEAD_H = 24;
+/**
+ * Internal layout.
+ *
+ * The node is a single surface divided by WHITESPACE and one hairline, never
+ * by nested boxes — "boundary priority: whitespace, then background shift,
+ * then border last". Vertical rhythm, all on the 4px space scale:
+ *
+ *    0   top edge, health rule rides here
+ *    8   glyph top (18px box)
+ *   26   header baseline area ends
+ *   30   hairline under the header
+ *   52   primary value baseline
+ *   68   secondary row baseline
+ *   80   meter
+ *
+ * The old layout put a vertical divider rule at x=104 to fence the sparkline
+ * off from the numbers. That rule is gone: two type sizes and 12px of gap
+ * separate them more quietly than a line does.
+ */
+const HEAD_H = 30;
 /** Horizontal inset for everything inside the body. */
 const PAD_X = 12;
-/** x of the vertical rule splitting numbers from the sparkline. */
-const DIVIDER_X = 104;
 
-const SPARK_X = 112;
-const SPARK_Y = 32;
-const SPARK_W = 60;
-const SPARK_H = 20;
+const SPARK_X = 108;
+const SPARK_Y = 38;
+const SPARK_W = 64;
+const SPARK_H = 18;
 /** One sample per second over the same 60s window the charts show. */
 export const SPARK_LEN = 60;
 
-const METER_Y = 78;
-const METER_H = 4;
+/**
+ * The utilisation meter spans the FULL width of the node, flush to both
+ * insets, and sits on the bottom edge. Full width matters: the bar's length
+ * is the redundant, colour-blind-safe encoding of load, so it needs the
+ * longest run the node can give it to be readable at a glance.
+ */
+const METER_Y = 80;
+const METER_H = 3;
 const METER_W = NODE_W - PAD_X * 2;
+/**
+ * Load at which the meter grows a threshold tick.
+ *
+ * DERIVED from healthOfLoad rather than restated, so this file can never drift
+ * out of agreement with format.ts about where warn begins. A literal 0.7 here
+ * would be a second source of truth for the same number.
+ */
+const WARN_AT = (() => {
+  for (let v = 0; v <= 1000; v++) if (healthOfLoad(v / 1000) === 'warn') return v / 1000;
+  return 0.7;
+})();
 
 const GRID = 8;
 /** Visual radius of a port dot. */
@@ -365,7 +400,16 @@ const Spark = memo(function Spark({ data, unit }: SparkProps) {
  * Glyph
  * ------------------------------------------------------------------ */
 
-const GLYPH_SCALE = 14 / GLYPH_BOX;
+/**
+ * Rendered glyph size, in world units.
+ *
+ * 18, not 14. The set was rendered and inspected at both: at 14px the denser
+ * glyphs (region's globe, shard's partitions, service's stacked units) close
+ * up into solid blobs, because a 1.5px stroke eats too much of a 14px box.
+ * 18px is the smallest size at which all fourteen stay distinguishable.
+ */
+const GLYPH_PX = 18;
+const GLYPH_SCALE = GLYPH_PX / GLYPH_BOX;
 
 const Glyph = memo(function Glyph({ kind }: { kind: NodeKind }) {
   const filled = FILLED_GLYPHS.has(kind);
@@ -387,19 +431,67 @@ const Glyph = memo(function Glyph({ kind }: { kind: NodeKind }) {
  * ------------------------------------------------------------------ */
 
 /**
- * Horizontal-tangent cubic bezier between two ports.
+ * Edge routing: a straight run with ONE filleted turn at each end.
  *
- * Orthogonal routing with filleted corners was considered and rejected: it is
- * a real path-generation problem (fillet clamping, overlap avoidance, a
- * four-corner back-route case) and this curve already reads correctly for
- * every topology the presets produce.
+ * This replaces a full-width cubic bezier, and the reason is the user's
+ * complaint that the wires "read as noise". A bezier between two ports is
+ * curving along its ENTIRE length, so ten of them crossing a diagram produce
+ * ten unique arcs with no shared direction — the eye cannot group them and
+ * the result looks like scribble.
+ *
+ * An engineering diagram instead reads as a bus: every wire leaves its source
+ * horizontally, travels along ONE axis, and arrives horizontally. Only the
+ * corners are curved, and they all share the same radius, so the picture is
+ * built from a small vocabulary of repeated shapes. That is what makes a
+ * schematic scan cleanly at a glance.
+ *
+ * Geometry: leave the source horizontally for STUB px, turn, run vertically
+ * to the target's row, turn again, arrive horizontally. When the two ports are
+ * already on (nearly) the same row the whole thing degenerates to a straight
+ * line, which is both the common case and the cheapest to read.
+ *
+ * `mid` is where the vertical run happens. Halfway between the ports normally;
+ * clamped to leave a stub at each end so the corner radius always fits.
  */
+const EDGE_STUB = 22;
+const EDGE_RADIUS = 12;
+
 function edgePath(ax: number, ay: number, bx: number, by: number): string {
+  const dy = by - ay;
+
+  // Same row (within a hair): a straight line. No corners to draw.
+  if (Math.abs(dy) < 1) return `M${ax},${ay} L${bx},${by}`;
+
   const dx = bx - ax;
-  // Bow scales with the gap so stacked nodes still read as curves, and is
-  // floored at 48 for the wider node.
-  const bow = clamp(Math.abs(dx) * 0.5, 48, 200);
-  return `M${ax},${ay} C${ax + bow},${ay} ${bx - bow},${by} ${bx},${by}`;
+  // Where the vertical leg sits. Keep a stub at both ends so each fillet has
+  // room; when the target is BEHIND the source there is no room for a mid
+  // route, so the leg goes just past the source and the path doubles back.
+  const mid =
+    dx > EDGE_STUB * 2
+      ? ax + Math.max(EDGE_STUB, dx / 2)
+      : ax + EDGE_STUB;
+
+  // Corner radius must never exceed half of either leg it joins, or the two
+  // arcs overlap and the path visibly kinks.
+  const r = Math.min(
+    EDGE_RADIUS,
+    Math.abs(dy) / 2,
+    Math.max(1, Math.abs(mid - ax)),
+    Math.max(1, Math.abs(bx - mid)),
+  );
+  const sy = dy > 0 ? 1 : -1;
+  // Sweep flags flip with direction so both corners bend the correct way.
+  const s1 = dy > 0 ? 1 : 0;
+  const s2 = dy > 0 ? 0 : 1;
+
+  return [
+    `M${ax},${ay}`,
+    `L${mid - r},${ay}`,
+    `A${r},${r} 0 0 ${s1} ${mid},${ay + r * sy}`,
+    `L${mid},${by - r * sy}`,
+    `A${r},${r} 0 0 ${s2} ${mid + r},${by}`,
+    `L${bx},${by}`,
+  ].join(' ');
 }
 
 /**
@@ -411,10 +503,15 @@ function edgeWidth(f: number): number {
   return f <= 0 ? 1 : clamp(1 + Math.log10(1 + f) * 0.85, 1, 4.5);
 }
 
-/** Where the arrowhead sits: just short of the target port. */
-const ARROW_INSET = 9;
-const ARROW_LEN = 9;
-const ARROW_SPREAD = 0.42;
+/**
+ * Arrowhead geometry. Because every edge now arrives horizontally the head is
+ * a fixed triangle rather than a rotated one: ARROW_LEN along the wire,
+ * ARROW_HALF either side of it. INSET is how far the LINE stops short of the
+ * tip so the stroke never pokes through the solid head.
+ */
+const ARROW_INSET = 8;
+const ARROW_LEN = 8;
+const ARROW_HALF = 3.6;
 
 interface EdgeViewProps {
   edge: SimEdge;
@@ -440,28 +537,54 @@ const EdgeView = memo(function EdgeView({
   targetHealth,
   showLabel,
 }: EdgeViewProps) {
-  // Pull the endpoint back so the stroke does not poke through the arrowhead.
-  const angle = Math.atan2(by - ay, bx - ax);
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const tipX = bx - cos * 2;
-  const tipY = by - sin * 2;
-  const d = edgePath(ax, ay, tipX - cos * ARROW_INSET, tipY - sin * ARROW_INSET);
+  // Every edge now ARRIVES horizontally (see edgePath), so the arrowhead is
+  // always axis-aligned and needs no trigonometry. That is a direct benefit of
+  // the routing change: the old bezier arrived at an arbitrary angle, which
+  // meant computing atan2 per edge per frame and produced arrowheads that
+  // each sat at their own tilt.
+  const tipX = bx - 2;
+  const d = edgePath(ax, ay, tipX - ARROW_INSET, by);
 
   const width = edgeWidth(flow);
   const active = flow > 0.05;
 
-  // One dash cycle is 12 user units, so animation-duration directly encodes
-  // the flow rate. Clamped so it never strobes and never appears frozen.
-  const style = active
-    ? ({
-        animationDuration: `${clamp(3.2 / Math.log10(10 + flow), 0.35, 2.4)}s`,
-      } as CSSProperties)
-    : undefined;
+  /**
+   * Flow is encoded as dash DENSITY, and the animation only carries speed.
+   *
+   * `--dash` is the cycle length in user units: heavy flow packs the dashes
+   * tightly, light flow spaces them out. That is the channel a reader can
+   * still measure with the animation stopped, which is why it survives
+   * prefers-reduced-motion.
+   *
+   * `animationDuration` is derived so one cycle takes proportionally less time
+   * as the rate climbs, and is clamped at both ends: below 0.35s the dashes
+   * strobe, above 2.4s they look frozen. Driving it from a CSS custom property
+   * means React never touches this per frame — the canvas re-renders at 10Hz,
+   * and the browser interpolates the motion continuously in between.
+   */
+  const style = useMemo(() => {
+    if (!active) return undefined;
+    // Cycle length in USER UNITS (not px): dense at high flow, sparse at low.
+    const cycle = clamp(20 - Math.log10(1 + flow) * 4, 7, 20);
+    const on = 3;
+    return {
+      '--dash-on': on.toFixed(1),
+      '--dash-off': (cycle - on).toFixed(1),
+      // Travel exactly one cycle per iteration so the pattern never jumps.
+      '--dash-cycle': (-cycle).toFixed(1),
+      animationDuration: `${clamp(3.2 / Math.log10(10 + flow), 0.35, 2.4).toFixed(2)}s`,
+    } as CSSProperties;
+  }, [active, flow]);
 
-  // Midpoint of a cubic whose control points share the endpoints' y is simply
-  // the average in y; x is the average of the four control x's at t=0.5.
-  const midX = (ax + bx) / 2;
+  // Label anchor. The routed path's vertical leg sits at `mid`, so the visual
+  // centre of the wire is there rather than at the straight-line midpoint.
+  const dxTotal = bx - ax;
+  const midX =
+    Math.abs(by - ay) < 1
+      ? (ax + bx) / 2
+      : dxTotal > EDGE_STUB * 2
+        ? ax + Math.max(EDGE_STUB, dxTotal / 2)
+        : ax + EDGE_STUB;
   const midY = (ay + by) / 2;
 
   return (
@@ -489,12 +612,11 @@ const EdgeView = memo(function EdgeView({
           style={style}
         />
       )}
+      {/* Arrowhead. Axis-aligned because every edge arrives horizontally. */}
       <path
-        d={`M${tipX},${tipY} L${tipX - Math.cos(angle - ARROW_SPREAD) * ARROW_LEN},${
-          tipY - Math.sin(angle - ARROW_SPREAD) * ARROW_LEN
-        } L${tipX - Math.cos(angle + ARROW_SPREAD) * ARROW_LEN},${
-          tipY - Math.sin(angle + ARROW_SPREAD) * ARROW_LEN
-        } Z`}
+        d={`M${tipX},${by} L${tipX - ARROW_LEN},${by - ARROW_HALF} L${
+          tipX - ARROW_LEN
+        },${by + ARROW_HALF} Z`}
         className="cv-edge-arrow"
       />
 
@@ -542,6 +664,14 @@ interface NodeViewProps {
   linking: boolean;
   /** True when this node is the snapped target of the live link. */
   linkTarget: boolean;
+  /**
+   * An injected failure in force on this node right now, or null. Sourced from
+   * `snapshot.activeFailures`, so a crashed or slowed node is marked as
+   * FAULTED even when its own stats look calm — a crashed node serves nothing,
+   * which reads as 0% utilisation and would otherwise paint as perfectly
+   * healthy. This is the one state the metrics alone cannot express.
+   */
+  fault: FailureKind | null;
   onActivate: (id: string, additive: boolean) => void;
   onNudge: (id: string, dx: number, dy: number) => void;
 }
@@ -555,11 +685,13 @@ const NodeView = memo(function NodeView({
   linkRole,
   linking,
   linkTarget,
+  fault,
   onActivate,
   onNudge,
 }: NodeViewProps) {
   const readout = stats ? readoutFor(node.kind, stats, node.config) : null;
-  const health = readout ? readout.health : 'ok';
+  // A faulted node is never reported as healthy, whatever its metrics say.
+  const health: Health = fault ? 'danger' : readout ? readout.health : 'ok';
 
   const handleKey = useCallback(
     (e: React.KeyboardEvent<SVGGElement>) => {
@@ -606,21 +738,28 @@ const NodeView = memo(function NodeView({
     <g
       className={`cv-node is-${health}${selected ? ' is-selected' : ''}${
         readout?.losing ? ' is-losing' : ''
-      }${linking ? ' is-linking' : ''}${linkClass}`}
+      }${fault ? ' is-faulted' : ''}${linking ? ' is-linking' : ''}${linkClass}`}
       transform={`translate(${node.x},${node.y})`}
       tabIndex={0}
       role="button"
       aria-label={
-        readout
-          ? `${KIND_NAME[node.kind]} ${node.label}, ${readout.primary.value} ${readout.primary.label}`
-          : `${KIND_NAME[node.kind]} ${node.label}`
+        [
+          KIND_NAME[node.kind],
+          node.label,
+          readout ? `${readout.primary.value} ${readout.primary.label}` : null,
+          // The fault is announced, not just drawn: a screen-reader user has
+          // no access to the square mark in the corner.
+          fault ? `faulted: ${fault}` : null,
+        ]
+          .filter(Boolean)
+          .join(', ')
       }
       aria-pressed={selected}
       data-hit="node"
       data-id={node.id}
       onKeyDown={handleKey}
     >
-      {/* Body. */}
+      {/* Body. One surface. No header band fill, no card-in-card. */}
       <rect
         className="cv-node-body"
         width={NODE_W}
@@ -629,34 +768,54 @@ const NodeView = memo(function NodeView({
         ry={NODE_R}
       />
 
+      {/*
+        Selection ring.
+
+        Drawn as a SEPARATE inset rect rather than as a border on the body,
+        for two reasons. It can be 2px without changing the body's geometry
+        (a thicker border would shift every child by a pixel), and it can sit
+        slightly inside the edge so the accent reads as a ring around the node
+        rather than as the node's own outline. This is the single most
+        important state in the canvas — the user said selection was
+        unmistakably bad — so it gets its own element and the only cool colour
+        on screen.
+      */}
+      {selected && (
+        <rect
+          className="cv-node-ring"
+          x={1}
+          y={1}
+          width={NODE_W - 2}
+          height={NODE_H - 2}
+          rx={NODE_R - 1}
+          ry={NODE_R - 1}
+        />
+      )}
+
+      {/* Health rule: a 1.5px bar inset from the rounded corners, along the
+          top edge. Paints --status, so it is invisible-by-neutral at ok and
+          the only warm mark on the node at warn/danger. */}
+      <rect
+        className="cv-node-rule"
+        x={NODE_R}
+        y={0}
+        width={NODE_W - NODE_R * 2}
+        height={1.5}
+      />
+
       {showHeader && (
         <>
-          {/* Header band. Rounded at the top only, square where it meets
-              the hairline — drawn as a path because a rect cannot do that. */}
-          <path
-            className="cv-node-head"
-            d={`M0,${HEAD_H} L0,${NODE_R} A${NODE_R},${NODE_R} 0 0 1 ${NODE_R},0 L${
-              NODE_W - NODE_R
-            },0 A${NODE_R},${NODE_R} 0 0 1 ${NODE_W},${NODE_R} L${NODE_W},${HEAD_H} Z`}
-          />
-          {/* Health rule along the top edge. */}
-          <path
-            className="cv-node-rule"
-            d={`M0,${NODE_R} A${NODE_R},${NODE_R} 0 0 1 ${NODE_R},0 L${
-              NODE_W - NODE_R
-            },0 A${NODE_R},${NODE_R} 0 0 1 ${NODE_W},${NODE_R} L${NODE_W},1.5 L0,1.5 Z`}
-          />
           <line
             className="cv-node-hair"
-            x1={0}
+            x1={PAD_X}
             y1={HEAD_H}
-            x2={NODE_W}
+            x2={NODE_W - PAD_X}
             y2={HEAD_H}
           />
 
           <g
             className="cv-node-icon"
-            transform={`translate(10,5) scale(${GLYPH_SCALE})`}
+            transform={`translate(${PAD_X},6) scale(${GLYPH_SCALE})`}
           >
             <Glyph kind={node.kind} />
           </g>
@@ -665,65 +824,70 @@ const NodeView = memo(function NodeView({
 
       <text
         className="cv-node-name"
-        x={showHeader ? 30 : PAD_X}
-        y={showHeader ? 16 : 20}
+        x={showHeader ? PAD_X + GLYPH_PX + 8 : PAD_X}
+        y={showHeader ? 21 : 24}
       >
         {node.label}
       </text>
 
-      {showHeader && <circle className="cv-node-dot" cx={172} cy={12} r={4} />}
+      {/*
+        Status mark, top right. Redundant with colour by SHAPE, which is the
+        rule that keeps the diagram readable under deuteranopia (where warn and
+        danger converge to the same yellow-green):
 
-      {/* Traffic is actively being lost here. The only added decoration, and
-          it appears only when the statement is true. */}
-      {full && readout?.losing && (
-        // x=156, not 164: the health dot occupies 168..176 (cx 172, r 4), so
-        // a square at 164 shared an edge with it and the two read as a single
-        // smudge at 100% zoom. 156 leaves a clear 8px gap between them.
-        <rect className="cv-node-loss" x={156} y={6} width={4} height={4} />
+          ok      nothing at all — a healthy node carries no mark
+          warn    a hollow ring
+          danger  a filled disc
+          fault   a square, which no metric state ever produces
+
+        So the three states differ in fill and the fourth in silhouette,
+        before any colour is applied.
+      */}
+      {showHeader && fault && (
+        <rect className="cv-node-mark is-fault" x={NODE_W - PAD_X - 7} y={9} width={7} height={7} />
+      )}
+      {showHeader && !fault && health === 'danger' && (
+        <circle className="cv-node-mark is-danger" cx={NODE_W - PAD_X - 3.5} cy={12.5} r={3.5} />
+      )}
+      {showHeader && !fault && health === 'warn' && (
+        <circle className="cv-node-mark is-warn" cx={NODE_W - PAD_X - 3.5} cy={12.5} r={3} />
       )}
 
       {full && readout && (
         <>
-          <text className="cv-node-primary" x={PAD_X} y={50}>
+          <text className="cv-node-primary" x={PAD_X} y={52}>
             <tspan className="cv-val">{readout.primary.value}</tspan>
             <tspan className="cv-cap" dx={4}>
               {readout.primary.label}
             </tspan>
           </text>
 
-          <line
-            className="cv-node-div"
-            x1={DIVIDER_X}
-            y1={32}
-            x2={DIVIDER_X}
-            y2={60}
-          />
-
           <Spark data={spark} unit={sparkUnit} />
 
-          <text className="cv-node-sec" x={PAD_X} y={68}>
+          <text className="cv-node-sec" x={PAD_X} y={70}>
             <tspan className="cv-val">{readout.a.value}</tspan>
-            <tspan className="cv-cap" dx={4}>
+            <tspan className="cv-cap" dx={3}>
               {readout.a.label}
             </tspan>
           </text>
-          <text className="cv-node-sec" x={96} y={68}>
+          <text className="cv-node-sec" x={PAD_X + 56} y={70}>
             <tspan className="cv-val">{readout.b.value}</tspan>
-            <tspan className="cv-cap" dx={4}>
+            <tspan className="cv-cap" dx={3}>
               {readout.b.label}
             </tspan>
           </text>
         </>
       )}
 
-      {/* Meter. Position-encoded, so it survives colorblindness and low zoom. */}
+      {/* Meter. Length is the primary encoding of load — it survives both
+          colourblindness and the zoom levels where text has dropped out. */}
       <rect
         className="cv-meter-track"
         x={PAD_X}
         y={METER_Y}
         width={METER_W}
         height={METER_H}
-        rx={2}
+        rx={1.5}
       />
       {meterW > 0 && (
         <rect
@@ -732,9 +896,18 @@ const NodeView = memo(function NodeView({
           y={METER_Y}
           width={meterW}
           height={METER_H}
-          rx={2}
+          rx={1.5}
         />
       )}
+      {/* Threshold tick. A fixed landmark at the warn line, so a bar can be
+          read against WHERE trouble starts, not just against its own length. */}
+      <rect
+        className="cv-meter-tick"
+        x={PAD_X + METER_W * WARN_AT}
+        y={METER_Y - 1}
+        width={1}
+        height={METER_H + 2}
+      />
 
       {/*
         Ports. Input left, output right.
@@ -1659,18 +1832,41 @@ export default function Canvas({
   const showEdgeLabels = view.k >= 1;
 
   /**
+   * Injected failures in force, keyed by node id.
+   *
+   * `activeFailures` is an ARRAY on the snapshot, so looking a node up in it
+   * directly would be O(n) per node per render. Indexing it once per snapshot
+   * keeps NodeView's prop a plain string that memo can compare by identity.
+   */
+  const faultById = useMemo(() => {
+    const m = new Map<string, FailureKind>();
+    if (!snapshot) return m;
+    for (const f of snapshot.activeFailures) m.set(f.nodeId, f.kind);
+    return m;
+  }, [snapshot]);
+
+  /**
    * Health per node, so an edge can be colored by the state of the node it
    * feeds. Computed once per snapshot rather than per edge.
+   *
+   * A faulted node is forced to `danger` here as well as inside NodeView, so
+   * that the WIRES feeding a crashed node also read as failing. Without this
+   * a crashed node (which serves nothing, so reports 0% utilisation) would sit
+   * at the end of a set of perfectly healthy-looking edges.
    */
   const healthById = useMemo(() => {
     const m = new Map<string, Health>();
     if (!snapshot) return m;
     for (const n of topology.nodes) {
+      if (faultById.has(n.id)) {
+        m.set(n.id, 'danger');
+        continue;
+      }
       const s = snapshot.nodes[n.id];
       if (s) m.set(n.id, readoutFor(n.kind, s, n.config).health);
     }
     return m;
-  }, [snapshot, topology.nodes]);
+  }, [snapshot, topology.nodes, faultById]);
 
   /**
    * The link gesture currently in flight, from either mechanism. Drag and
@@ -1825,6 +2021,7 @@ export default function Canvas({
                   linkRole={linkRoles.get(n.id) ?? 'none'}
                   linking={linkFrom !== null}
                   linkTarget={snapTarget === n.id}
+                  fault={faultById.get(n.id) ?? null}
                   onActivate={onActivate}
                   onNudge={onNudge}
                 />
