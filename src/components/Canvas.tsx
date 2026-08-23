@@ -16,28 +16,97 @@ import type {
   SimSnapshot,
   Topology,
 } from '../sim/types';
-import { FILLED_GLYPHS, GLYPH, NODE_DND_MIME } from './nodeVisuals';
+import {
+  FILLED_GLYPHS,
+  GLYPH,
+  GLYPH_BOX,
+  KIND_NAME,
+  NODE_DND_MIME,
+} from './nodeVisuals';
+import {
+  formatCount,
+  formatMs,
+  formatPct,
+  formatRate,
+  healthOfErr,
+  healthOfLoad,
+} from './format';
+import type { Health } from './format';
 import './Canvas.css';
 
 /* ------------------------------------------------------------------ *
- * Geometry constants. Preset coordinates treat x/y as the node's
- * top-left corner, spaced ~200-320px apart horizontally.
+ * Geometry.
+ *
+ * Preset coordinates treat x/y as the node's top-left corner. 184x88 is
+ * measured against the real preset spacing, not chosen for looks:
+ *
+ *   async-workers   worker(730,200) and db(860,380) overlap horizontally
+ *                   (130px apart, 184px wide) and read only because of the
+ *                   vertical gap: 380 - (200 + 88) = 92px. Safe.
+ *   load-balanced   api1/api2/api3 stack at y=80/220/360. At H=88 the gutter
+ *                   is 140 - 88 = 52px, enough for three edges to fan
+ *                   through. At H=96 it would be 44px and the fan-out that
+ *                   preset exists to teach starts to crowd.
+ *   async-workers   api(260) -> queue(500) is the tightest horizontal pair:
+ *                   240 - 184 = 56px of edge. Fine.
+ *
+ * Any future change to these two numbers must be re-checked against those
+ * three pairs.
  * ------------------------------------------------------------------ */
 
-export const NODE_W = 168;
-export const NODE_H = 60;
+export const NODE_W = 184;
+export const NODE_H = 88;
+const NODE_R = 5;
+
+/** Height of the title block. The body is the remaining 64px. */
+const HEAD_H = 24;
+/** Horizontal inset for everything inside the body. */
+const PAD_X = 12;
+/** x of the vertical rule splitting numbers from the sparkline. */
+const DIVIDER_X = 104;
+
+const SPARK_X = 112;
+const SPARK_Y = 32;
+const SPARK_W = 60;
+const SPARK_H = 20;
+/** One sample per second over the same 60s window the charts show. */
+export const SPARK_LEN = 60;
+
+const METER_Y = 78;
+const METER_H = 4;
+const METER_W = NODE_W - PAD_X * 2;
+
 const GRID = 8;
 const PORT_R = 5;
+const PORT_CY = NODE_H / 2;
+
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 2.5;
-/** Below this zoom the live numbers are dropped so labels stay readable. */
+/** Below this the body numbers and sparkline drop. */
 const DETAIL_ZOOM = 0.7;
+/** Below this only the name, health rule and meter survive. */
+const MINIMAL_ZOOM = 0.5;
+
+/** Auto-fit margin and clamp. 1.5 stops a 3-node preset becoming a billboard. */
+const FIT_MARGIN = 64;
+const FIT_MIN = 0.6;
+const FIT_MAX = 1.5;
 
 export interface Viewport {
   x: number;
   y: number;
   k: number;
 }
+
+/**
+ * Per-node sparkline samples, newest last, keyed by node id.
+ *
+ * `SimSnapshot.history` is system-wide — `HistoryPoint` carries no node id —
+ * so there is no per-node history in the engine to draw. Since src/sim is not
+ * ours to change, the ring buffer lives in the UI and is passed in. Absent or
+ * short buffers render a bare baseline, never a placeholder.
+ */
+export type SparkData = ReadonlyMap<string, ArrayLike<number>>;
 
 export interface CanvasProps {
   topology: Topology;
@@ -49,6 +118,8 @@ export interface CanvasProps {
   onDeleteNode: (id: string) => void;
   onDeleteEdge: (id: string) => void;
   onDropNode: (kind: NodeKind, x: number, y: number) => void;
+  /** Optional: per-node sparkline history. Omitted -> no sparklines. */
+  spark?: SparkData;
 }
 
 /* ------------------------------------------------------------------ *
@@ -59,92 +130,184 @@ const snap = (v: number) => Math.round(v / GRID) * GRID;
 const clamp = (v: number, lo: number, hi: number) =>
   v < lo ? lo : v > hi ? hi : v;
 
-const inPort = (n: SimNode) => ({ x: n.x, y: n.y + NODE_H / 2 });
-const outPort = (n: SimNode) => ({ x: n.x + NODE_W, y: n.y + NODE_H / 2 });
+const inPort = (n: SimNode) => ({ x: n.x, y: n.y + PORT_CY });
+const outPort = (n: SimNode) => ({ x: n.x + NODE_W, y: n.y + PORT_CY });
 
-/** Health band for a utilization in 0..1. */
-function healthOf(u: number): 'ok' | 'warn' | 'danger' {
-  if (u >= 0.9) return 'danger';
-  if (u >= 0.7) return 'warn';
-  return 'ok';
+/* ------------------------------------------------------------------ *
+ * Readouts.
+ *
+ * Five live values per node, all from fields the engine already computes.
+ * The previous two-value readout discarded eleven of thirteen NodeStats
+ * fields — including `queued`, the backlog that three of the five presets
+ * exist to teach.
+ * ------------------------------------------------------------------ */
+
+interface Cell {
+  value: string;
+  label: string;
 }
 
-function fmtMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '0';
-  if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
-  if (ms >= 100) return `${Math.round(ms)}`;
-  return ms >= 10 ? ms.toFixed(0) : ms.toFixed(1);
-}
-
-function fmtCount(n: number): string {
-  if (!Number.isFinite(n)) return '0';
-  if (n >= 10000) return `${(n / 1000).toFixed(0)}k`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return `${Math.round(n)}`;
-}
-
-function fmtRate(n: number): string {
-  if (!Number.isFinite(n)) return '0';
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  if (n >= 100) return `${Math.round(n)}`;
-  return n >= 10 ? n.toFixed(0) : n.toFixed(1);
-}
-
-/**
- * The two numbers that matter most for each kind, plus the value that
- * drives the health bar. Queue nodes are about backlog, not utilization;
- * caches are about hit rate; everything else is utilization + p99.
- */
 interface Readout {
-  a: { label: string; value: string };
-  b: { label: string; value: string };
-  /** 0..1, drives the health bar width and color. */
+  primary: Cell;
+  a: Cell;
+  b: Cell;
+  /** 0..1. Drives the meter width and the health band. */
   load: number;
+  /** Health of the primary metric specifically. */
+  health: Health;
+  /** Value the sparkline plots, in the primary's units. */
+  spark: number;
+  /** True when traffic is actively being lost here. */
+  losing: boolean;
 }
 
-function readoutFor(kind: NodeKind, s: NodeStats): Readout {
+function readoutFor(
+  kind: NodeKind,
+  s: NodeStats,
+  cfg: { queueLimit: number },
+): Readout {
   const util = clamp(s.utilization, 0, 1);
+  const losing = s.shedRate + s.timeoutRate > 0;
+
   switch (kind) {
-    case 'client':
+    case 'client': {
+      const err = clamp(s.errorRate, 0, 1);
       return {
-        a: { label: 'rps', value: fmtRate(s.throughput) },
-        b: { label: 'p99', value: fmtMs(s.p99) },
-        load: clamp(s.errorRate, 0, 1),
-      };
-    case 'queue': {
-      const depth = s.queued + s.inFlight;
-      return {
-        a: { label: 'depth', value: fmtCount(depth) },
-        b: { label: 'in/s', value: fmtRate(s.arrivalRate) },
-        // Backlog health: a queue is fine empty, alarming when it is filling.
-        load: clamp(depth / 500, 0, 1),
+        primary: { value: formatRate(s.throughput), label: 'rps' },
+        a: { value: formatMs(s.p99), label: 'p99' },
+        b: { value: formatPct(err), label: 'err' },
+        load: err,
+        health: healthOfErr(err),
+        spark: s.throughput,
+        losing,
       };
     }
-    case 'cache':
+
+    case 'lb':
       return {
-        a: { label: 'hit', value: `${Math.round(s.hitRate * 100)}%` },
-        b: { label: 'p99', value: fmtMs(s.p99) },
+        primary: { value: formatPct(util), label: 'util' },
+        a: { value: formatRate(s.throughput), label: 'rps' },
+        b: { value: formatCount(s.queued), label: 'queue' },
         load: util,
+        health: healthOfLoad(util),
+        spark: util,
+        losing,
       };
+
+    case 'cache': {
+      const hit = clamp(s.hitRate, 0, 1);
+      // A cache's meter shows misses: an empty bar is a cache doing its job.
+      const miss = 1 - hit;
+      return {
+        primary: { value: formatPct(hit), label: 'hit' },
+        a: { value: formatMs(s.p99), label: 'p99' },
+        b: { value: formatRate(s.throughput), label: 'rps' },
+        load: miss,
+        health: healthOfLoad(miss),
+        spark: hit,
+        losing,
+      };
+    }
+
+    case 'queue': {
+      const depth = s.queued + s.inFlight;
+      // Divide by the node's own limit. The old hardcoded 500 was wrong for
+      // every preset: the real limits are 5000, 512, 256, 128, 96, 64, 48, 32.
+      const limit = cfg.queueLimit > 0 ? cfg.queueLimit : 1;
+      const fill = clamp(depth / limit, 0, 1);
+      return {
+        primary: { value: formatCount(depth), label: 'depth' },
+        a: { value: formatRate(s.arrivalRate), label: 'in' },
+        b: { value: formatRate(s.throughput), label: 'out' },
+        load: fill,
+        health: healthOfLoad(fill),
+        spark: depth,
+        losing,
+      };
+    }
+
+    // service, db, worker
     default:
       return {
-        a: { label: 'util', value: `${Math.round(util * 100)}%` },
-        b: { label: 'p99', value: fmtMs(s.p99) },
+        primary: { value: formatPct(util), label: 'util' },
+        a: { value: formatMs(s.p99), label: 'p99' },
+        b: { value: formatCount(s.queued), label: 'queue' },
         load: util,
+        health: healthOfLoad(util),
+        spark: util,
+        losing,
       };
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Sparkline
+ * ------------------------------------------------------------------ */
 
-const KIND_NAME: Record<NodeKind, string> = {
-  client: 'Client',
-  lb: 'Load balancer',
-  service: 'Service',
-  cache: 'Cache',
-  db: 'Database',
-  queue: 'Queue',
-  worker: 'Worker',
-};
+/** Round up to a friendly ceiling so the y-domain does not jitter each sample. */
+function niceCeil(v: number): number {
+  if (!Number.isFinite(v) || v <= 0) return 1;
+  const mag = 10 ** Math.floor(Math.log10(v));
+  const n = v / mag;
+  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  return step * mag;
+}
+
+interface SparkProps {
+  data: ArrayLike<number> | undefined;
+  /** Fractions (utilization, hit rate) prefer a fixed 0..1 domain. */
+  unit: boolean;
+}
+
+const Spark = memo(function Spark({ data, unit }: SparkProps) {
+  const points = useMemo(() => {
+    if (!data || data.length < 2) return '';
+    let max = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      if (Number.isFinite(v) && v > max) max = v;
+    }
+    /**
+     * Fractional series read against a fixed 0..1 domain, so a node at 20%
+     * looks like a node at 20% rather than being auto-scaled to fill the box.
+     *
+     * The exception is a series that never leaves the bottom of that domain —
+     * a load balancer runs at ~0.01% utilization, and against a domain of 1
+     * every sample lands on the baseline, producing a flat line that cannot
+     * show variation no matter what the node does. Below 10% the domain
+     * relaxes to the data so the trace still carries information.
+     */
+    const top = unit && max >= 0.1 ? 1 : niceCeil(max * 1.15);
+    const n = data.length;
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const v = Number.isFinite(data[i]) ? data[i] : 0;
+      const x = (i / (n - 1)) * SPARK_W;
+      const y = SPARK_H - clamp(v / top, 0, 1) * SPARK_H;
+      out.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    }
+    return out.join(' ');
+  }, [data, unit]);
+
+  return (
+    <g transform={`translate(${SPARK_X},${SPARK_Y})`}>
+      <line
+        className="cv-spark-base"
+        x1={0}
+        y1={SPARK_H + 0.5}
+        x2={SPARK_W}
+        y2={SPARK_H + 0.5}
+      />
+      {points && <polyline className="cv-spark" points={points} />}
+    </g>
+  );
+});
+
+/* ------------------------------------------------------------------ *
+ * Glyph
+ * ------------------------------------------------------------------ */
+
+const GLYPH_SCALE = 14 / GLYPH_BOX;
 
 const Glyph = memo(function Glyph({ kind }: { kind: NodeKind }) {
   const filled = FILLED_GLYPHS.has(kind);
@@ -154,7 +317,7 @@ const Glyph = memo(function Glyph({ kind }: { kind: NodeKind }) {
       className="cv-glyph"
       fill={filled ? 'currentColor' : 'none'}
       stroke={filled ? 'none' : 'currentColor'}
-      strokeWidth={1.3}
+      strokeWidth={1.3 / GLYPH_SCALE}
       strokeLinecap="round"
       strokeLinejoin="round"
     />
@@ -162,30 +325,38 @@ const Glyph = memo(function Glyph({ kind }: { kind: NodeKind }) {
 });
 
 /* ------------------------------------------------------------------ *
- * Edge path: horizontal-tangent cubic bezier between two ports.
+ * Edges
  * ------------------------------------------------------------------ */
 
-function edgePath(
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-): string {
+/**
+ * Horizontal-tangent cubic bezier between two ports.
+ *
+ * Orthogonal routing with filleted corners was considered and rejected: it is
+ * a real path-generation problem (fillet clamping, overlap avoidance, a
+ * four-corner back-route case) and this curve already reads correctly for
+ * every topology the presets produce.
+ */
+function edgePath(ax: number, ay: number, bx: number, by: number): string {
   const dx = bx - ax;
-  // Bow out enough to read as a curve even when the nodes are stacked
-  // vertically or the target sits behind the source.
-  const bow = Math.max(40, Math.min(180, Math.abs(dx) * 0.5));
-  const c1 = ax + bow;
-  const c2 = bx - bow;
-  return `M${ax},${ay} C${c1},${ay} ${c2},${by} ${bx},${by}`;
+  // Bow scales with the gap so stacked nodes still read as curves, and is
+  // floored at 48 for the wider node.
+  const bow = clamp(Math.abs(dx) * 0.5, 48, 200);
+  return `M${ax},${ay} C${ax + bow},${ay} ${bx - bow},${by} ${bx},${by}`;
+}
+
+/**
+ * Stroke width from flow. Logarithmic so 10rps and 1000rps stay in one visual
+ * family while still ranking unambiguously:
+ *   0 -> 1.0   1 -> 1.26   10 -> 1.85   100 -> 2.71   1k -> 3.55   5k -> 4.16
+ */
+function edgeWidth(f: number): number {
+  return f <= 0 ? 1 : clamp(1 + Math.log10(1 + f) * 0.85, 1, 4.5);
 }
 
 /** Where the arrowhead sits: just short of the target port. */
 const ARROW_INSET = 9;
-
-/* ------------------------------------------------------------------ *
- * Edge
- * ------------------------------------------------------------------ */
+const ARROW_LEN = 9;
+const ARROW_SPREAD = 0.42;
 
 interface EdgeViewProps {
   edge: SimEdge;
@@ -195,7 +366,11 @@ interface EdgeViewProps {
   by: number;
   flow: number;
   selected: boolean;
+  /** Health of the TARGET node — a failing sink colors its inbound wire. */
+  targetHealth: Health;
+  showLabel: boolean;
   onSelect: (id: string | null) => void;
+  onDeleteEdge: (id: string) => void;
 }
 
 const EdgeView = memo(function EdgeView({
@@ -206,27 +381,28 @@ const EdgeView = memo(function EdgeView({
   by,
   flow,
   selected,
+  targetHealth,
+  showLabel,
   onSelect,
+  onDeleteEdge,
 }: EdgeViewProps) {
   // Pull the endpoint back so the stroke does not poke through the arrowhead.
   const angle = Math.atan2(by - ay, bx - ax);
-  const tipX = bx - Math.cos(angle) * 2;
-  const tipY = by - Math.sin(angle) * 2;
-  const d = edgePath(ax, ay, tipX - Math.cos(angle) * ARROW_INSET, tipY - Math.sin(angle) * ARROW_INSET);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const tipX = bx - cos * 2;
+  const tipY = by - sin * 2;
+  const d = edgePath(ax, ay, tipX - cos * ARROW_INSET, tipY - sin * ARROW_INSET);
 
-  // Thickness grows gently: log-ish so 10rps and 1000rps stay in the same
-  // visual family instead of one edge becoming a slab.
-  const width = flow > 0 ? clamp(1.25 + Math.log10(1 + flow) * 0.7, 1.25, 4) : 1.25;
-
-  // Dash animation period: faster flow = shorter period. One dash cycle is
-  // 12 user units, so duration = 12 / speed. Clamped so it never strobes.
+  const width = edgeWidth(flow);
   const active = flow > 0.05;
-  const period = active
-    ? clamp(3.2 / Math.log10(10 + flow), 0.35, 2.4)
-    : 0;
 
+  // One dash cycle is 12 user units, so animation-duration directly encodes
+  // the flow rate. Clamped so it never strobes and never appears frozen.
   const style = active
-    ? ({ animationDuration: `${period}s` } as CSSProperties)
+    ? ({
+        animationDuration: `${clamp(3.2 / Math.log10(10 + flow), 0.35, 2.4)}s`,
+      } as CSSProperties)
     : undefined;
 
   const handleDown = useCallback(
@@ -237,25 +413,64 @@ const EdgeView = memo(function EdgeView({
     [edge.id, onSelect],
   );
 
+  const handleDelete = useCallback(
+    (e: ReactPointerEvent<SVGGElement>) => {
+      e.stopPropagation();
+      onDeleteEdge(edge.id);
+    },
+    [edge.id, onDeleteEdge],
+  );
+
+  // Midpoint of a cubic whose control points share the endpoints' y is simply
+  // the average in y; x is the average of the four control x's at t=0.5.
+  const midX = (ax + bx) / 2;
+  const midY = (ay + by) / 2;
+
   return (
     <g
-      className={`cv-edge${selected ? ' is-selected' : ''}${active ? ' is-active' : ''}`}
+      className={`cv-edge${selected ? ' is-selected' : ''}${
+        active ? ' is-active' : ''
+      } is-${targetHealth}`}
     >
-      {/* Fat invisible hit area — a 1.25px line is impossible to click. */}
+      {/* Fat invisible hit area — a 1px line is impossible to click. */}
       <path d={d} className="cv-edge-hit" onPointerDown={handleDown} />
       <path d={d} className="cv-edge-line" strokeWidth={width} />
       {active && (
         <path
           d={d}
           className="cv-edge-flow"
-          strokeWidth={width}
+          strokeWidth={width * 0.75}
           style={style}
         />
       )}
       <path
-        d={`M${tipX},${tipY} L${tipX - Math.cos(angle - 0.42) * 9},${tipY - Math.sin(angle - 0.42) * 9} L${tipX - Math.cos(angle + 0.42) * 9},${tipY - Math.sin(angle + 0.42) * 9} Z`}
+        d={`M${tipX},${tipY} L${tipX - Math.cos(angle - ARROW_SPREAD) * ARROW_LEN},${
+          tipY - Math.sin(angle - ARROW_SPREAD) * ARROW_LEN
+        } L${tipX - Math.cos(angle + ARROW_SPREAD) * ARROW_LEN},${
+          tipY - Math.sin(angle + ARROW_SPREAD) * ARROW_LEN
+        } Z`}
         className="cv-edge-arrow"
       />
+
+      {/* How traffic splits at a fan-out. Invisible before this change. */}
+      {showLabel && active && (
+        <text className="cv-edge-label" x={midX} y={midY - 6}>
+          {formatRate(flow)}
+        </text>
+      )}
+
+      {selected && (
+        <g
+          className="cv-edge-del"
+          transform={`translate(${midX},${midY})`}
+          onPointerDown={handleDelete}
+          role="button"
+          aria-label="Delete connection"
+        >
+          <rect x={-7} y={-7} width={14} height={14} rx={3} />
+          <path d="M-3.5,-3.5 L3.5,3.5 M3.5,-3.5 L-3.5,3.5" />
+        </g>
+      )}
     </g>
   );
 });
@@ -267,30 +482,35 @@ const EdgeView = memo(function EdgeView({
 interface NodeViewProps {
   node: SimNode;
   stats: NodeStats | null;
+  spark: ArrayLike<number> | undefined;
   selected: boolean;
-  showDetail: boolean;
+  /** 2 = full, 1 = header + meter only, 0 = name + meter. */
+  detail: 0 | 1 | 2;
   linking: boolean;
   onSelect: (id: string | null) => void;
   onNodeDown: (e: ReactPointerEvent<SVGGElement>, id: string) => void;
   onPortDown: (e: ReactPointerEvent<SVGCircleElement>, id: string) => void;
   onPortEnter: (id: string) => void;
   onPortLeave: () => void;
+  onNudge: (id: string, dx: number, dy: number) => void;
 }
 
 const NodeView = memo(function NodeView({
   node,
   stats,
+  spark,
   selected,
-  showDetail,
+  detail,
   linking,
   onSelect,
   onNodeDown,
   onPortDown,
   onPortEnter,
   onPortLeave,
+  onNudge,
 }: NodeViewProps) {
-  const readout = stats ? readoutFor(node.kind, stats) : null;
-  const health = readout ? healthOf(readout.load) : 'ok';
+  const readout = stats ? readoutFor(node.kind, stats, node.config) : null;
+  const health = readout ? readout.health : 'ok';
 
   const handleDown = useCallback(
     (e: ReactPointerEvent<SVGGElement>) => onNodeDown(e, node.id),
@@ -304,89 +524,177 @@ const NodeView = memo(function NodeView({
     () => onPortEnter(node.id),
     [node.id, onPortEnter],
   );
+
   const handleKey = useCallback(
     (e: React.KeyboardEvent<SVGGElement>) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         onSelect(node.id);
+        return;
       }
+      // Arrows nudge by one grid step, shift+arrow by four.
+      const step = e.shiftKey ? GRID * 4 : GRID;
+      let dx = 0;
+      let dy = 0;
+      if (e.key === 'ArrowLeft') dx = -step;
+      else if (e.key === 'ArrowRight') dx = step;
+      else if (e.key === 'ArrowUp') dy = -step;
+      else if (e.key === 'ArrowDown') dy = step;
+      else return;
+      e.preventDefault();
+      onNudge(node.id, dx, dy);
     },
-    [node.id, onSelect],
+    [node.id, onSelect, onNudge],
   );
 
-  const barW = readout ? clamp(readout.load, 0, 1) * (NODE_W - 24) : 0;
+  // A working node must never render an empty meter: 2px minimum whenever
+  // load is non-zero. This is the geometric twin of the never-print-zero rule.
+  const load = readout ? clamp(readout.load, 0, 1) : 0;
+  const meterW = load > 0 ? Math.max(2, load * METER_W) : 0;
+
+  // Fractional metrics pin the sparkline domain to 0..1 so a utilization
+  // trace does not rescale itself into looking permanently full.
+  const sparkUnit =
+    node.kind !== 'queue' && node.kind !== 'client';
+
+  const full = detail === 2;
+  const showHeader = detail >= 1;
 
   return (
     <g
-      className={`cv-node is-${health}${selected ? ' is-selected' : ''}`}
+      className={`cv-node is-${health}${selected ? ' is-selected' : ''}${
+        readout?.losing ? ' is-losing' : ''
+      }`}
       transform={`translate(${node.x},${node.y})`}
       tabIndex={0}
       role="button"
-      aria-label={`${KIND_NAME[node.kind]} ${node.label}`}
+      aria-label={
+        readout
+          ? `${KIND_NAME[node.kind]} ${node.label}, ${readout.primary.value} ${readout.primary.label}`
+          : `${KIND_NAME[node.kind]} ${node.label}`
+      }
       aria-pressed={selected}
       onPointerDown={handleDown}
       onKeyDown={handleKey}
     >
+      {/* Body. */}
       <rect
         className="cv-node-body"
         width={NODE_W}
         height={NODE_H}
-        rx={7}
-        ry={7}
+        rx={NODE_R}
+        ry={NODE_R}
       />
 
-      <g className="cv-node-icon" transform="translate(12,10)">
-        <Glyph kind={node.kind} />
-      </g>
+      {showHeader && (
+        <>
+          {/* Header band. Rounded at the top only, square where it meets
+              the hairline — drawn as a path because a rect cannot do that. */}
+          <path
+            className="cv-node-head"
+            d={`M0,${HEAD_H} L0,${NODE_R} A${NODE_R},${NODE_R} 0 0 1 ${NODE_R},0 L${
+              NODE_W - NODE_R
+            },0 A${NODE_R},${NODE_R} 0 0 1 ${NODE_W},${NODE_R} L${NODE_W},${HEAD_H} Z`}
+          />
+          {/* Health rule along the top edge. */}
+          <path
+            className="cv-node-rule"
+            d={`M0,${NODE_R} A${NODE_R},${NODE_R} 0 0 1 ${NODE_R},0 L${
+              NODE_W - NODE_R
+            },0 A${NODE_R},${NODE_R} 0 0 1 ${NODE_W},${NODE_R} L${NODE_W},1.5 L0,1.5 Z`}
+          />
+          <line
+            className="cv-node-hair"
+            x1={0}
+            y1={HEAD_H}
+            x2={NODE_W}
+            y2={HEAD_H}
+          />
 
-      <text className="cv-node-label" x={36} y={22}>
+          <g
+            className="cv-node-icon"
+            transform={`translate(10,5) scale(${GLYPH_SCALE})`}
+          >
+            <Glyph kind={node.kind} />
+          </g>
+        </>
+      )}
+
+      <text
+        className="cv-node-name"
+        x={showHeader ? 30 : PAD_X}
+        y={showHeader ? 16 : 20}
+      >
         {node.label}
       </text>
 
-      {showDetail && readout ? (
-        <text className="cv-node-nums" x={36} y={38}>
-          <tspan className="cv-num">{readout.a.value}</tspan>
-          <tspan className="cv-unit" dx={3}>
-            {readout.a.label}
-          </tspan>
-          <tspan className="cv-num" dx={10}>
-            {readout.b.value}
-          </tspan>
-          <tspan className="cv-unit" dx={3}>
-            {readout.b.label}
-          </tspan>
-        </text>
-      ) : (
-        <text className="cv-node-kind" x={36} y={38}>
-          {KIND_NAME[node.kind]}
-        </text>
+      {showHeader && <circle className="cv-node-dot" cx={172} cy={12} r={4} />}
+
+      {/* Traffic is actively being lost here. The only added decoration, and
+          it appears only when the statement is true. */}
+      {full && readout?.losing && (
+        <rect className="cv-node-loss" x={164} y={6} width={4} height={4} />
       )}
 
-      {/* Health bar. The only strong color at rest. */}
+      {full && readout && (
+        <>
+          <text className="cv-node-primary" x={PAD_X} y={50}>
+            <tspan className="cv-val">{readout.primary.value}</tspan>
+            <tspan className="cv-cap" dx={4}>
+              {readout.primary.label}
+            </tspan>
+          </text>
+
+          <line
+            className="cv-node-div"
+            x1={DIVIDER_X}
+            y1={32}
+            x2={DIVIDER_X}
+            y2={60}
+          />
+
+          <Spark data={spark} unit={sparkUnit} />
+
+          <text className="cv-node-sec" x={PAD_X} y={68}>
+            <tspan className="cv-val">{readout.a.value}</tspan>
+            <tspan className="cv-cap" dx={4}>
+              {readout.a.label}
+            </tspan>
+          </text>
+          <text className="cv-node-sec" x={96} y={68}>
+            <tspan className="cv-val">{readout.b.value}</tspan>
+            <tspan className="cv-cap" dx={4}>
+              {readout.b.label}
+            </tspan>
+          </text>
+        </>
+      )}
+
+      {/* Meter. Position-encoded, so it survives colorblindness and low zoom. */}
       <rect
-        className="cv-bar-track"
-        x={12}
-        y={NODE_H - 9}
-        width={NODE_W - 24}
-        height={3}
-        rx={1.5}
+        className="cv-meter-track"
+        x={PAD_X}
+        y={METER_Y}
+        width={METER_W}
+        height={METER_H}
+        rx={2}
       />
-      {readout && barW > 0 && (
+      {meterW > 0 && (
         <rect
-          className="cv-bar-fill"
-          x={12}
-          y={NODE_H - 9}
-          width={barW}
-          height={3}
-          rx={1.5}
+          className="cv-meter-fill"
+          x={PAD_X}
+          y={METER_Y}
+          width={meterW}
+          height={METER_H}
+          rx={2}
         />
       )}
 
-      {/* Ports. Input on the left, output on the right. */}
+      {/* Ports. Input left, output right. */}
       <circle
         className="cv-port cv-port-in"
         cx={0}
-        cy={NODE_H / 2}
+        cy={PORT_CY}
         r={PORT_R}
         onPointerEnter={linking ? handlePortEnter : undefined}
         onPointerLeave={linking ? onPortLeave : undefined}
@@ -394,7 +702,7 @@ const NodeView = memo(function NodeView({
       <circle
         className="cv-port cv-port-out"
         cx={NODE_W}
-        cy={NODE_H / 2}
+        cy={PORT_CY}
         r={PORT_R}
         onPointerDown={handlePortDown}
       />
@@ -433,6 +741,7 @@ export default function Canvas({
   onDeleteNode,
   onDeleteEdge,
   onDropNode,
+  spark,
 }: CanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -499,7 +808,11 @@ export default function Canvas({
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         setView((v) => {
-          const k = clamp(v.k * Math.exp(-e.deltaY * 0.0022), MIN_ZOOM, MAX_ZOOM);
+          const k = clamp(
+            v.k * Math.exp(-e.deltaY * 0.0022),
+            MIN_ZOOM,
+            MAX_ZOOM,
+          );
           if (k === v.k) return v;
           // Keep the world point under the cursor pinned to the cursor.
           const px = e.clientX - r.left;
@@ -537,8 +850,10 @@ export default function Canvas({
     const down = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !isTypingTarget(e.target)) {
         // Only swallow the space if the canvas is what the user is looking at.
-        if (hostRef.current?.contains(document.activeElement) ||
-            document.activeElement === document.body) {
+        if (
+          hostRef.current?.contains(document.activeElement) ||
+          document.activeElement === document.body
+        ) {
           spaceRef.current = true;
           if (dragRef.current.mode === 'none') setCursor('grab');
           e.preventDefault();
@@ -668,6 +983,15 @@ export default function Canvas({
     hoverPortRef.current = null;
   }, []);
 
+  const onNudge = useCallback(
+    (id: string, dx: number, dy: number) => {
+      const n = topology.nodes.find((m) => m.id === id);
+      if (!n) return;
+      onMoveNode(id, snap(n.x + dx), snap(n.y + dy));
+    },
+    [topology.nodes, onMoveNode],
+  );
+
   const onPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       const d = dragRef.current;
@@ -766,9 +1090,8 @@ export default function Canvas({
     [toWorld, onDropNode],
   );
 
-  /* ---------------- initial fit ---------------- */
+  /* ---------------- fit to content ---------------- */
 
-  const fittedRef = useRef(false);
   const fitToContent = useCallback(() => {
     const host = hostRef.current;
     if (!host || topology.nodes.length === 0) return;
@@ -785,28 +1108,61 @@ export default function Canvas({
       if (n.x + NODE_W > maxX) maxX = n.x + NODE_W;
       if (n.y + NODE_H > maxY) maxY = n.y + NODE_H;
     }
-    const pad = 72;
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
     const k = clamp(
       Math.min(
-        (r.width - pad * 2) / Math.max(1, maxX - minX),
-        (r.height - pad * 2) / Math.max(1, maxY - minY),
+        (r.width - FIT_MARGIN * 2) / bw,
+        (r.height - FIT_MARGIN * 2) / bh,
       ),
-      MIN_ZOOM,
-      1.15,
+      FIT_MIN,
+      FIT_MAX,
     );
     setView({
       k,
-      x: (r.width - (maxX - minX) * k) / 2 - minX * k,
-      y: (r.height - (maxY - minY) * k) / 2 - minY * k,
+      x: (r.width - bw * k) / 2 - minX * k,
+      y: (r.height - bh * k) / 2 - minY * k,
     });
   }, [topology.nodes]);
 
+  /**
+   * Re-fit whenever the topology is replaced wholesale (mount, preset load) —
+   * keyed on the set of node ids so dragging a node or editing its config
+   * never yanks the viewport out from under the user.
+   */
+  const topoKey = useMemo(
+    () =>
+      topology.nodes
+        .map((n) => n.id)
+        .sort()
+        .join(','),
+    [topology.nodes],
+  );
+
   useLayoutEffect(() => {
-    if (fittedRef.current) return;
     if (topology.nodes.length === 0) return;
-    fittedRef.current = true;
     fitToContent();
-  }, [topology.nodes.length, fitToContent]);
+    // fitToContent is intentionally omitted: it changes identity on every node
+    // move, and re-fitting mid-drag is exactly what this guard prevents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topoKey]);
+
+  /** Re-fit on container resize, but only while the user is idle. */
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || typeof ResizeObserver === 'undefined') return;
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      if (dragRef.current.mode !== 'none') return;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => fitToContent());
+    });
+    ro.observe(host);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [fitToContent]);
 
   const zoomBy = useCallback((factor: number) => {
     const host = hostRef.current;
@@ -832,15 +1188,42 @@ export default function Canvas({
     return m;
   }, [topology.nodes]);
 
-  const showDetail = view.k >= DETAIL_ZOOM;
+  const detail: 0 | 1 | 2 =
+    view.k >= DETAIL_ZOOM ? 2 : view.k >= MINIMAL_ZOOM ? 1 : 0;
+  const showEdgeLabels = view.k >= 1;
+
+  /**
+   * Health per node, so an edge can be colored by the state of the node it
+   * feeds. Computed once per snapshot rather than per edge.
+   */
+  const healthById = useMemo(() => {
+    const m = new Map<string, Health>();
+    if (!snapshot) return m;
+    for (const n of topology.nodes) {
+      const s = snapshot.nodes[n.id];
+      if (s) m.set(n.id, readoutFor(n.kind, s, n.config).health);
+    }
+    return m;
+  }, [snapshot, topology.nodes]);
 
   const previewFrom = linkPreview ? nodeById.get(linkPreview.from) : undefined;
   const previewPort = previewFrom ? outPort(previewFrom) : null;
 
+  /**
+   * Ruled grid. 32px minor, 128px major — a ruled field reads as a workspace,
+   * where the old 8px dot field read as an empty document (and painted tens of
+   * thousands of dots of static across a wide canvas).
+   */
+  const minor = 32 * view.k;
+  const major = 128 * view.k;
   const gridStyle: CSSProperties = {
-    backgroundSize: `${GRID * 3 * view.k}px ${GRID * 3 * view.k}px`,
+    backgroundSize: `${minor}px ${minor}px, ${minor}px ${minor}px, ${major}px ${major}px, ${major}px ${major}px`,
     backgroundPosition: `${view.x}px ${view.y}px`,
+    // Fade the grid out as the diagram shrinks past the point where rules help.
+    opacity: view.k < MINIMAL_ZOOM ? 0 : view.k < FIT_MIN ? 0.5 : 1,
   };
+
+  const elapsed = snapshot ? snapshot.system.timeMs / 1000 : 0;
 
   return (
     <div
@@ -877,7 +1260,10 @@ export default function Canvas({
                   by={q.y}
                   flow={snapshot?.edgeFlow[ed.id] ?? 0}
                   selected={selectedId === ed.id}
+                  targetHealth={healthById.get(ed.to) ?? 'ok'}
+                  showLabel={showEdgeLabels}
                   onSelect={onSelect}
+                  onDeleteEdge={onDeleteEdge}
                 />
               );
             })}
@@ -901,14 +1287,16 @@ export default function Canvas({
                 key={n.id}
                 node={n}
                 stats={snapshot?.nodes[n.id] ?? null}
+                spark={spark?.get(n.id)}
                 selected={selectedId === n.id}
-                showDetail={showDetail}
+                detail={detail}
                 linking={linkPreview !== null}
                 onSelect={onSelect}
                 onNodeDown={onNodeDown}
                 onPortDown={onPortDown}
                 onPortEnter={onPortEnter}
                 onPortLeave={onPortLeave}
+                onNudge={onNudge}
               />
             ))}
           </g>
@@ -921,14 +1309,43 @@ export default function Canvas({
         </p>
       )}
 
+      {/* Status ledger. A corner carrying a true number stops reading as
+          dead space. */}
+      {topology.nodes.length > 0 && (
+        <div className="cv-ledger label" aria-hidden="true">
+          {topology.nodes.length} nodes
+          <span className="cv-ledger-sep">·</span>
+          {topology.edges.length} edges
+          <span className="cv-ledger-sep">·</span>
+          zoom {Math.round(view.k * 100)}%
+          <span className="cv-ledger-sep">·</span>
+          {elapsed.toFixed(1)}s
+        </div>
+      )}
+
       <div className="cv-zoom">
-        <button type="button" onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => zoomBy(1 / 1.25)}
+          aria-label="Zoom out"
+        >
           &minus;
         </button>
-        <button type="button" className="cv-zoom-level" onClick={fitToContent}>
+        <button
+          type="button"
+          className="btn btn-ghost cv-zoom-level"
+          onClick={fitToContent}
+          aria-label="Fit to content"
+        >
           {Math.round(view.k * 100)}%
         </button>
-        <button type="button" onClick={() => zoomBy(1.25)} aria-label="Zoom in">
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => zoomBy(1.25)}
+          aria-label="Zoom in"
+        >
           +
         </button>
       </div>

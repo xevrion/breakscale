@@ -1,46 +1,149 @@
 /* ==========================================================================
-   sys-sim design system
-   Dark, near-neutral UI. One accent hue. Status colors are semantic only:
-   they describe a metric's state, never decorate a surface.
+   sys-sim design system — foundation layer
+
+   This file owns, and is the SOLE owner of:
+     - the six-step type scale
+     - the six-step 4px spacing scale
+     - every color token
+     - the shared primitives: .panel .label .num .btn .slider .field .scroll,
+       status classes, the focus ring, scrollbars, reduced motion
+
+   Rules enforced here:
+     - Six font sizes only: 10 / 12 / 13 / 15 / 20 / 32. Nothing else.
+     - Two weights only: 500 and 600.
+     - Spacing is 4 / 8 / 12 / 16 / 24 / 32. No other value, no negatives.
+     - Radii are 4 / 5 / 6 only. A radius is never combined with a
+       single-side border.
+     - Every number renders in --mono with tabular-nums.
+     - Status colors describe a metric's state. They never decorate.
+     - No gradients, no backdrop-filter, no glow, no serif, no shadow except
+       the focus ring.
+
+   No component-specific class may be defined in this file.
    ========================================================================== */
 
 :root {
-  /* Elevation ramp: each step is a small lightness lift, no hue shift beyond
-     a faint cool cast so status colors stay legible on top of it. */
-  --bg: #0c0d10;
-  --surface: #131519;
-  --surface-2: #1b1e24;
-  --border: #262a31;
+  /* ------------------------------------------------------------------------
+     Type scale — six steps, all integers.
+     Nothing outside this table may set a font-size anywhere in the codebase.
 
-  /* Continuation of the same neutral ramp, above --border. Used by the canvas
-     for the dot grid, edge strokes and port outlines, which need to separate
-     from each other on the darkest surface without introducing a new hue. */
-  --grid-dot: #21252c;
-  --line: #333944;
-  --line-2: #3d4450;
+       T1  10  600  uppercase  labels, eyebrows, captions, axis captions
+       T2  12  500             secondary body; mono variant for tick values
+       T3  13  500             body default, node name, app title
+       T4  15  600  mono       workhorse numeric: node primary, stat values
+       T5  20  600  mono       chart header readouts, selected node primary
+       T6  32  600  mono       exactly two: offered load, system p99
+     ------------------------------------------------------------------------ */
+  --fs-label: 10px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-num: 15px;
+  --fs-lg: 20px;
+  --fs-hero: 32px;
+
+  /* Tracking paired to each step. Small text opens up, large text tightens. */
+  --tr-label: 0.08em;
+  --tr-num: -0.01em;
+  --tr-lg: -0.02em;
+  --tr-hero: -0.03em;
+
+  /* Line heights. Numeric steps are set tight — they are single-line readouts
+     whose box height must not vary with the digits inside it. */
+  --lh-label: 1.2;
+  --lh-sm: 1.4;
+  --lh-base: 1.5;
+  --lh-num: 1.1;
+  --lh-hero: 1;
+
+  /* Only two weights exist. 500 = every label and body string.
+     600 = every number and the app title. */
+  --fw-body: 500;
+  --fw-num: 600;
+
+  /* ------------------------------------------------------------------------
+     Spacing — strict 4px grid, six tokens.
+     No value outside this set may appear as padding, gap or margin.
+
+       4   number-to-unit gap, stacked legend rows, icon-to-text, tick clearance
+       8   list rows, internal padding of compact controls
+       12  palette row padding, label-to-control gap, node inner horizontal
+       16  panel padding (palette, inspector, metrics strip)
+       24  between sections within a panel, metrics grid column gap
+       32  between top-level bar regions only
+     ------------------------------------------------------------------------ */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Radii — three values, nothing else. Never combine with a one-sided border. */
+  --r-sm: 4px;
+  --r-node: 5px;
+  --r-md: 6px;
+
+  /* Interactive transitions only, 120-200ms. There are no entrance animations. */
+  --dur-fast: 120ms;
+  --dur-base: 160ms;
+  --dur-slow: 200ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ------------------------------------------------------------------------
+     Neutral ramp.
+     Deepened and de-hued from the previous palette so the canvas reads as
+     ground and the node body sits visibly above it. Each step is a small
+     lightness lift with no hue shift, keeping status colors legible on top.
+     ------------------------------------------------------------------------ */
+  --bg: #0a0b0d;
+  --surface: #101216; /* chrome panels: palette, inspector, metrics strip */
+  --surface-2: #171a20; /* node body, inputs, raised rows */
+  --surface-3: #1e222a; /* node header band ONLY */
+  --border: #232830;
+
+  /* Canvas rules. Both must recede almost to invisibility: a ruled field
+     reads as a workspace, a loud one competes with the diagram. */
+  --grid-line: #171a20; /* 32px hairline rules */
+  --grid-major: #1e222a; /* every 4th rule, 128px */
+
+  /* Retained alias: the dot grid is replaced by ruled lines, but the token
+     name is kept so any remaining reference resolves rather than falling back
+     to an invalid value. */
+  --grid-dot: var(--grid-line);
+
+  /* Continuation of the neutral ramp above --border, for edges, ports,
+     arrowheads and neutral chart series. Chart series are distinguished by
+     weight and lightness, never by hue. */
+  --line: #2e343e; /* idle edge */
+  --line-2: #3a414d; /* hover edge, arrowheads */
   --line-3: #4a5260;
-  --line-4: #59616f;
+  --line-4: #6b7484; /* p50 series, sparkline stroke */
   --line-5: #6d7686;
-  --track: #23272f;
+  --track: #1c2027; /* meter troughs */
 
-  /* Two extra categorical hues, used ONLY to distinguish failure reasons in
-     the metrics breakdown, where five causes must be told apart at a glance. */
+  /* Two categorical hues, used ONLY to separate failure reasons in the
+     breakdown, where five causes must be told apart at a glance. */
   --cat-violet: #b06fd8;
-  --cat-blue: #4a7fb5;
+  --cat-blue: #649ad4;
 
-  /* Text ramp. --text hits 15.8:1 on --bg, --text-dim 7.4:1,
-     --text-faint 4.8:1 — all above WCAG AA for their sizes. */
-  --text: #e8eaed;
-  --text-dim: #9ba1ac;
-  --text-faint: #7d838e;
+  /* Text ramp. Verified ratios on --bg: --text 17.09:1, --text-dim 8.32:1,
+     --text-faint 6.12:1. --text-faint is never used below 10px and never
+     carries a value — captions and units only. */
+  --text: #edeff2;
+  --text-dim: #a2a9b4;
+  --text-faint: #8a9099;
 
-  /* Single accent hue, used for CTAs, selection and focus only. */
+  /* Single accent hue. Four permitted uses, all meaning "you did this":
+     the focus ring, selection, the slider fill, and .btn-primary.
+     A data series may never wear the selection hue. */
   --accent: #4c8dff;
   --accent-hover: #6ba0ff;
   --accent-press: #3d7ae6;
   --accent-fg: #06070a;
 
-  /* Semantic metric states. Reserved for numbers and status marks. */
+  /* Semantic metric states. Three permitted carriers only: a node's meter and
+     health mark, a numeric value that has crossed a threshold, and the failure
+     breakdown. Never a border, background, panel or decorative icon. */
   --ok: #3fb950;
   --warn: #d29922;
   --danger: #f0553f;
@@ -81,8 +184,9 @@ body,
 
 body {
   font-family: var(--sans);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-base);
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -105,18 +209,20 @@ textarea {
   color: inherit;
 }
 
-/* Headings inherit body size by default; components set their own scale. */
+/* Headings inherit the body step. Components pick a scale step explicitly;
+   nothing gets a size by virtue of its tag name. */
 h1,
 h2,
 h3,
 h4 {
   font-size: inherit;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: var(--fw-num);
+  letter-spacing: var(--tr-num);
 }
 
 /* --------------------------------------------------------------------------
-   Focus
+   Focus — one ring, everywhere, 2px accent at offset 2.
+   This is the only box-shadow-or-outline effect in the system.
    -------------------------------------------------------------------------- */
 
 :focus {
@@ -126,39 +232,75 @@ h4 {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
 }
 
 /* --------------------------------------------------------------------------
    Primitives
    -------------------------------------------------------------------------- */
 
+/* A panel is a single surface with a single border. It may contain rows.
+   A row may not contain another bordered box — one nesting level, maximum. */
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   min-height: 0;
   min-width: 0;
 }
 
+/* T1. The sole 10px definition in the codebase. Uppercase is mandatory: it is
+   what makes 10px read as a label rather than as failed body text.
+   Never a sentence, never a number, max ~18 characters. */
 .label {
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.4;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-num);
+  line-height: var(--lh-label);
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: var(--tr-label);
   color: var(--text-faint);
 }
 
+/* Every number in the application carries this class. Tabular figures are
+   what stop a live readout from jittering as its digits change. */
 .num,
 .mono {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tr-num);
 }
 
-/* Status modifiers. Apply to the number itself, not to its container. */
+/* Numeric scale steps. Each pairs its size with the tracking and line-height
+   that step requires, so a call site sets one class rather than four rules. */
+.num-sm {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+
+.num-md {
+  font-size: var(--fs-num);
+  font-weight: var(--fw-num);
+  line-height: var(--lh-num);
+}
+
+.num-lg {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-num);
+  line-height: var(--lh-num);
+  letter-spacing: var(--tr-lg);
+}
+
+.num-hero {
+  font-size: var(--fs-hero);
+  font-weight: var(--fw-num);
+  line-height: var(--lh-hero);
+  letter-spacing: var(--tr-hero);
+}
+
+/* Status modifiers. Applied to the number itself, never to its container.
+   At 'ok' nothing is colored — a healthy screen is entirely neutral, which is
+   what gives --warn and --danger their meaning when they do appear. */
 .is-ok {
   color: var(--ok);
 }
@@ -172,45 +314,48 @@ h4 {
 }
 
 /* --------------------------------------------------------------------------
-   Buttons
+   Buttons — sole definition. Do not re-declare .btn in a component file.
    -------------------------------------------------------------------------- */
 
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
+  gap: var(--sp-1);
+  height: 26px;
+  padding: 0 var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: var(--surface-2);
   color: var(--text);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
   transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease;
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .btn:hover:not(:disabled) {
-  background: #232730;
-  border-color: #333944;
+  background: var(--surface-3);
+  border-color: var(--line);
 }
 
 .btn:active:not(:disabled) {
   background: var(--surface-2);
+  border-color: var(--line);
 }
 
+/* At most one primary button is visible at a time. */
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
-  font-weight: 600;
+  font-weight: var(--fw-num);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -253,7 +398,19 @@ h4 {
 }
 
 /* --------------------------------------------------------------------------
-   Slider — the app's primary control. Must feel precise.
+   Slider — the app's primary control, and the only thing on screen the
+   student directly manipulates. It must feel precise.
+
+   Geometry, identical across engines:
+     hit area  28px tall (pointer target, well above the 24px minimum)
+     track      4px, --r-sm, --track fill, 1px --border
+     thumb     12px circle, --text at rest, --accent while dragging
+
+   WebKit centers the thumb on the track with a negative margin-top; Firefox
+   centers it automatically. Both are specified explicitly below because the
+   two engines share no pseudo-elements and a rule for one is invisible to
+   the other. The selectors are therefore deliberately NOT merged into a
+   single list: one unrecognized pseudo-element invalidates a whole group.
    -------------------------------------------------------------------------- */
 
 .slider {
@@ -261,7 +418,7 @@ h4 {
   appearance: none;
   display: block;
   width: 100%;
-  height: 18px;
+  height: 28px;
   margin: 0;
   padding: 0;
   background: transparent;
@@ -269,27 +426,29 @@ h4 {
   touch-action: none;
 }
 
-/* Track — WebKit */
+/* --- Track: WebKit --- */
 .slider::-webkit-slider-runnable-track {
   height: 4px;
-  border-radius: 2px;
-  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  background: var(--track);
   border: 1px solid var(--border);
 }
 
-/* Thumb — WebKit. Margin centers it on a 4px track + 1px borders. */
+/* --- Thumb: WebKit ---
+   margin-top centers a 12px thumb on a 4px track with 1px borders:
+   (4 + 2 - 12) / 2 = -3px. */
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
-  margin-top: -6px;
+  width: 12px;
+  height: 12px;
+  margin-top: -3px;
   border-radius: 50%;
   background: var(--text);
   border: none;
   transition:
-    background-color 140ms ease,
-    transform 140ms ease;
+    background-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
 .slider:hover::-webkit-slider-thumb {
@@ -298,38 +457,42 @@ h4 {
 
 .slider:active::-webkit-slider-thumb {
   background: var(--accent);
-  transform: scale(1.08);
+  transform: scale(1.1);
 }
 
+/* The thumb cannot take an outline, so focus is drawn as a ring on the thumb
+   itself. This is the focus indicator, not a glow: a flat 3px accent ring at
+   full opacity, matching the 2px outline used everywhere else. */
 .slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px rgba(76, 141, 255, 0.35);
+  box-shadow: 0 0 0 3px var(--accent);
 }
 
-/* Track — Firefox */
+/* --- Track: Firefox --- */
 .slider::-moz-range-track {
   height: 4px;
-  border-radius: 2px;
-  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  background: var(--track);
   border: 1px solid var(--border);
 }
 
-/* Filled portion — Firefox only; WebKit has no equivalent pseudo-element,
-   so the fill is a progressive enhancement rather than load-bearing. */
+/* Filled portion. Firefox only — WebKit exposes no equivalent pseudo-element,
+   so the fill is a progressive enhancement and never load-bearing: the thumb
+   position alone always communicates the value. */
 .slider::-moz-range-progress {
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
   background: var(--accent);
 }
 
 .slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--text);
   border: none;
   transition:
-    background-color 140ms ease,
-    transform 140ms ease;
+    background-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
 .slider:hover::-moz-range-thumb {
@@ -338,11 +501,17 @@ h4 {
 
 .slider:active::-moz-range-thumb {
   background: var(--accent);
-  transform: scale(1.08);
+  transform: scale(1.1);
 }
 
 .slider:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px rgba(76, 141, 255, 0.35);
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+/* Firefox draws a dotted inner focus ring on the input itself; suppress it in
+   favour of the thumb ring above. */
+.slider::-moz-focus-outer {
+  border: 0;
 }
 
 .slider:focus-visible {
@@ -361,31 +530,37 @@ h4 {
 input[type='text'],
 input[type='number'],
 select {
-  height: 28px;
-  padding: 0 8px;
+  height: 26px;
+  padding: 0 var(--sp-2);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: var(--bg);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
   transition:
-    border-color 140ms ease,
-    background-color 140ms ease;
+    border-color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
+/* Numeric inputs are numbers: mono, tabular, right-aligned so the digits of
+   successive rows line up on a shared axis. */
 input[type='number'] {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: var(--tr-num);
   text-align: right;
 }
 
 select {
-  padding-right: 26px;
+  padding-right: var(--sp-6);
   cursor: pointer;
-  /* Neutral chevron drawn inline so no network request is needed. */
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239ba1ac' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* Neutral chevron, inlined so no network request is needed. Stroke is
+     --text-dim (#a2a9b4). */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a2a9b4' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 8px center;
+  background-position: right var(--sp-2) center;
   -webkit-appearance: none;
   appearance: none;
 }
@@ -398,7 +573,7 @@ select option {
 input[type='text']:hover,
 input[type='number']:hover,
 select:hover {
-  border-color: #333944;
+  border-color: var(--line);
 }
 
 input[type='text']:focus,
@@ -436,13 +611,13 @@ input[type='number']::-webkit-inner-spin-button {
   margin: 0;
 }
 
-/* Label + control row. */
+/* Label + control on one row. */
 .field {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 28px;
+  gap: var(--sp-3);
+  min-height: 26px;
 }
 
 .field > .label {
@@ -460,12 +635,33 @@ input[type='number']::-webkit-inner-spin-button {
 .field-stack {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 
 .field-stack > input,
 .field-stack > select {
   width: 100%;
+}
+
+/* Key / value row: dim label left, mono value right-aligned so every value in
+   a panel shares one vertical axis. */
+.row-k {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+.row-v {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: var(--fs-num);
+  font-weight: var(--fw-num);
+  line-height: var(--lh-num);
+  letter-spacing: var(--tr-num);
+  color: var(--text);
+  text-align: right;
 }
 
 /* --------------------------------------------------------------------------
@@ -476,7 +672,7 @@ input[type='number']::-webkit-inner-spin-button {
   overflow-y: auto;
   min-height: 0;
   scrollbar-width: thin;
-  scrollbar-color: #2f343d transparent;
+  scrollbar-color: var(--line) transparent;
 }
 
 .scroll::-webkit-scrollbar {
@@ -489,14 +685,14 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .scroll::-webkit-scrollbar-thumb {
-  background: #2f343d;
+  background: var(--line);
   border: 3px solid transparent;
   background-clip: content-box;
-  border-radius: 5px;
+  border-radius: var(--r-md);
 }
 
 .scroll::-webkit-scrollbar-thumb:hover {
-  background: #3d434e;
+  background: var(--line-2);
   background-clip: content-box;
 }
 
@@ -505,7 +701,24 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 /* --------------------------------------------------------------------------
+   Utilities
+   -------------------------------------------------------------------------- */
+
+/* Visible to screen readers, absent from the visual layout. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
    Reduced motion
+   The app has exactly two animations: interactive transitions (120-200ms) and
+   the edge-flow dash offset, which encodes a live measurement. Both are
+   neutralized here; no content animation exists to suppress.
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -518,7 +731,10 @@ input[type='number']::-webkit-inner-spin-button {
     scroll-behavior: auto !important;
   }
 
-  .slider:active::-webkit-slider-thumb,
+  .slider:active::-webkit-slider-thumb {
+    transform: none;
+  }
+
   .slider:active::-moz-range-thumb {
     transform: none;
   }

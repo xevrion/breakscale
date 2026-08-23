@@ -1,509 +1,315 @@
-/* ------------------------------------------------------------------ *
- * Inspector: right-hand config panel.
- * One surface. Sections are separated by whitespace and hairlines,
- * never by nested boxes.
- * ------------------------------------------------------------------ */
+/* ==========================================================================
+   Inspector — the right-hand config panel — and TrafficControl, the top bar.
 
-.inspector {
+   This file owns ONLY layout and the few classes unique to these two
+   components. It deliberately defines no .btn, no .slider, no .label, no
+   .row-k/.row-v and no font-size: index.css is the sole owner of all of
+   those. The previous version re-declared .btn and .slider with different
+   values (28px vs 6/12 padding; 14px vs 12px thumb; 4px vs 3px track), so
+   which one won depended on bundler import order.
+
+   One nesting level maximum: the panel is a surface, it contains rows, and
+   a row never contains another bordered box.
+   ========================================================================== */
+
+.ins {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  width: 300px;
-  flex: none;
-  padding: 20px;
-  box-sizing: border-box;
+  gap: var(--sp-6);
+  padding: var(--sp-4);
   background: var(--surface);
   border-left: 1px solid var(--border);
-  overflow-y: auto;
-  font: 13px/1.45 var(--sans, system-ui, sans-serif);
-  color: var(--text);
   text-align: left;
 }
 
-.inspector-empty {
-  margin: 0;
-  padding-top: 4px;
-  color: var(--text-faint);
-  font-size: 13px;
+/* The empty state is one calm line, not a centered placeholder graphic. */
+.ins-empty {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
-/* ---------------- header / rename ---------------- */
+/* ---------------- header / inline rename ---------------- */
 
-.inspector-head {
+.ins-head {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
-.title-input {
+/* The title is an input that does not look like one until you reach for it:
+   editing the name is a normal thing to do, but a boxed field would make the
+   panel read as a form rather than as a readout. */
+.ins-title {
   width: 100%;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 3px 6px;
-  margin-left: -6px;
-  font: 600 15px/1.3 inherit;
+  height: 26px;
+  /* No left padding, so the title's first glyph aligns with the labels below
+     it. The old file used margin-left:-6px to correct padding it had just
+     applied; not applying it is the actual fix. */
+  padding: 0 var(--sp-2) 0 0;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-num);
+  letter-spacing: var(--tr-num);
   color: var(--text);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
-  outline: none;
+  border-radius: var(--r-sm);
   transition:
-    background-color 140ms ease,
-    border-color 140ms ease;
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
-.title-input:hover {
+.ins-title:hover {
   background: var(--surface-2);
+  border-color: var(--border);
 }
 
-.title-input:focus {
+.ins-title:focus {
   background: var(--bg);
   border-color: var(--accent);
 }
 
-.kind-tag {
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-faint);
+/* One line on what this kind of component does. Body text, not a caption:
+   it is a sentence, so it may not use .label. */
+.ins-blurb {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
 }
 
 /* ---------------- sections ---------------- */
 
-.section {
+.ins-section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--sp-3);
 }
 
-.section-rule {
-  height: 1px;
-  background: var(--border);
+/* A rule above the eyebrow separates sections without drawing a box around
+   either one. Padding, never a border on the section itself. */
+.ins-section-title {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
 }
 
-/* ---------------- fields ---------------- */
+/* ---------------- config fields ---------------- */
 
-.field {
+.ins-fields {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-3);
 }
 
-.field-inline {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+/* A slider field: label and live value on one line, track beneath. */
+.ins-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
 }
 
-.field-head {
+.ins-field-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
-.field-label {
-  color: var(--text-dim);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.field-value {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: var(--text);
-}
-
-.field-unit {
-  font-size: 11px;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
-.number-wrap {
+/* A numeric field: label left, input right, on a single row. */
+.ins-field-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 26px;
 }
 
-.number {
-  width: 66px;
-  box-sizing: border-box;
-  padding: 4px 6px;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  text-align: right;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  outline: none;
-  transition: border-color 140ms ease;
+.ins-number-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
-.number:hover {
-  border-color: var(--text-faint);
+.ins-number {
+  width: 72px;
+  flex: none;
 }
 
-.number:focus {
-  border-color: var(--accent);
-}
-
-/* ---------------- sliders ---------------- */
-
-.slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 18px;
-  margin: 0;
-  background: transparent;
-  cursor: pointer;
-  outline: none;
-}
-
-.slider::-webkit-slider-runnable-track {
-  height: 3px;
-  border-radius: 2px;
-  background: var(--surface-2);
-}
-
-.slider::-moz-range-track {
-  height: 3px;
-  border-radius: 2px;
-  background: var(--surface-2);
-}
-
-.slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: -4.5px;
-  border: none;
-  border-radius: 50%;
-  background: var(--text-dim);
-  transition:
-    background-color 140ms ease,
-    transform 140ms ease;
-}
-
-.slider::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border: none;
-  border-radius: 50%;
-  background: var(--text-dim);
-  transition:
-    background-color 140ms ease,
-    transform 140ms ease;
-}
-
-.slider:hover::-webkit-slider-thumb {
-  background: var(--text);
-}
-
-.slider:hover::-moz-range-thumb {
-  background: var(--text);
-}
-
-.slider:focus-visible::-webkit-slider-thumb {
-  background: var(--accent);
-}
-
-.slider:focus-visible::-moz-range-thumb {
-  background: var(--accent);
-}
-
-.slider:active::-webkit-slider-thumb {
-  background: var(--accent);
-  transform: scale(1.15);
-}
-
-.slider:active::-moz-range-thumb {
-  background: var(--accent);
-  transform: scale(1.15);
-}
-
-/* ---------------- derived readout ---------------- */
-
-.derived {
-  margin: -4px 0 0;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
-.derived-expr,
-.derived-result {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.derived-result {
-  color: var(--text);
+/* The unit beside an input. A caption, so --text-faint is legal here. */
+.ins-unit {
+  white-space: nowrap;
 }
 
 /* ---------------- live stats ---------------- */
 
-.stat-list {
+.ins-stats {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--sp-2);
 }
 
-.stat-row {
+/* Label left, value right. Every value in the panel lands on one axis, which
+   is what lets the eye scan the column instead of reading each row. */
+.ins-stat {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
-.stat-label {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.stat-value {
+/* The arithmetic behind the derived ceiling, shown so the number is not
+   magic. Faint and small — it is a footnote to the value above it. */
+.ins-expr {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  text-align: right;
-  color: var(--text);
-}
-
-.stats-idle {
-  margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  letter-spacing: var(--tr-label);
+  text-transform: uppercase;
   color: var(--text-faint);
 }
 
-.tone-ok {
-  color: var(--ok);
+/* ---------------- footer ---------------- */
+
+.ins-foot {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
 }
 
-.tone-warn {
-  color: var(--warn);
-}
-
-.tone-danger {
-  color: var(--danger);
-}
-
-/* ---------------- buttons ---------------- */
-
-.btn {
-  padding: 6px 12px;
-  font: 500 12px/1 inherit;
-  color: var(--text);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  cursor: pointer;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease;
-}
-
-.btn:hover {
-  border-color: var(--text-faint);
-}
-
-.btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.btn-primary {
-  color: var(--bg);
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.btn-primary:hover {
-  border-color: var(--accent);
-  filter: brightness(1.1);
-}
-
-.btn-danger {
-  align-self: flex-start;
-  color: var(--text-dim);
+/* Destructive, so it stays quiet until hovered. It is never the primary
+   action of the panel and must not compete with the config above it. */
+.ins-delete {
   background: transparent;
+  color: var(--text-dim);
 }
 
-.btn-danger:hover {
-  color: var(--danger);
+.ins-delete:hover:not(:disabled) {
+  background: transparent;
   border-color: var(--danger);
+  color: var(--danger);
 }
 
-/* ------------------------------------------------------------------ *
- * TrafficControl: the primary control bar.
- * ------------------------------------------------------------------ */
+/* ==========================================================================
+   TrafficControl — the primary control bar.
+
+   It is a plain flex child of .app-bar and supplies NO background, border,
+   font or padding of its own. The previous version re-declared all four,
+   and the doubled border plus padding is what pushed the load slider and
+   its scale off the top of the viewport.
+   ========================================================================== */
 
 .traffic {
   display: flex;
-  align-items: flex-end;
-  gap: 32px;
-  padding: 14px 20px;
-  box-sizing: border-box;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  font: 13px/1.45 var(--sans, system-ui, sans-serif);
-  color: var(--text);
-  text-align: left;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
 }
 
+/* ---------------- offered load: the one input ---------------- */
+
+/* The value sits BESIDE the track, not above it.
+   Stacking eyebrow + 32px hero + 28px slider + 12px scale measures 80px, which
+   is what overflowed the 52px bar and pushed the primary control off the top of
+   the viewport. Side-by-side, the tallest element is the 32px hero and the
+   whole block measures 44px — inside a 56px bar with room to spare. */
 .traffic-load {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
   flex: 1 1 auto;
-  min-width: 240px;
-  max-width: 560px;
+  min-width: 280px;
+  /* Capped so the slider and the number it changes stay adjacent on a wide
+     screen instead of drifting to opposite edges. */
+  max-width: 720px;
+}
+
+.traffic-load-head {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
+  flex: none;
 }
 
-.load-head {
+/* The track and its scale, taking the remaining width. */
+.traffic-load-track {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.traffic-load-readout {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
+  gap: var(--sp-1);
 }
 
-.load-label {
-  font-size: 12px;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-
-.load-readout {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-}
-
-.load-value {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 24px;
-  font-weight: 500;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  color: var(--text);
-}
-
-.load-unit {
-  font-size: 12px;
+.traffic-load-unit {
   color: var(--text-faint);
 }
 
-.slider-primary {
-  height: 22px;
-}
-
-.slider-primary::-webkit-slider-runnable-track {
-  height: 4px;
-}
-
-.slider-primary::-moz-range-track {
-  height: 4px;
-}
-
-.slider-primary::-webkit-slider-thumb {
-  width: 16px;
-  height: 16px;
-  margin-top: -6px;
-  background: var(--accent);
-}
-
-.slider-primary::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  background: var(--accent);
-}
-
-.slider-primary:hover::-webkit-slider-thumb,
-.slider-primary:hover::-moz-range-thumb {
-  background: var(--accent);
-}
-
-.load-scale {
-  display: flex;
-  justify-content: space-between;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 10px;
+/* Scale marks positioned at their true log location along the track. The
+   row is relative and each mark is absolute, translated by half its own
+   width so it is centred on its tick rather than starting at it. */
+.traffic-scale {
+  position: relative;
+  height: 12px;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
   color: var(--text-faint);
+}
+
+.traffic-scale-mark {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: var(--fs-label);
+  white-space: nowrap;
+}
+
+/* Slack falls here, between the control and the readout, rather than being
+   pushed onto the headline with margin-left:auto. */
+.traffic-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ---------------- headline metrics: the effect ---------------- */
+
+.traffic-headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-6);
+  flex: none;
+}
+
+.traffic-metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
+.traffic-metric-group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-6);
 }
 
 .traffic-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-bottom: 4px;
+  gap: var(--sp-2);
+  flex: none;
 }
 
-/* ---------------- headline metrics ---------------- */
-
-.headline {
-  display: flex;
-  align-items: flex-end;
-  gap: 28px;
-  margin-left: auto;
-  padding-bottom: 2px;
-}
-
-.headline-primary {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.headline-label {
-  font-size: 11px;
-  letter-spacing: 0.03em;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
-/* The single most important number on screen. */
-.headline-value {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 40px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: -0.03em;
-}
-
-.headline-secondary {
-  display: flex;
-  gap: 24px;
-  padding-bottom: 5px;
-}
-
-.headline-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.headline-sub {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 15px;
-  color: var(--text);
-}
-
-@media (max-width: 1100px) {
+/* At narrower widths the secondary metrics are the first thing to go: the
+   slider and p99 are the two things that must always be reachable. */
+@media (max-width: 1360px) {
   .traffic {
-    flex-wrap: wrap;
-    gap: 20px;
+    gap: var(--sp-6);
   }
 
-  .headline {
-    margin-left: 0;
+  .traffic-metric-group {
+    display: none;
   }
 }

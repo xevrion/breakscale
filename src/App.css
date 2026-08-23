@@ -1,27 +1,44 @@
 /* ==========================================================================
-   App shell. Fixed viewport, no page scroll — every region that can overflow
-   scrolls inside itself.
+   App shell.
+
+   Fixed viewport: the page itself never scrolls. Every region that can
+   overflow scrolls inside itself, so the top bar and the metrics strip stay
+   put no matter how long the topology or the config form gets.
+
+   This file owns the GRID ONLY. Each panel paints its own surface, border
+   and padding in its own stylesheet, so a panel can be moved between grid
+   slots without dragging its appearance along with it.
    ========================================================================== */
 
 .app {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100vh;
+  /* dvh keeps the bar reachable on mobile browsers whose toolbars collapse. */
   height: 100dvh;
   overflow: hidden;
   background: var(--bg);
 }
 
 /* --------------------------------------------------------------------------
-   Top bar
+   Top bar.
+
+   56px per the layout spec. The traffic control measures 44px, so the bar
+   has real slack rather than the 24px overflow that used to push the
+   primary control off the top of the viewport.
+
+   The bar owns the background and the border; .traffic is a plain flex
+   child that declares none of the four, which is what fixed that overflow.
    -------------------------------------------------------------------------- */
 
 .app-bar {
   display: flex;
   align-items: center;
-  gap: 32px;
-  height: 52px;
-  padding: 0 16px;
+  gap: var(--sp-8);
+  height: 56px;
+  /* flex-none against the shrink that a long headline would otherwise cause. */
+  flex: none;
+  padding: 0 var(--sp-4);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -29,46 +46,50 @@
 .app-title {
   flex: none;
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  font-weight: var(--fw-num);
+  letter-spacing: var(--ls-base);
   color: var(--text);
   white-space: nowrap;
 }
 
-/* The traffic control owns the rest of the bar. */
+/* The traffic control takes the rest of the bar. min-width:0 lets it
+   actually shrink instead of forcing the bar wider than the viewport. */
 .app-bar > .traffic {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 /* --------------------------------------------------------------------------
-   Body: palette | stage | inspector
+   Body: palette | stage | inspector.
+
+   The rails are FIXED. They hold a 12-item list and a config form; neither
+   reads better wider, and letting them grow is exactly what makes a large
+   display feel empty. Every extra pixel goes to the stage, which is the
+   subject of the app.
    -------------------------------------------------------------------------- */
 
 .app-body {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 320px;
+  grid-template-columns: 224px minmax(0, 1fr) 320px;
   min-height: 0;
   overflow: hidden;
 }
 
+/* Both rails scroll internally via the shared .scroll primitive and paint
+   their own surface. The grid only supplies the separating hairline, so
+   the rule that draws it lives with the layout that needs it. */
 .app-body > .pal {
   border-right: 1px solid var(--border);
   background: var(--surface);
-  overflow-y: auto;
-}
-
-.app-body > .inspector {
-  border-left: 1px solid var(--border);
-  background: var(--surface);
-  overflow-y: auto;
 }
 
 /* --------------------------------------------------------------------------
    Stage: canvas above, metrics strip pinned below.
-   The strip spans only the canvas so the inspector stays full height —
-   a selected node's knobs and its metrics stay visible together.
+
+   The strip spans only the canvas, not the inspector, so a selected node's
+   knobs and the system's charts stay legible side by side.
    -------------------------------------------------------------------------- */
 
 .app-stage {
@@ -77,18 +98,33 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* The strip reflows against THIS box, not the viewport. A viewport media
+     query cannot see that the stage is the viewport minus both rails, which
+     is why the old `@media (max-width: 1000px)` on .mx could never fire at
+     any width the app is actually used at. */
+  container-type: inline-size;
+  container-name: stage;
 }
 
+/* min-height, not height: a fixed height with a few px of slack is one
+   type-scale change away from silently clipping its own charts. */
 .app-stage > .mx {
-  height: 200px;
+  min-height: clamp(196px, 26vh, 260px);
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
 
-/* Below this the three-column layout stops being usable; the inspector
-   narrows first, then the palette. */
-@media (max-width: 1180px) {
+/* --------------------------------------------------------------------------
+   The single layout media query.
+
+   Below this the rails narrow so the stage keeps enough width for three
+   charts. The strip then reflows on its own through container queries in
+   Metrics.css. Three unrelated breakpoints (1180 / 1100 / 1000) collapsed
+   to this one plus those two container queries.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1360px) {
   .app-body {
-    grid-template-columns: 220px minmax(0, 1fr) 280px;
+    grid-template-columns: 200px minmax(0, 1fr) 288px;
   }
 }

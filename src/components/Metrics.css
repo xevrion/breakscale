@@ -1,116 +1,132 @@
 /* ==========================================================================
-   Metrics strip — bottom-of-screen live charts.
-   Two time-series charts plus a failure breakdown, separated by whitespace
-   and one hairline rule. No nested cards: the strip's own panel is the only
-   boundary, everything inside is laid out on the same plane.
+   Metrics strip — bottom-of-stage live charts.
+
+   Three charts on one plane: latency, throughput, failures. No nested
+   cards — the strip's own panel is the only boundary. Separation is
+   whitespace and a single hairline rule, never a box.
    ========================================================================== */
 
 .mx {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(190px, 0.55fr);
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-6);
   align-items: start;
-  padding: 14px 16px;
+  padding: var(--sp-4);
   min-width: 0;
 }
 
-/* Vertical hairlines instead of boxing each chart. */
+/* Vertical hairlines instead of boxing each chart. Deliberately no
+   border-radius here: a rounded box with one side bordered is the
+   classic mistake this rule exists to avoid. */
 .mx > * + * {
-  padding-left: 24px;
+  padding-left: var(--sp-6);
   border-left: 1px solid var(--border);
-  /* No border-radius here on purpose — a rounded box with one side
-     bordered is the classic mistake. This is a plain separator. */
 }
 
-@media (max-width: 1000px) {
+/* --------------------------------------------------------------------------
+   Responsive.
+
+   These are CONTAINER queries, not media queries. The old
+   `@media (max-width: 1000px)` could never fire: it tested the viewport
+   while .mx lives inside .app-stage, which is viewport minus palette
+   minus inspector. At a 1280 viewport the stage is ~790px and the
+   latency plot collapsed to ~163px — 2.7px per sample.
+
+   .app-stage declares `container-type: inline-size` (App.css).
+   -------------------------------------------------------------------------- */
+
+@container stage (max-width: 1040px) {
   .mx {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .mx > * + * {
+  /* Failures drops to a full-width second row rather than holding a
+     fixed column that crushes its neighbours. */
+  .mx-fail-col {
+    grid-column: 1 / -1;
     padding-left: 0;
-    padding-top: 16px;
+    padding-top: var(--sp-4);
     border-left: none;
     border-top: 1px solid var(--border);
   }
 }
 
-.mx-chart,
-.mx-fail {
+@container stage (max-width: 720px) {
+  .mx {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-4);
+    overflow-y: auto;
+  }
+
+  .mx > * + * {
+    padding-left: 0;
+    padding-top: var(--sp-4);
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
+.mx-chart {
   min-width: 0;
 }
 
 /* --------------------------------------------------------------------------
-   Chart header: title on the left, live readouts on the right.
+   Chart header: eyebrow left, live readout right.
+
+   The unit lives HERE, in the eyebrow — not floating inside the plot,
+   where the old `ms` / `rps` text overlapped the top y-tick by 4-5px in
+   an identical faint grey. The two elements no longer share a coordinate
+   space, so that collision cannot recur.
    -------------------------------------------------------------------------- */
 
-.mx-chart-head {
+.mx-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 18px;
-  margin-bottom: 6px;
+  gap: var(--sp-3);
+  min-height: var(--sp-6);
+  margin-bottom: var(--sp-1);
 }
 
-.mx-title {
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.4;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-faint);
+.mx-eyebrow {
   white-space: nowrap;
 }
 
-.mx-readout {
+.mx-head-right {
   display: flex;
   align-items: baseline;
-  gap: 14px;
+  gap: var(--sp-3);
   min-width: 0;
 }
 
-.mx-read {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
+/* The one T5 number per chart. This is the rung the audit found missing:
+   the strip used to top out at 15px. */
+.mx-readout {
+  color: var(--text);
   white-space: nowrap;
 }
 
-.mx-read-k {
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  color: var(--text-faint);
+/* Dropped traffic. State, not entrance — it appears when the system
+   starts losing requests and leaves when it stops. */
+.mx-dropped {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  white-space: nowrap;
+  animation: mx-drop-in var(--dur-base) var(--ease);
 }
 
-.mx-read-v {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1;
-  font-size: 12px;
-  letter-spacing: -0.01em;
-  color: var(--text-dim);
+@keyframes mx-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
-.mx-read-sub {
-  color: var(--text-faint);
-}
-
-/* p99 is the number that matters most in this strip: it is the only
-   readout at full text weight and full contrast. */
-.mx-read-p99 .mx-read-v {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.mx-read-p99 .mx-read-k {
-  color: var(--text-dim);
-}
-
-.mx-read-dropped .mx-read-v {
-  color: var(--danger);
+@media (prefers-reduced-motion: reduce) {
+  .mx-dropped {
+    animation: none;
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -133,44 +149,78 @@
   pointer-events: none;
 }
 
-/* The stretched layer is inset to the plot area by inline styles. */
+/* Inset to the plot area by inline styles computed from the measured width. */
 .mx-layer-scaled {
   inset: auto;
 }
 
+/* --------------------------------------------------------------------------
+   Axes
+   -------------------------------------------------------------------------- */
+
 .mx-grid {
   stroke: var(--border);
+  stroke-opacity: 0.6;
   stroke-width: 1;
-  /* Sit on the device pixel rather than straddling two. */
   shape-rendering: crispEdges;
 }
 
-.mx-ylabel,
+/* The baseline is distinct from the interior gridlines. "Did it reach
+   zero" is a real question here, and a visible origin is what turns a
+   sketch into a plot. */
+.mx-zero {
+  stroke: var(--border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.mx-xtick {
+  stroke: var(--border);
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+/* The present. Traces scroll into a fixed `now`. */
+.mx-now {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+/* Tick values at T2/12px --text-dim. These were 9px --text-faint: the
+   least legible text in the app, and the numbers being taught. */
+.mx-ytick {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  fill: var(--text-dim);
+}
+
 .mx-xlabel,
-.mx-unit {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1;
-  font-size: 9px;
+.mx-empty {
   fill: var(--text-faint);
 }
 
-.mx-unit {
-  font-size: 8px;
-  letter-spacing: 0.04em;
-}
-
-.mx-xlabel {
-  font-family: var(--sans);
-  font-size: 9px;
+/* SVG <text> cannot inherit .label's text-transform reliably across
+   engines, so the strings are authored uppercase; this carries size,
+   weight and tracking only. */
+.mx-xlabel,
+.mx-empty {
+  font-size: var(--fs-label);
+  font-weight: var(--fw-num);
+  letter-spacing: var(--tr-label);
 }
 
 /* --------------------------------------------------------------------------
-   Lines. Separated by weight first, color second, so the chart still reads
-   correctly for a colorblind student.
+   Lines.
 
-   vector-effect keeps stroke width uniform despite the non-uniform
-   viewBox scale — without it the lines would smear horizontally.
+   Separated by WEIGHT first and lightness second, so the chart still
+   reads correctly for a colorblind student. The old 1 / 1.25 / 1.75px
+   spread was sub-pixel at 1x and read as three identical hairlines;
+   1.5 / 2 / 2.5 is a real half-pixel separation.
+
+   vector-effect is essential: the plot layer is horizontally stretched,
+   and without it every stroke would deform with container width.
    -------------------------------------------------------------------------- */
 
 .mx-line {
@@ -181,150 +231,178 @@
 }
 
 .mx-line-p50 {
-  stroke: var(--text-faint);
-  stroke-width: 1;
+  stroke: var(--line-4);
+  stroke-width: 1.5;
 }
 
 .mx-line-p95 {
   stroke: var(--text-dim);
-  stroke-width: 1.25;
+  stroke-width: 2;
 }
 
+/* p99 is toned by the same function as the headline number, so the line
+   and the figure above it always show the same colour for the same
+   value. Previously it was unconditionally --danger, which rendered
+   blood-red at 40ms and at 4000ms alike and desensitized the one hue
+   that should mean alarm. */
 .mx-line-p99 {
+  stroke: var(--text);
+  stroke-width: 2.5;
+}
+
+.mx-line-p99.is-warn {
+  stroke: var(--warn);
+}
+
+.mx-line-p99.is-danger {
   stroke: var(--danger);
-  stroke-width: 1.75;
 }
 
-.mx-read-p50 .mx-read-k {
-  color: var(--text-faint);
-}
-
-.mx-read-p95 .mx-read-k {
-  color: var(--text-faint);
-}
-
-/* Offered is the reference; goodput is what actually got served. */
+/* Offered is the reference; goodput is what actually got served.
+   Goodput is NOT --accent: a data series may never wear the hue that
+   means "you selected this". */
 .mx-line-offered {
-  stroke: var(--text-dim);
-  stroke-width: 1;
-  stroke-dasharray: 3 2;
+  stroke: var(--text-faint);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
 }
 
 .mx-line-goodput {
-  stroke: var(--accent);
-  stroke-width: 1.75;
+  stroke: var(--text);
+  stroke-width: 2.5;
 }
 
-/* The dropped-traffic band. Subtle enough to read as a region, strong
-   enough that a widening gap is the first thing you notice. */
+/* Dropped traffic as literal area. Subtle enough to read as a region,
+   strong enough that a widening wedge is the first thing you notice. */
 .mx-gap {
   fill: var(--danger);
-  fill-opacity: 0.16;
+  fill-opacity: 0.14;
   stroke: none;
 }
 
-.mx-read-offered .mx-read-v {
-  color: var(--text-dim);
-}
-
-.mx-read-goodput .mx-read-v {
-  color: var(--accent);
+.mx-band {
+  stroke: none;
+  fill-opacity: 0.85;
 }
 
 /* --------------------------------------------------------------------------
-   Failure breakdown — one thin stacked bar plus a mono legend.
+   Legend. Below the plot, one row, line swatches in each series' own
+   stroke. No boxes, no dots, no colored chips.
    -------------------------------------------------------------------------- */
 
-.mx-fail-total {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1;
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.mx-fail-bar {
-  display: flex;
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  overflow: hidden;
-  background: var(--surface-2);
-}
-
-.mx-fail-bar-empty {
-  background: var(--surface-2);
-}
-
-.mx-fail-seg {
-  display: block;
-  min-width: 2px;
-  flex-shrink: 1;
-  flex-basis: 0;
-}
-
-.mx-fail-none {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
-.mx-fail-legend {
+.mx-legend {
   list-style: none;
-  margin: 10px 0 0;
+  margin: var(--sp-2) 0 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  min-width: 0;
 }
 
-.mx-fail-item {
+.mx-legend-stack {
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.mx-key {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  line-height: 1.4;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  transition: opacity var(--dur-fast) var(--ease);
 }
 
-.mx-swatch {
+/* A zero row dims rather than unmounting. Rows appearing and vanishing
+   under a moving slider is a major source of the "unfinished" read. */
+.mx-key[data-dim] {
+  opacity: 0.4;
+}
+
+.mx-key-line {
   flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line-4);
+}
+
+.mx-key-swatch {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
   border-radius: 1px;
 }
 
-.mx-fail-name {
+.mx-key-name {
   color: var(--text-dim);
   white-space: nowrap;
 }
 
-.mx-fail-count {
+.mx-key-value {
+  color: var(--text);
+}
+
+/* In the stacked failure legend the value is right-aligned on a shared axis. */
+.mx-legend-stack .mx-key-value {
   margin-left: auto;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1;
-  color: var(--text-dim);
 }
 
-/* Reason colors. These are the one place several hues coexist, because
-   each maps to a distinct failure mode the student must tell apart.
-   Danger/warn carry the two that mean overload. */
-.mx-fail-error {
-  background: var(--danger);
+.mx-key-p50 {
+  background: var(--line-4);
 }
 
-.mx-fail-shed {
-  background: var(--warn);
+.mx-key-p95 {
+  background: var(--text-dim);
 }
 
-.mx-fail-timeout {
-  background: var(--cat-violet);
+.mx-key-p99 {
+  background: var(--text);
 }
 
-.mx-fail-no-route {
+.mx-key-offered {
   background: var(--text-faint);
 }
 
-.mx-fail-depth {
+.mx-key-goodput {
+  background: var(--text);
+}
+
+.mx-key-gap {
+  background: var(--danger);
+  opacity: 0.5;
+}
+
+/* --------------------------------------------------------------------------
+   Failure reason colors. This is the one place several hues coexist,
+   because each maps to a distinct failure mode the student must tell
+   apart — a legitimate categorical need, not decoration.
+   -------------------------------------------------------------------------- */
+
+.mx-fill-error {
+  fill: var(--danger);
+  background: var(--danger);
+}
+
+.mx-fill-shed {
+  fill: var(--warn);
+  background: var(--warn);
+}
+
+.mx-fill-timeout {
+  fill: var(--cat-violet);
+  background: var(--cat-violet);
+}
+
+.mx-fill-no-route {
+  fill: var(--cat-blue);
   background: var(--cat-blue);
+}
+
+.mx-fill-depth {
+  fill: var(--line-4);
+  background: var(--line-4);
 }

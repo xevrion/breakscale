@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { NodeConfig, NodeKind, SimSnapshot, Topology } from './sim/types';
+import type {
+  NodeConfig,
+  NodeKind,
+  NodeStats,
+  SimSnapshot,
+  Topology,
+} from './sim/types';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
 import type { Preset } from './sim/presets';
-import Canvas from './components/Canvas';
+import Canvas, { SPARK_LEN } from './components/Canvas';
 import { Inspector, TrafficControl } from './components/Inspector';
 import { Metrics } from './components/Metrics';
 import { Palette } from './components/Palette';
@@ -25,6 +31,47 @@ const SNAPSHOT_INTERVAL_MS = 1000 / SNAPSHOT_HZ;
  * minutes of simulated time in a single frame.
  */
 const MAX_FRAME_MS = 100;
+
+/**
+ * One press of Step advances this much simulated time. The engine exposes no
+ * step() of its own — only advance(dt) — so a step is simply one manual frame
+ * at a size big enough to visibly move the state.
+ */
+const STEP_MS = 100;
+
+/**
+ * Sparkline cadence. 1Hz x 60 samples = the same 60s window the charts show.
+ * The engine emits history every 250ms; sampling at 1Hz keeps the node
+ * sparkline and the metrics charts describing the same span of time.
+ */
+const SPARK_INTERVAL_MS = 1000;
+
+/**
+ * The series each node kind's sparkline plots. Mirrors the primary metric
+ * chosen in Canvas's `readoutFor`, so the trend line under a number is a
+ * trend line OF that number rather than of some unrelated quantity.
+ */
+function sparkValue(
+  kind: NodeKind,
+  s: NodeStats,
+  queueLimit: number,
+): number {
+  switch (kind) {
+    case 'client':
+      return s.throughput;
+    case 'cache':
+      return s.hitRate;
+    case 'queue': {
+      const depth = s.queued + s.inFlight;
+      const limit = queueLimit > 0 ? queueLimit : 1;
+      // Stored as a fraction of the node's own limit so the trace is
+      // comparable against the meter beneath it.
+      return Math.min(depth / limit, 1) * limit;
+    }
+    default:
+      return s.utilization;
+  }
+}
 
 interface Session {
   topology: Topology;
@@ -187,6 +234,50 @@ export default function App() {
   useEffect(() => {
     runningRef.current = running;
   }, [running]);
+
+  /* ---------------- per-node sparkline history ----------------
+   *
+   * `SimSnapshot.history` is system-wide — `HistoryPoint` carries no node id —
+   * so there is no per-node series in the engine to draw, and src/sim is not
+   * ours to change. The ring buffer therefore lives here.
+   *
+   * Sampled when the engine's own clock crosses a 1000ms boundary rather than
+   * on a wall-clock timer, so the trace stays correct while paused, while
+   * single-stepping, and after a tab-away. 60 samples at 1Hz is the same 60s
+   * window the charts below the canvas show.
+   */
+  const sparkRef = useRef(new Map<string, Float32Array>());
+  const sparkTickRef = useRef(-1);
+  const [spark, setSpark] = useState<ReadonlyMap<string, Float32Array>>(
+    () => new Map(),
+  );
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const tick = Math.floor(snapshot.system.timeMs / SPARK_INTERVAL_MS);
+    if (tick === sparkTickRef.current) return;
+    // A reset moves the clock backwards; drop the stale trace rather than
+    // splicing new samples onto the tail of the previous run.
+    const rewound = tick < sparkTickRef.current;
+    sparkTickRef.current = tick;
+
+    const prev = sparkRef.current;
+    const next = new Map<string, Float32Array>();
+
+    for (const n of topology.nodes) {
+      const s = snapshot.nodes[n.id];
+      const old = rewound ? undefined : prev.get(n.id);
+      const buf = new Float32Array(SPARK_LEN);
+      if (old) buf.set(old.subarray(1));
+      buf[SPARK_LEN - 1] = s ? sparkValue(n.kind, s, n.config.queueLimit) : 0;
+      next.set(n.id, buf);
+    }
+
+    // Entries for removed nodes are dropped by virtue of rebuilding from the
+    // current topology, so the map cannot leak across preset loads.
+    sparkRef.current = next;
+    setSpark(next);
+  }, [snapshot, topology.nodes]);
 
   /* ---------------- the simulation loop ---------------- */
 
@@ -383,6 +474,18 @@ export default function App() {
 
   const handleToggleRun = useCallback(() => setRunning((r) => !r), []);
 
+  /**
+   * Advance one fixed tick with the loop stopped. Stepping while running
+   * would race the rAF loop and make the delta non-deterministic, so a step
+   * always pauses first — the same contract a debugger's step button has.
+   */
+  const handleStep = useCallback(() => {
+    setRunning(false);
+    runningRef.current = false;
+    engine.advance(STEP_MS);
+    setSnapshot(engine.snapshot());
+  }, [engine]);
+
   /* ---------------- keyboard ---------------- */
 
   useEffect(() => {
@@ -407,6 +510,14 @@ export default function App() {
         return;
       }
 
+      // Step one tick. Ignored with a modifier held so it cannot shadow
+      // browser shortcuts like Cmd/Ctrl+S.
+      if ((e.key === 's' || e.key === 'S') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        handleStep();
+        return;
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         setSelectedId((cur) => {
           if (cur === null) return cur;
@@ -424,7 +535,7 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleDeleteNode, handleDeleteEdge, topology.nodes, topology.edges]);
+  }, [handleDeleteNode, handleDeleteEdge, handleStep, topology.nodes, topology.edges]);
 
   /* ---------------- derived ---------------- */
 
@@ -439,12 +550,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-bar">
-        <h1 className="app-title">System Design Simulator</h1>
+        <h1 className="app-title">sys-sim</h1>
         <TrafficControl
           rps={rps}
           onRpsChange={handleRpsChange}
           running={running}
           onToggleRun={handleToggleRun}
+          onStep={handleStep}
           onReset={handleReset}
           system={snapshot?.system ?? EMPTY_SYSTEM}
         />
@@ -469,6 +581,7 @@ export default function App() {
             onDeleteNode={handleDeleteNode}
             onDeleteEdge={handleDeleteEdge}
             onDropNode={handleAddNode}
+            spark={spark}
           />
           {snapshot ? <Metrics snapshot={snapshot} /> : null}
         </main>

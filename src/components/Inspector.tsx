@@ -1,6 +1,18 @@
 import { useId } from 'react';
+import type { ReactNode } from 'react';
 import type { NodeConfig, NodeKind, NodeStats, SimNode, SystemStats } from '../sim/types';
-import { formatMs, formatPct, formatRate } from './format';
+import {
+  NA,
+  formatCount,
+  formatMs,
+  formatPct,
+  formatRate,
+  formatRateBare,
+  healthOfErr,
+  healthOfLatency,
+  healthOfLoad,
+  toneClass,
+} from './format';
 import './Inspector.css';
 
 /* ------------------------------------------------------------------ *
@@ -61,6 +73,23 @@ const KIND_LABEL: Record<NodeKind, string> = {
   worker: 'Worker',
 };
 
+/**
+ * One line on what the kind is for. This is the text that used to sit under
+ * every palette row, where it forced the rail to 260px and left it mostly
+ * empty. It belongs here, shown only for the one kind actually selected.
+ */
+const KIND_BLURB: Record<NodeKind, string> = {
+  client:
+    'Offers load and waits for an answer. Its timeout decides when a slow reply becomes a failure.',
+  lb: 'Spreads requests across its targets. Its own pool and backlog can saturate before theirs do.',
+  service:
+    'The workhorse. Capacity slots x service time sets the ceiling everything else queues behind.',
+  cache: 'Answers hits without touching downstream. The hit rate is the knob that matters here.',
+  db: 'Slots and service time. It does not retry for you, so its queue is where pressure shows.',
+  queue: 'A buffer. Depth is the whole story: it absorbs bursts up to the limit, then sheds.',
+  worker: 'Drains a queue at its own pace. Too few workers and the backlog never recovers.',
+};
+
 /* ------------------------------------------------------------------ *
  * Field descriptors: label, unit, control shape, bounds.
  * ------------------------------------------------------------------ */
@@ -93,7 +122,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     min: 1,
     max: 5000,
     step: 1,
-    display: (v) => `${formatRate(v)}/s`,
+    display: (v) => formatRate(v),
   },
   capacity: {
     control: 'number',
@@ -176,12 +205,12 @@ function SliderRow({
 }) {
   const id = useId();
   return (
-    <div className="field">
-      <div className="field-head">
-        <label className="field-label" htmlFor={id}>
+    <div className="ins-field">
+      <div className="ins-field-head">
+        <label className="row-k" htmlFor={id}>
           {spec.label}
         </label>
-        <span className="field-value">{spec.display(value)}</span>
+        <span className="row-v">{spec.display(value)}</span>
       </div>
       <input
         id={id}
@@ -208,14 +237,14 @@ function NumberRow({
 }) {
   const id = useId();
   return (
-    <div className="field field-inline">
-      <label className="field-label" htmlFor={id}>
+    <div className="ins-field-row">
+      <label className="row-k" htmlFor={id}>
         {spec.label}
       </label>
-      <div className="number-wrap">
+      <span className="ins-number-wrap">
         <input
           id={id}
-          className="number"
+          className="ins-number"
           type="number"
           min={spec.min}
           max={spec.max}
@@ -228,49 +257,49 @@ function NumberRow({
             onChange(clamped);
           }}
         />
-        <span className="field-unit">{spec.unit}</span>
-      </div>
+        <span className="label ins-unit">{spec.unit}</span>
+      </span>
     </div>
   );
 }
 
-function StatRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: 'ok' | 'warn' | 'danger';
-}) {
+/**
+ * One live readout. `tone` is a health class or undefined — at 'ok' the value
+ * stays neutral, so a healthy panel carries no colour at all and --warn /
+ * --danger keep their meaning for when they do appear.
+ */
+function StatRow({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="stat-row">
-      <span className="stat-label">{label}</span>
-      <span className={tone ? `stat-value tone-${tone}` : 'stat-value'}>{value}</span>
+    <div className="ins-stat">
+      <span className="row-k">{label}</span>
+      <span className={tone ? `row-v ${tone}` : 'row-v'}>{value}</span>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ *
- * Thresholds. Shared with TrafficControl so the two agree on colour.
- * ------------------------------------------------------------------ */
-
-function utilizationTone(u: number): 'ok' | 'warn' | 'danger' {
-  if (u >= 0.9) return 'danger';
-  if (u >= 0.7) return 'warn';
-  return 'ok';
+/**
+ * A ratio rendered as a multiple: `3.8x`, `0.6x`, `<0.1x`.
+ *
+ * Rule 1 applies here as it does to every other readout: a node running at
+ * twenty times its ceiling has a headroom of 0.05, and `0.0x` would say it has
+ * none to spare when what it actually has is a deficit. Below the display step
+ * it degrades to a bound rather than to zero.
+ */
+function formatMultiple(v: number): string {
+  if (!Number.isFinite(v) || v < 0) return NA;
+  if (v === 0) return '0x';
+  if (v < 0.1) return '<0.1x';
+  if (v < 10) return `${v.toFixed(1).replace(/\.0$/, '')}x`;
+  return `${formatCount(v)}x`;
 }
 
-function errorTone(rate: number): 'ok' | 'warn' | 'danger' {
-  if (rate >= 0.05) return 'danger';
-  if (rate >= 0.005) return 'warn';
-  return 'ok';
-}
-
-function latencyTone(p99: number): 'ok' | 'warn' | 'danger' {
-  if (p99 >= 1000) return 'danger';
-  if (p99 >= 250) return 'warn';
-  return 'ok';
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="ins-section">
+      <h2 className="label ins-section-title">{title}</h2>
+      {children}
+    </section>
+  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -288,8 +317,8 @@ export interface InspectorProps {
 export function Inspector({ node, stats, onChange, onDelete, onRename }: InspectorProps) {
   if (!node) {
     return (
-      <aside className="inspector">
-        <p className="inspector-empty">Select a node to configure it.</p>
+      <aside className="ins scroll" aria-label="Inspector">
+        <p className="ins-empty">Select a node on the canvas to configure it.</p>
       </aside>
     );
   }
@@ -302,103 +331,124 @@ export function Inspector({ node, stats, onChange, onDelete, onRename }: Inspect
   const showCeiling = HAS_THROUGHPUT_CEILING.has(node.kind) && cfg.serviceMs > 0;
   const maxThroughput = showCeiling ? cfg.capacity * (1000 / cfg.serviceMs) : 0;
 
+  // Headroom answers "is this the bottleneck?" without reading a chart:
+  // the ceiling divided by what is actually arriving. Below 1.0x the node
+  // cannot keep up, which is why it is toned by the same load thresholds.
+  const arrivals = stats?.arrivalRate ?? 0;
+  const headroom = showCeiling && arrivals > 0 ? maxThroughput / arrivals : null;
+
+  const serviceMsLabel =
+    cfg.serviceMs < 10 ? cfg.serviceMs.toFixed(1) : String(Math.round(cfg.serviceMs));
+
   return (
-    <aside className="inspector">
-      <header className="inspector-head">
+    <aside className="ins scroll" aria-label="Inspector">
+      <header className="ins-head">
         <input
-          className="title-input"
+          className="ins-title"
           type="text"
           value={node.label}
           spellCheck={false}
           aria-label="Node name"
           onChange={(e) => onRename(node.id, e.currentTarget.value)}
         />
-        <span className="kind-tag">{KIND_LABEL[node.kind]}</span>
+        <span className="label">{KIND_LABEL[node.kind]}</span>
       </header>
 
-      <section className="section">
-        {fields.map((field) => {
-          const spec = FIELD_SPECS[field];
-          const value = cfg[field];
-          return spec.control === 'slider' ? (
-            <SliderRow
-              key={field}
-              spec={spec}
-              value={value}
-              onChange={(v) => onChange(node.id, { [field]: v })}
-            />
-          ) : (
-            <NumberRow
-              key={field}
-              spec={spec}
-              value={value}
-              onChange={(v) => onChange(node.id, { [field]: v })}
-            />
-          );
-        })}
-      </section>
+      <p className="ins-blurb">{KIND_BLURB[node.kind]}</p>
+
+      <Section title="Config">
+        <div className="ins-fields">
+          {fields.map((field) => {
+            const spec = FIELD_SPECS[field];
+            const value = cfg[field];
+            return spec.control === 'slider' ? (
+              <SliderRow
+                key={field}
+                spec={spec}
+                value={value}
+                onChange={(v) => onChange(node.id, { [field]: v })}
+              />
+            ) : (
+              <NumberRow
+                key={field}
+                spec={spec}
+                value={value}
+                onChange={(v) => onChange(node.id, { [field]: v })}
+              />
+            );
+          })}
+        </div>
+      </Section>
 
       {showCeiling && (
-        <p className="derived">
-          Max throughput ={' '}
-          <span className="derived-expr">
-            {cfg.capacity} x 1000/{cfg.serviceMs < 10 ? cfg.serviceMs.toFixed(1) : Math.round(cfg.serviceMs)}
-          </span>{' '}
-          = <span className="derived-result">{formatRate(maxThroughput)}/s</span>
-        </p>
+        <Section title="Derived">
+          <div className="ins-stats">
+            <StatRow label="Max throughput" value={formatRate(maxThroughput)} />
+            <p className="ins-expr">
+              {formatCount(cfg.capacity)} slots x 1000/{serviceMsLabel}ms
+            </p>
+            {headroom !== null && (
+              <StatRow
+                label="Headroom"
+                value={formatMultiple(headroom)}
+                tone={toneClass(healthOfLoad(arrivals / maxThroughput))}
+              />
+            )}
+          </div>
+        </Section>
       )}
 
-      <div className="section-rule" />
-
-      <section className="section">
+      <Section title="Live">
         {stats ? (
-          <div className="stat-list">
+          <div className="ins-stats">
             {node.kind !== 'client' && (
               <StatRow
                 label="Utilization"
                 value={formatPct(stats.utilization)}
-                tone={utilizationTone(stats.utilization)}
+                tone={toneClass(healthOfLoad(stats.utilization))}
               />
             )}
-            <StatRow label="In flight" value={formatRate(stats.inFlight)} />
+            <StatRow label="In flight" value={formatCount(stats.inFlight)} />
             <StatRow
               label={node.kind === 'queue' ? 'Backlog' : 'Queued'}
-              value={formatRate(stats.queued)}
+              value={formatCount(stats.queued)}
             />
-            <StatRow label="Throughput" value={`${formatRate(stats.throughput)}/s`} />
-            <StatRow label="Arrivals" value={`${formatRate(stats.arrivalRate)}/s`} />
+            <StatRow label="Throughput" value={formatRate(stats.throughput)} />
+            <StatRow label="Arrivals" value={formatRate(stats.arrivalRate)} />
             {node.kind === 'cache' && (
               <StatRow label="Observed hit rate" value={formatPct(stats.hitRate)} />
             )}
             <StatRow label="p50" value={formatMs(stats.p50)} />
             <StatRow label="p95" value={formatMs(stats.p95)} />
-            <StatRow label="p99" value={formatMs(stats.p99)} />
+            <StatRow
+              label="p99"
+              value={formatMs(stats.p99)}
+              tone={toneClass(healthOfLatency(stats.p99))}
+            />
             <StatRow
               label="Errors"
               value={formatPct(stats.errorRate)}
-              tone={errorTone(stats.errorRate)}
+              tone={toneClass(healthOfErr(stats.errorRate))}
             />
             {stats.shedRate > 0 && (
-              <StatRow label="Shed" value={`${formatRate(stats.shedRate)}/s`} tone="danger" />
+              <StatRow label="Shed" value={formatRate(stats.shedRate)} tone="is-danger" />
             )}
             {stats.timeoutRate > 0 && (
-              <StatRow
-                label="Timed out"
-                value={`${formatRate(stats.timeoutRate)}/s`}
-                tone="danger"
-              />
+              <StatRow label="Timed out" value={formatRate(stats.timeoutRate)} tone="is-danger" />
             )}
+            <StatRow label="Completed" value={formatCount(stats.totalCompleted)} />
+            <StatRow label="Failed" value={formatCount(stats.totalFailed)} />
           </div>
         ) : (
-          <p className="stats-idle">No traffic yet.</p>
+          <p className="ins-blurb">No traffic through this node yet.</p>
         )}
-      </section>
+      </Section>
 
-      <div className="section-rule" />
-
-      <button type="button" className="btn btn-danger" onClick={() => onDelete(node.id)}>
-        Delete node
-      </button>
+      <div className="ins-foot">
+        <button type="button" className="btn ins-delete" onClick={() => onDelete(node.id)}>
+          Delete node
+        </button>
+      </div>
     </aside>
   );
 }
@@ -437,11 +487,19 @@ function rpsToPosition(rps: number): number {
   return Math.round(t * SLIDER_STEPS);
 }
 
+/**
+ * Scale marks, placed at their true log position rather than spread evenly.
+ * An evenly-spaced 1/10/100/1k/5k row lies about where the thumb will land:
+ * 1k sits at 69% of the travel, not 75%.
+ */
+const SCALE_MARKS = [1, 10, 100, 1000, 5000];
+
 export interface TrafficControlProps {
   rps: number;
   onRpsChange: (rps: number) => void;
   running: boolean;
   onToggleRun: () => void;
+  onStep: () => void;
   onReset: () => void;
   system: SystemStats;
 }
@@ -451,70 +509,105 @@ export function TrafficControl({
   onRpsChange,
   running,
   onToggleRun,
+  onStep,
   onReset,
   system,
 }: TrafficControlProps) {
   const sliderId = useId();
 
+  const p99Tone = toneClass(healthOfLatency(system.p99));
+  const errTone = toneClass(healthOfErr(system.errorRate));
+
+  // Traffic offered but never completed. While this is non-zero the student
+  // is watching requests disappear, which is the entire lesson of three of
+  // the five presets, so it earns a slot the moment it exists.
+  const dropped = Math.max(0, system.offeredRps - system.goodputRps);
+  const showDropped = dropped > 0.5;
+
   return (
     <div className="traffic">
+      {/* Cause. The only thing on screen the student directly controls, and
+          therefore the only input that gets a hero-sized number. */}
       <div className="traffic-load">
-        <div className="load-head">
-          <label className="load-label" htmlFor={sliderId}>
+        <div className="traffic-load-head">
+          <label className="label" htmlFor={sliderId}>
             Offered load
           </label>
-          <div className="load-readout">
-            <span className="load-value">{formatRate(rps)}</span>
-            <span className="load-unit">req/s</span>
+          <span className="traffic-load-readout">
+            <span className="num num-hero">{formatRateBare(rps)}</span>
+            <span className="label traffic-load-unit">rps</span>
+          </span>
+        </div>
+        <div className="traffic-load-track">
+          <input
+            id={sliderId}
+            className="slider"
+            type="range"
+            min={0}
+            max={SLIDER_STEPS}
+            step={1}
+            value={rpsToPosition(rps)}
+            aria-valuetext={`${Math.round(rps)} requests per second`}
+            onChange={(e) => onRpsChange(positionToRps(Number(e.currentTarget.value)))}
+          />
+          <div className="traffic-scale" aria-hidden="true">
+            {SCALE_MARKS.map((m) => (
+              <span
+                key={m}
+                className="num traffic-scale-mark"
+                style={{ left: `${(rpsToPosition(m) / SLIDER_STEPS) * 100}%` }}
+              >
+                {m >= 1000 ? `${m / 1000}k` : m}
+              </span>
+            ))}
           </div>
         </div>
-        <input
-          id={sliderId}
-          className="slider slider-primary"
-          type="range"
-          min={0}
-          max={SLIDER_STEPS}
-          step={1}
-          value={rpsToPosition(rps)}
-          onChange={(e) => onRpsChange(positionToRps(Number(e.currentTarget.value)))}
-        />
-        <div className="load-scale">
-          <span>1</span>
-          <span>10</span>
-          <span>100</span>
-          <span>1k</span>
-          <span>5k</span>
+      </div>
+
+      <div className="traffic-spacer" />
+
+      {/* Effect. p99 is the number students should watch, so it carries the
+          only other hero, toned by the same threshold as the chart line. */}
+      <div className="traffic-headline">
+        <div className="traffic-metric">
+          <span className="label">System p99</span>
+          <span className={p99Tone ? `num num-hero ${p99Tone}` : 'num num-hero'}>
+            {formatMs(system.p99)}
+          </span>
+        </div>
+
+        <div className="traffic-metric-group">
+          <div className="traffic-metric">
+            <span className="label">Goodput</span>
+            <span className="num num-md">{formatRate(system.goodputRps)}</span>
+          </div>
+          <div className="traffic-metric">
+            <span className="label">Errors</span>
+            <span className={errTone ? `num num-md ${errTone}` : 'num num-md'}>
+              {formatPct(system.errorRate)}
+            </span>
+          </div>
+          {showDropped && (
+            <div className="traffic-metric">
+              <span className="label">Dropped</span>
+              <span className="num num-md is-danger">{formatRate(dropped)}</span>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="traffic-actions">
-        <button type="button" className="btn btn-primary" onClick={onToggleRun}>
+        <button type="button" className="btn" onClick={onToggleRun}>
           {running ? 'Pause' : 'Play'}
+        </button>
+        {/* Stepping is only meaningful against a stopped clock, and it
+            pauses on its own, so the control states what it will do. */}
+        <button type="button" className="btn" onClick={onStep}>
+          Step
         </button>
         <button type="button" className="btn" onClick={onReset}>
           Reset
         </button>
-      </div>
-
-      <div className="headline">
-        <div className="headline-primary">
-          <span className="headline-label">p99 latency</span>
-          <span className={`headline-value tone-${latencyTone(system.p99)}`}>
-            {formatMs(system.p99)}
-          </span>
-        </div>
-        <div className="headline-secondary">
-          <div className="headline-item">
-            <span className="headline-label">Goodput</span>
-            <span className="headline-sub">{formatRate(system.goodputRps)}/s</span>
-          </div>
-          <div className="headline-item">
-            <span className="headline-label">Errors</span>
-            <span className={`headline-sub tone-${errorTone(system.errorRate)}`}>
-              {formatPct(system.errorRate)}
-            </span>
-          </div>
-        </div>
       </div>
     </div>
   );

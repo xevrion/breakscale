@@ -38,3 +38,21 @@ export const FILLED_GLYPHS: ReadonlySet<NodeKind> = new Set<NodeKind>([
   'client',
   'cache',
 ]);
+
+/**
+ * The box every path above is drawn in. The node header renders the glyph at
+ * 14px, so the consumer scales by 14/16 rather than the paths being redrawn —
+ * one number to change if the art is ever re-cut.
+ */
+export const GLYPH_BOX = 16;
+
+/** Human-readable kind names. Used by the canvas, the palette and the inspector. */
+export const KIND_NAME: Record<NodeKind, string> = {
+  client: 'Client',
+  lb: 'Load balancer',
+  service: 'Service',
+  cache: 'Cache',
+  db: 'Database',
+  queue: 'Queue',
+  worker: 'Worker',
+};

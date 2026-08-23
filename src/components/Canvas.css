@@ -1,7 +1,19 @@
 /* ==========================================================================
    Canvas — topology editor
-   The canvas is the darkest surface in the app so panels read as floating
-   above it. Color is reserved for the health bars and selection.
+
+   The canvas is the instrument. It is the only region of the app permitted to
+   be loud; every panel around it recedes to a hairline. The ground is --bg,
+   the node body sits one step above it on --surface-2, and its title block one
+   step above that on --surface-3. Structure comes from that stepping and from
+   the header/body split — never from nesting, shadows or tint.
+
+   Color budget: neutral at rest. --ok/--warn/--danger appear on exactly three
+   carriers, all of them live measurements — the meter fill, the health rule
+   and dot, and a primary value that has crossed a threshold. A healthy
+   topology renders entirely in greys, which is what gives a red meter meaning.
+
+   All font sizes come from the six-step scale in index.css. This file defines
+   no size of its own.
    ========================================================================== */
 
 .cv-host {
@@ -28,24 +40,35 @@
 .cv-host.is-dropping::after {
   content: '';
   position: absolute;
-  inset: 6px;
+  inset: var(--sp-2);
   border: 1px dashed var(--accent);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   pointer-events: none;
 }
 
 /* --------------------------------------------------------------------------
-   Dot grid. Painted as a CSS background so panning/zooming it costs nothing.
+   Ruled grid.
+
+   Four repeating-linear-gradients: minor verticals, minor horizontals, then
+   the same again at 4x spacing in a lighter value. Painted as a CSS
+   background so panning and zooming it costs nothing — background-size and
+   -position are driven from JS to track the viewport exactly.
+
+   Replaces an 8px dot field, which at a 1900px canvas meant ~55,000 dots of
+   static competing with the diagram for attention.
    -------------------------------------------------------------------------- */
 
 .cv-grid {
   position: absolute;
   inset: 0;
-  /* A single 1px dot per tile, as an SVG so no gradient function is involved.
-     background-size is set from JS to GRID * 3 * zoom, so the dot spacing
-     tracks the viewport exactly. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Ccircle cx='1' cy='1' r='1' fill='%2321252c'/%3E%3C/svg%3E");
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
+  background-repeat: repeat;
   pointer-events: none;
+  transition: opacity var(--dur-slow) var(--ease);
 }
 
 .cv-svg {
@@ -72,14 +95,13 @@
   fill: none;
   stroke: var(--line);
   stroke-linecap: round;
-  transition:
-    stroke 140ms ease,
-    opacity 140ms ease;
+  stroke-linejoin: round;
+  transition: stroke var(--dur-fast) var(--ease);
 }
 
 .cv-edge-arrow {
   fill: var(--line);
-  transition: fill 140ms ease;
+  transition: fill var(--dur-fast) var(--ease);
 }
 
 .cv-edge.is-active .cv-edge-line {
@@ -87,42 +109,121 @@
 }
 
 .cv-edge.is-active .cv-edge-arrow {
-  fill: var(--line-3);
+  fill: var(--line-2);
 }
 
-.cv-edge:hover .cv-edge-line,
-.cv-edge:hover .cv-edge-flow {
-  stroke: var(--line-4);
+.cv-edge:hover .cv-edge-line {
+  stroke: var(--line-3);
 }
 
 .cv-edge:hover .cv-edge-arrow {
-  fill: var(--line-4);
+  fill: var(--line-3);
 }
 
-.cv-edge.is-selected .cv-edge-line,
-.cv-edge.is-selected .cv-edge-flow {
+/* A wire feeding a node that is losing traffic carries that state upstream to
+   its cause. This is metric state, not decoration. */
+.cv-edge.is-danger .cv-edge-line {
+  stroke: var(--danger);
+  stroke-opacity: 0.55;
+}
+
+.cv-edge.is-danger .cv-edge-arrow {
+  fill: var(--danger);
+  fill-opacity: 0.75;
+}
+
+.cv-edge.is-danger .cv-edge-flow {
+  stroke: var(--danger);
+  stroke-opacity: 0.5;
+}
+
+.cv-edge.is-selected .cv-edge-line {
   stroke: var(--accent);
+  stroke-opacity: 1;
 }
 
 .cv-edge.is-selected .cv-edge-arrow {
   fill: var(--accent);
+  fill-opacity: 1;
 }
 
-/* The moving dashes. One cycle is 12 user units (8 dash + 4 gap), so the
-   animation-duration set inline directly encodes the flow rate. */
+.cv-edge.is-selected .cv-edge-flow {
+  stroke: var(--text);
+  stroke-opacity: 0.8;
+}
+
+/* The moving pulses. One cycle is 12 user units, so the animation-duration set
+   inline directly encodes the flow rate — no per-frame React work, and the
+   whole thing runs off the main thread.
+
+   Sparse dashes (2 on, 10 off) read as discrete packets moving down a wire.
+   The old 8/4 read as marching ants, i.e. as a selection marquee. The flow
+   layer rides OVER the solid base at 75% width, so the base line is always
+   continuous and the pulse is a highlight, never a hole punched in the wire. */
 .cv-edge-flow {
   fill: none;
-  stroke: var(--line-5);
+  stroke: var(--text-dim);
+  stroke-opacity: 0.55;
   stroke-linecap: round;
-  stroke-dasharray: 8 4;
-  animation: cv-dash 1s linear infinite;
+  stroke-dasharray: 2 10;
+  animation: cv-flow 1s linear infinite;
   pointer-events: none;
 }
 
-@keyframes cv-dash {
+@keyframes cv-flow {
   to {
     stroke-dashoffset: -12;
   }
+}
+
+/* Rate at the midpoint. This is how a student sees traffic SPLIT at a load
+   balancer — previously invisible. The halo is paint-order stroke, so the
+   label stays readable where it crosses the grid or another wire. */
+.cv-edge-label {
+  fill: var(--text-faint);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-num);
+  letter-spacing: var(--tr-num);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.cv-edge.is-active:hover .cv-edge-label {
+  fill: var(--text-dim);
+}
+
+/* Delete affordance on a selected edge. */
+.cv-edge-del {
+  cursor: pointer;
+}
+
+.cv-edge-del rect {
+  fill: var(--surface-2);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.cv-edge-del path {
+  stroke: var(--text-dim);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  fill: none;
+  transition: stroke var(--dur-fast) var(--ease);
+}
+
+.cv-edge-del:hover rect {
+  stroke: var(--danger);
+}
+
+.cv-edge-del:hover path {
+  stroke: var(--danger);
 }
 
 .cv-link-preview {
@@ -135,6 +236,9 @@
 
 /* --------------------------------------------------------------------------
    Nodes
+
+   A node reads as a schematic component with a title block, not as a rounded
+   rectangle with text in it. That is what the 24px header band buys.
    -------------------------------------------------------------------------- */
 
 .cv-node {
@@ -146,17 +250,63 @@
 }
 
 .cv-node-body {
-  fill: var(--surface);
+  fill: var(--surface-2);
   stroke: var(--border);
   stroke-width: 1;
-  transition:
-    fill 140ms ease,
-    stroke 140ms ease;
+  transition: stroke var(--dur-fast) var(--ease);
+}
+
+.cv-node-head {
+  fill: var(--surface-3);
+}
+
+.cv-node-hair {
+  stroke: var(--border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+/* Health rule along the top edge. Survives at low zoom, where the meter is
+   sub-pixel, and is one of three redundant channels for the same state.
+
+   At 'ok' it stays neutral. Painting six saturated green marks across a
+   healthy topology would spend the status palette on the state that needs no
+   attention, and leave --warn and --danger nothing to contrast against. A
+   healthy canvas is grey; color means look here. */
+.cv-node-rule {
+  fill: var(--line-2);
+  fill-opacity: 0.9;
+  transition: fill var(--dur-slow) var(--ease);
+}
+
+.cv-node.is-warn .cv-node-rule {
+  fill: var(--warn);
+}
+
+.cv-node.is-danger .cv-node-rule {
+  fill: var(--danger);
+}
+
+.cv-node-dot {
+  fill: var(--line-2);
+  transition: fill var(--dur-slow) var(--ease);
+}
+
+.cv-node.is-warn .cv-node-dot {
+  fill: var(--warn);
+}
+
+.cv-node.is-danger .cv-node-dot {
+  fill: var(--danger);
+}
+
+/* Shown only while traffic is actually being lost. */
+.cv-node-loss {
+  fill: var(--danger);
 }
 
 .cv-node:hover .cv-node-body {
-  fill: var(--surface-2);
-  stroke: var(--line);
+  stroke: var(--line-2);
 }
 
 .cv-node.is-selected .cv-node-body {
@@ -173,9 +323,16 @@
   stroke-width: 1.5;
 }
 
+/* SVG cannot take outline-offset, so the focus ring is drawn as a second
+   stroke outside the body. Flat, single-color, no glow. */
+.cv-node:focus-visible .cv-node-body {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .cv-node-icon {
   color: var(--text-faint);
-  transition: color 140ms ease;
+  transition: color var(--dur-fast) var(--ease);
 }
 
 .cv-node:hover .cv-node-icon,
@@ -187,67 +344,134 @@
   vector-effect: non-scaling-stroke;
 }
 
-.cv-node-label {
+/* T3 — the node name. */
+.cv-node-name {
   fill: var(--text);
   font-family: var(--sans);
-  font-size: 12.5px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-body);
   dominant-baseline: middle;
   pointer-events: none;
 }
 
-.cv-node-kind {
-  fill: var(--text-faint);
-  font-family: var(--sans);
-  font-size: 10.5px;
-  dominant-baseline: middle;
-  pointer-events: none;
-}
-
-.cv-node-nums {
+/* T4 — the primary metric. Promotes to T5 when the node is selected. */
+.cv-node-primary {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
-  font-size: 11px;
-  letter-spacing: -0.01em;
-  dominant-baseline: middle;
+  font-size: var(--fs-num);
+  font-weight: var(--fw-num);
+  letter-spacing: var(--tr-num);
+  dominant-baseline: alphabetic;
   pointer-events: none;
 }
 
-.cv-num {
+.cv-node.is-selected .cv-node-primary {
+  font-size: var(--fs-lg);
+  letter-spacing: var(--tr-lg);
+}
+
+/* T2 — the two secondary metrics. */
+.cv-node-sec {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  letter-spacing: var(--tr-num);
+  dominant-baseline: alphabetic;
+  pointer-events: none;
+}
+
+.cv-node-primary .cv-val {
+  fill: var(--text);
+}
+
+.cv-node-sec .cv-val {
   fill: var(--text-dim);
 }
 
-.cv-unit {
+/* T1 — unit captions. Uppercase is what makes 10px read as a label. */
+.cv-cap {
   fill: var(--text-faint);
-  font-size: 9.5px;
+  font-family: var(--sans);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-num);
+  text-transform: uppercase;
+  letter-spacing: var(--tr-label);
 }
 
-/* Health bar — the only strong color at rest. */
-.cv-bar-track {
-  fill: var(--track);
-}
+/* The primary value takes the health color only at warn and danger, and only
+   because it IS the breaching metric. At ok nothing is colored — which is the
+   entire reason a colored number means something when one appears.
 
-.cv-bar-fill {
-  transition: width 200ms linear;
-}
-
-.cv-node.is-ok .cv-bar-fill {
-  fill: var(--ok);
-}
-
-.cv-node.is-warn .cv-bar-fill {
+   Note this deliberately does not tint the secondaries: reddening a p99
+   because utilization breached gives that number a state it did not earn. */
+.cv-node.is-warn .cv-node-primary .cv-val {
   fill: var(--warn);
 }
 
-.cv-node.is-danger .cv-bar-fill {
+.cv-node.is-danger .cv-node-primary .cv-val {
   fill: var(--danger);
 }
 
-/* At full load the number itself picks up the state, so the node reads as
-   hot even when the bar is clipped by the node edge. */
-.cv-node.is-danger .cv-num {
+.cv-node-div {
+  stroke: var(--border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+/* --------------------------------------------------------------------------
+   Sparkline — 60 samples at 1Hz, matching the 60s window of the charts.
+   No fill, no dots, no axis: a trend, not a chart.
+   -------------------------------------------------------------------------- */
+
+.cv-spark {
+  fill: none;
+  stroke: var(--line-4);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  transition: stroke var(--dur-fast) var(--ease);
+}
+
+.cv-node:hover .cv-spark,
+.cv-node.is-selected .cv-spark {
+  stroke: var(--text-dim);
+}
+
+.cv-spark-base {
+  stroke: var(--border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+/* --------------------------------------------------------------------------
+   Meter — position-encoded load. The primary health channel, and the one that
+   survives colorblindness because it encodes by length.
+   -------------------------------------------------------------------------- */
+
+.cv-meter-track {
+  fill: var(--track);
+}
+
+/* At 'ok' the fill is neutral: load is already encoded by length, which is the
+   channel that survives colorblindness and low zoom. Hue is held in reserve
+   for the two states worth interrupting the student for. */
+.cv-meter-fill {
+  fill: var(--line-4);
+  transition:
+    width var(--dur-slow) linear,
+    fill var(--dur-slow) var(--ease);
+}
+
+.cv-node.is-warn .cv-meter-fill {
+  fill: var(--warn);
+}
+
+.cv-node.is-danger .cv-meter-fill {
   fill: var(--danger);
 }
 
@@ -259,9 +483,21 @@
   fill: var(--bg);
   stroke: var(--line-2);
   stroke-width: 1.5;
+  opacity: 0;
   transition:
-    stroke 140ms ease,
-    fill 140ms ease;
+    opacity var(--dur-fast) var(--ease),
+    stroke var(--dur-fast) var(--ease),
+    fill var(--dur-fast) var(--ease);
+}
+
+/* Ports are an editing affordance, so they appear on approach rather than
+   sitting on every node permanently. They stay visible while a link is being
+   drawn, otherwise there would be nothing to aim at. */
+.cv-node:hover .cv-port,
+.cv-node:focus-visible .cv-port,
+.cv-node.is-selected .cv-port,
+.cv-nodes:has(.cv-port:active) .cv-port {
+  opacity: 1;
 }
 
 .cv-port-out {
@@ -281,6 +517,11 @@
   stroke: var(--accent);
 }
 
+/* While a link is in flight every port must be targetable. */
+.cv-host:has(.cv-link-preview) .cv-port {
+  opacity: 1;
+}
+
 /* --------------------------------------------------------------------------
    Overlays
    -------------------------------------------------------------------------- */
@@ -291,64 +532,79 @@
   left: 50%;
   transform: translate(-50%, -50%);
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: var(--fs-base);
   pointer-events: none;
+}
+
+/* Status ledger. Bottom-left, carrying four true numbers. */
+.cv-ledger {
+  position: absolute;
+  left: var(--sp-3);
+  bottom: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.cv-ledger-sep {
+  color: var(--line-2);
 }
 
 .cv-zoom {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  right: var(--sp-3);
+  bottom: var(--sp-3);
   display: flex;
   align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 5px;
-  overflow: hidden;
+  border-radius: var(--r-md);
 }
 
-.cv-zoom button {
-  height: 26px;
-  min-width: 26px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    background-color 140ms ease,
-    color 140ms ease;
-}
-
-.cv-zoom button:hover {
-  background: var(--surface-2);
-  color: var(--text);
+.cv-zoom .btn {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 var(--sp-1);
 }
 
 .cv-zoom-level {
-  min-width: 46px !important;
-  border-inline: 1px solid var(--border) !important;
+  min-width: 46px;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11px !important;
+  font-feature-settings: 'tnum' 1;
 }
 
 /* --------------------------------------------------------------------------
    Reduced motion
+
+   The dash animation is a live measurement, not decoration, so it degrades to
+   a static dimmed wire rather than simply stopping mid-cycle at an arbitrary
+   dash phase.
    -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
   .cv-edge-flow {
     animation: none;
+    stroke-dasharray: none;
+    stroke-opacity: 0.4;
   }
 
-  .cv-bar-fill,
+  .cv-meter-fill,
   .cv-node-body,
+  .cv-node-rule,
+  .cv-node-dot,
   .cv-node-icon,
   .cv-edge-line,
   .cv-edge-arrow,
+  .cv-spark,
+  .cv-grid,
   .cv-port {
     transition: none;
   }
