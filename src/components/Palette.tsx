@@ -13,6 +13,13 @@ const NODE_KINDS: NodeKind[] = [
   'db',
   'queue',
   'worker',
+  'replica',
+  'shard',
+  'autoscaler',
+  'region',
+  'cdn',
+  'ratelimiter',
+  'breaker',
 ];
 
 const KIND_LABEL: Record<NodeKind, string> = {
@@ -23,6 +30,13 @@ const KIND_LABEL: Record<NodeKind, string> = {
   db: 'Database',
   queue: 'Queue',
   worker: 'Worker',
+  replica: 'Read replicas',
+  shard: 'Sharded store',
+  autoscaler: 'Autoscaler',
+  region: 'Region',
+  cdn: 'CDN',
+  ratelimiter: 'Rate limiter',
+  breaker: 'Circuit breaker',
 };
 
 /**
@@ -39,6 +53,13 @@ const KIND_HINT: Record<NodeKind, string> = {
   db: 'Stores the data. Usually saturates first',
   queue: 'Holds work so the sender does not wait',
   worker: 'Drains the queue in the background',
+  replica: 'Scales reads, but they can be stale',
+  shard: 'Splits data by key. A hot key ruins it',
+  autoscaler: 'Adds capacity when load rises, after a delay',
+  region: 'Fails traffic over to another region',
+  cdn: 'Serves most requests before they reach you',
+  ratelimiter: 'Refuses excess traffic cheaply, at the door',
+  breaker: 'Stops calling a dependency that is failing',
 };
 
 /**

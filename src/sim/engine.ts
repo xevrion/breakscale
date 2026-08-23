@@ -1,6 +1,11 @@
+import { behaviourFor, type ComponentBehaviour } from './behaviour';
+import type { BehaviourCtx, NodeStateLike, ReqLike } from './engine-types';
 import { MinHeap, type Timed } from './heap';
 import { Rng } from './random';
 import type {
+  ActiveFailure,
+  FailureKind,
+  FailureOpts,
   FailureReason,
   HistoryPoint,
   NodeConfig,
@@ -40,6 +45,23 @@ const HISTORY_MAX = 240;
 const RETRY_BASE_BACKOFF_MS = 25;
 /** Guard so a runaway topology cannot allocate unbounded requests. */
 const MAX_LIVE_REQUESTS = 200000;
+/**
+ * Size of the keyspace every client draws request keys from.
+ *
+ * Deliberately small. The point of a key is that collisions happen often
+ * enough to be observable in a 30-second run: a read must frequently land on
+ * a key that was just written (so replication lag produces visible stale
+ * reads), and shard occupancy must be a meaningful distribution rather than
+ * every request landing on its own partition. Drawn from the seeded RNG, so
+ * the key stream is part of the deterministic replay.
+ */
+const KEYSPACE = 64;
+/**
+ * Shared empty vector for every kind that is not partitioned. snapshot() runs
+ * at 10Hz over every node; handing them all one frozen array avoids an
+ * allocation per node per frame for a field only shard nodes ever fill.
+ */
+const EMPTY_SHARDS: number[] = [];
 
 /* ------------------------------------------------------------------ *
  * Event types
@@ -50,6 +72,8 @@ const EV_SERVICE_DONE = 1;
 const EV_TIMEOUT = 2;
 const EV_WORKER_POLL = 3;
 const EV_RETRY = 4;
+/** A request finished traversing an edge with a latencyMs and is now offered. */
+const EV_LINK_ARRIVE = 5;
 
 interface Ev extends Timed {
   time: number;
@@ -108,6 +132,23 @@ interface Req {
   next: Req | null;
   /** Guards double resolution. */
   resolved: boolean;
+  /**
+   * Partition / cache key this request concerns. Drawn once by the client
+   * from `KEYSPACE` and inherited unchanged by every downstream call, so a
+   * shard or replica set several hops away partitions on the key the client
+   * actually asked for. Kinds that do not partition by key ignore it.
+   */
+  key: number;
+  /** True when this request is a write. Classified once, inherited downstream. */
+  isWrite: boolean;
+  /** Extra service time (ms) a behaviour asked for, consumed by serveWithin(). */
+  extraServiceMs: number;
+  /**
+   * Callback a self-managing kind (a sharded store) registers via
+   * serveWithin(), fired when this request's service time elapses so the
+   * behaviour can release its own slot. Null for the ordinary path.
+   */
+  onDrained: ((ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike) => void) | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -267,12 +308,39 @@ function quantile(sorted: Float64Array, n: number, q: number): number {
 }
 
 /* ------------------------------------------------------------------ *
+ * Injected failures
+ *
+ * Chaos is engine state, not a component: it is attached to a node id, so a
+ * node can be faulted and healed without the topology changing shape. The
+ * engine keeps one record per faulted node, plus a flat Set of cut edge ids
+ * so the send path can test a partition with a single Set lookup.
+ * ------------------------------------------------------------------ */
+
+interface Fault {
+  kind: FailureKind;
+  /** Simulated time the fault was injected. */
+  sinceMs: number;
+  /** 'slow': service-time multiplier, >= 1. */
+  factor: number;
+  /** 'errors': forced failure fraction, 0..1. */
+  rate: number;
+  /** 'partition': edge ids cut. Empty means "every edge leaving the node". */
+  edgeIds: string[];
+}
+
+/* ------------------------------------------------------------------ *
  * Per-node runtime state
  * ------------------------------------------------------------------ */
 
 interface NodeState {
   id: string;
   kind: SimNode['kind'];
+  /**
+   * This kind's behaviour, resolved once at buildNodes() time. The event loop
+   * reads policy through this reference only -- there is no per-event map
+   * lookup and no `kind === ...` test anywhere on the hot path.
+   */
+  behaviour: ComponentBehaviour;
   config: NodeConfig;
   /** Requests occupying a server slot right now. */
   busy: number;
@@ -306,23 +374,50 @@ interface NodeState {
 
   /** True once a worker poll event is scheduled, so we do not stack pollers. */
   pollScheduled: boolean;
+  /**
+   * Per-shard utilisation published by a self-partitioning behaviour, 0..1.
+   * Empty for every kind that is not partitioned; the engine only copies it
+   * into the snapshot and has no opinion about what a shard is.
+   */
+  shardUtil: number[];
+
+  /**
+   * Behaviour-private scratch state, allocated once from the behaviour's
+   * initState() hook. The engine never reads or interprets it. This is what
+   * lets a stateful kind (an autoscaler's cooldown clock, a region's failover
+   * deadline, a token bucket) exist without NodeState growing a field per
+   * kind -- the same thicket the registry refactor removed from the loop.
+   */
+  ext: unknown;
+
+  /**
+   * Behaviour-defined rate counters, created on first use. Namespaced per
+   * node, so two behaviours can never collide over a name.
+   */
+  custom: Map<string, RateCounter> | null;
 }
 
 /* ------------------------------------------------------------------ *
  * Engine
  * ------------------------------------------------------------------ */
 
-export class Engine {
+export class Engine implements BehaviourCtx {
   private topology: Topology;
   private seed: number;
   private rng: Rng;
 
-  private now = 0;
+  /** Current simulated time in ms. Part of BehaviourCtx; never written from outside. */
+  now = 0;
   private seq = 0;
   private heap = new MinHeap<Ev>();
 
   private nodes = new Map<string, NodeState>();
   private clientIds: string[] = [];
+  /**
+   * Nodes whose behaviour declares onTick. Kept as a separate list so the
+   * per-advance walk costs nothing at all while no such kind exists.
+   */
+  private tickNodes: NodeState[] = [];
   private edgeFlow = new Map<string, RateCounter>();
 
   private freeReq: Req | null = null;
@@ -342,7 +437,23 @@ export class Engine {
     timeout: 0,
     'no-route': 0,
     depth: 0,
+    throttled: 0,
+    rejected: 0,
+    crashed: 0,
+    partitioned: 0,
+    'region-down': 0,
   };
+
+  /** Injected failures, keyed by node id. At most one fault per node. */
+  private faults = new Map<string, Fault>();
+  /**
+   * Every edge id cut by an active partition, flattened out of `faults` so the
+   * send path tests a partition with one Set lookup instead of walking faults.
+   * Rebuilt whenever faults or the topology change.
+   */
+  private cutEdges = new Set<string>();
+  /** Reused snapshot array for active failures. */
+  private snapFailures: ActiveFailure[] = [];
 
   private history: HistoryPoint[] = [];
   private lastHistoryMs = 0;
@@ -367,6 +478,13 @@ export class Engine {
     const previous = this.nodes;
     this.topology = cloneTopology(t);
     this.buildNodes(previous);
+    // Faults survive a topology edit, but a whole-node partition names its
+    // edges implicitly, so the flattened set has to be recomputed against the
+    // new wiring. A fault on a node that no longer exists is dropped.
+    for (const nodeId of [...this.faults.keys()]) {
+      if (!this.nodes.has(nodeId)) this.faults.delete(nodeId);
+    }
+    this.rebuildCutEdges();
   }
 
   updateNodeConfig(id: string, patch: Partial<NodeConfig>): void {
@@ -376,8 +494,116 @@ export class Engine {
     if (!state) return;
     Object.assign(state.config, patch);
     // A capacity increase may free up slots for waiting work immediately.
-    if (state.kind !== 'client' && state.kind !== 'queue') {
-      this.pumpQueue(state);
+    this.pumpQueue(state);
+  }
+
+  /* ---------------- failure injection ---------------- *
+   *
+   * Chaos is a first-class engine operation rather than a component, so any
+   * node in any topology can be faulted without rewiring anything. Each fault
+   * intercepts at exactly one point in the request path, which is what makes
+   * it compose with retries, timeouts and a circuit breaker for free:
+   *
+   *   crash      admit() refuses immediately, and in-flight work at the node
+   *              is failed at injection time. The caller sees a failed call
+   *              like any other, so its retry budget and its breaker's error
+   *              window both observe it.
+   *   slow       serviceTimeFor() multiplies the drawn service time. Nothing
+   *              else changes, so the caller's timeout starts firing on its
+   *              own -- which is the lesson.
+   *   errors     onServiceComplete() rolls it after the node's own errorRate.
+   *   partition  sendChild() refuses to cross a cut edge, so the CALLER sees
+   *              the failure. That is what a network partition looks like
+   *              from one side, and it leaves the target node untouched.
+   * ------------------------------------------------------ */
+
+  /**
+   * Attach a fault to a node. One fault per node: injecting again replaces
+   * whatever was there, so the UI never has to reason about stacking.
+   */
+  injectFailure(nodeId: string, kind: FailureKind, opts: FailureOpts = {}): void {
+    if (!this.nodes.has(nodeId)) return;
+
+    const fault: Fault = {
+      kind,
+      sinceMs: this.now,
+      // A fault may not make a node faster, so a factor below 1 is clamped.
+      factor: opts.factor !== undefined && opts.factor > 1 ? opts.factor : 1,
+      rate: opts.rate !== undefined ? clamp01(opts.rate) : 1,
+      edgeIds: opts.edgeIds ? opts.edgeIds.slice() : [],
+    };
+    this.faults.set(nodeId, fault);
+    this.rebuildCutEdges();
+
+    // A crash is retroactive: work already inside the node dies with it.
+    // Without this the node would keep answering for one service time after
+    // being killed, and a student watching the graph would see the failure
+    // arrive late for no visible reason.
+    if (kind === 'crash') this.killInFlight(nodeId);
+  }
+
+  /** Heal a node. Work that already failed stays failed; new work succeeds. */
+  clearFailure(nodeId: string): void {
+    if (!this.faults.delete(nodeId)) return;
+    this.rebuildCutEdges();
+    const state = this.nodes.get(nodeId);
+    // A healed node may have callers' work waiting on it right now.
+    if (state) this.pumpQueue(state);
+  }
+
+  /** Every fault in force, for the UI. */
+  activeFailures(): ActiveFailure[] {
+    const out: ActiveFailure[] = [];
+    for (const [nodeId, f] of this.faults) {
+      out.push(describeFault(nodeId, f));
+    }
+    return out;
+  }
+
+  /**
+   * Fail everything the crashed node is holding: requests in service, and
+   * requests queued behind them. Iterating a copy of the waiting list matters
+   * because resolve() can re-enter the engine through the parent's retry path.
+   */
+  private killInFlight(nodeId: string): void {
+    const state = this.nodes.get(nodeId);
+    if (!state) return;
+
+    const waiting: Req[] = [];
+    for (let i = state.waitHead; i < state.waiting.length; i++) {
+      const req = state.waiting[i];
+      if (req) waiting.push(req);
+    }
+    state.waiting.length = 0;
+    state.waitHead = 0;
+
+    for (const req of waiting) {
+      if (req.resolved) continue;
+      // A buffered queue message has no caller to inform; it is simply lost,
+      // which is what an unreplicated broker losing its disk looks like.
+      state.totalFailed++;
+      this.resolve(req, false, 'crashed', 0);
+    }
+
+    // Requests already in service are deliberately NOT unwound here. Each one
+    // still holds a real slot, and its SERVICE_DONE event will release that
+    // slot and then find the node crashed in onServiceComplete, failing it as
+    // 'crashed'. Zeroing state.busy here instead would double-release those
+    // slots and let the crashed node appear to have free capacity.
+  }
+
+  private rebuildCutEdges(): void {
+    this.cutEdges.clear();
+    for (const [nodeId, fault] of this.faults) {
+      if (fault.kind !== 'partition') continue;
+      if (fault.edgeIds.length > 0) {
+        for (const id of fault.edgeIds) this.cutEdges.add(id);
+        continue;
+      }
+      // No edge ids given: cut everything leaving the node.
+      const state = this.nodes.get(nodeId);
+      if (!state) continue;
+      for (const edge of state.out) this.cutEdges.add(edge.id);
     }
   }
 
@@ -400,6 +626,7 @@ export class Engine {
 
     this.now = target;
     this.integrateAll();
+    if (this.tickNodes.length > 0) this.runTicks(dt);
     this.maybeRecordHistory();
   }
 
@@ -457,6 +684,10 @@ export class Engine {
         hitRate: 0,
         totalCompleted: 0,
         totalFailed: 0,
+        staleReadRate: 0,
+        maxShardUtilization: 0,
+        minShardUtilization: 0,
+        shardUtilization: EMPTY_SHARDS,
       };
       nodeOut[state.id] = entry;
 
@@ -474,6 +705,12 @@ export class Engine {
       entry.hitRate = hits + misses > 0 ? hits / (hits + misses) : 0;
       entry.totalCompleted = state.totalCompleted;
       entry.totalFailed = state.totalFailed;
+
+      // Kind-specific readouts. Keeping this a hook means the snapshot loop
+      // never grows a branch per kind, exactly as the event loop does not.
+      if (state.behaviour.decorateStats) {
+        state.behaviour.decorateStats(this, state, entry);
+      }
     }
 
     const edgeOut: Record<string, number> = this.snapEdges;
@@ -490,7 +727,21 @@ export class Engine {
       history: this.history,
       edgeFlow: edgeOut,
       failuresByReason: this.failures,
+      activeFailures: this.snapshotFailures(),
     };
+  }
+
+  /**
+   * Injected failures, rebuilt into the reused array. Length is the number of
+   * faulted nodes -- normally zero -- so this costs nothing on a healthy run.
+   */
+  private snapshotFailures(): ActiveFailure[] {
+    const out = this.snapFailures;
+    out.length = 0;
+    for (const [nodeId, fault] of this.faults) {
+      out.push(describeFault(nodeId, fault));
+    }
+    return out;
   }
 
   reset(): void {
@@ -513,11 +764,22 @@ export class Engine {
       timeout: 0,
       'no-route': 0,
       depth: 0,
+      throttled: 0,
+      rejected: 0,
+      crashed: 0,
+      partitioned: 0,
+      'region-down': 0,
     };
     this.history = [];
     this.lastHistoryMs = 0;
     this.snapNodes = {};
     this.snapEdges = {};
+    // Chaos is part of the run, not of the topology: reset() must reproduce
+    // the original trajectory from t=0, which it cannot do while a fault
+    // injected mid-run is still in force.
+    this.faults.clear();
+    this.cutEdges.clear();
+    this.snapFailures.length = 0;
     this.buildNodes(null);
   }
 
@@ -541,7 +803,7 @@ export class Engine {
       }
       state.lastIntegrateMs = this.now;
       next.set(node.id, state);
-      if (node.kind === 'client') this.clientIds.push(node.id);
+      if (state.behaviour.generatesLoad) this.clientIds.push(node.id);
     }
 
     for (const edge of this.topology.edges) {
@@ -549,15 +811,20 @@ export class Engine {
       const to = next.get(edge.to);
       if (!from || !to) continue;
       from.out.push(edge);
-      if (to.kind === 'worker' && from.kind === 'queue') to.sources.push(from.id);
+      // Structural wiring: a pull-based consumer drains whatever buffers feed
+      // it. Both traits come off the behaviour, so a future kind that also
+      // pulls (or also buffers) is wired up here with no edit.
+      if (to.behaviour.pullsFromQueues && from.behaviour.buffersForConsumers) {
+        to.sources.push(from.id);
+      }
     }
-    // A worker may also be wired queue -> worker in either drawn direction;
-    // treat an outgoing edge to a queue as a pull source too.
+    // A consumer may be drawn in either direction relative to its buffer;
+    // treat an outgoing edge to a buffer as a pull source too.
     for (const state of next.values()) {
-      if (state.kind !== 'worker') continue;
+      if (!state.behaviour.pullsFromQueues) continue;
       for (const edge of state.out) {
         const target = next.get(edge.to);
-        if (target && target.kind === 'queue' && !state.sources.includes(target.id)) {
+        if (target && target.behaviour.buffersForConsumers && !state.sources.includes(target.id)) {
           state.sources.push(target.id);
         }
       }
@@ -583,13 +850,17 @@ export class Engine {
     for (const id of this.clientIds) {
       this.scheduleArrival(id);
     }
+    this.tickNodes = [];
     for (const state of this.nodes.values()) {
-      if (state.kind === 'worker') {
-        state.pollScheduled = false;
-        this.pumpWorker(state);
-      } else if (state.kind !== 'client' && state.kind !== 'queue') {
-        this.pumpQueue(state);
+      state.pollScheduled = false;
+      // Allocate behaviour-private state before anything can run. A node kept
+      // across a hot swap keeps the state it already had, so an autoscaler
+      // does not forget its cooldown because an unrelated node was moved.
+      if (state.ext === null && state.behaviour.initState) {
+        state.ext = state.behaviour.initState(state);
       }
+      this.pumpQueue(state);
+      if (state.behaviour.onTick) this.tickNodes.push(state);
     }
   }
 
@@ -626,6 +897,14 @@ export class Engine {
       case EV_RETRY:
         if (ev.req && ev.req.token === ev.token) this.onRetry(state, ev.req);
         break;
+      case EV_LINK_ARRIVE:
+        // The request finished crossing an edge with a latencyMs and is only
+        // now offered to the target. A caller that already gave up during the
+        // crossing leaves a resolved request, which is dropped here.
+        if (ev.req && ev.req.token === ev.token && !ev.req.resolved) {
+          this.admit(state, ev.req);
+        }
+        break;
       default:
         break;
     }
@@ -635,7 +914,7 @@ export class Engine {
 
   private scheduleArrival(nodeId: string): void {
     const state = this.nodes.get(nodeId);
-    if (!state || state.kind !== 'client') return;
+    if (!state || !state.behaviour.generatesLoad) return;
     const rps = state.config.rps;
     if (!(rps > 0)) {
       // Poll again shortly so raising the slider resumes traffic.
@@ -661,6 +940,9 @@ export class Engine {
     root.pending = 0;
     root.maxChildMs = 0;
     root.ownMs = 0;
+    // Draw this request's key. Every downstream call inherits it, so the
+    // whole chain agrees on which partition/record is being touched.
+    root.key = Math.floor(this.rng.next() * KEYSPACE);
 
     this.totalRequests++;
     this.sysOffered.add(this.now, 1);
@@ -688,10 +970,32 @@ export class Engine {
       return;
     }
 
-    if (state.kind === 'lb') {
-      const edge = this.pickEdge(out);
+    const b = state.behaviour;
+    const mode = b.route ? b.route(this, state, req) : 'all';
+
+    if (mode === 'none') {
+      this.completeNode(state, req, req.ownMs);
+      return;
+    }
+
+    if (mode === 'one') {
+      const edge = b.pickEdge
+        ? b.pickEdge(this, state, req, out)
+        : this.pickWeightedOrLeastLoaded(out);
       if (!edge) {
-        this.resolve(req, false, 'no-route', req.ownMs);
+        // A kind whose pickEdge can decline for a reason of its own names it
+        // here (a region node that has no healthy region reports
+        // 'region-down', not a generic routing error). Read as a plain field,
+        // so this stays a trait lookup rather than a kind test.
+        const reason = state.behaviour.noRouteReason ?? 'no-route';
+        if (reason !== 'no-route') {
+          // A deliberate refusal by this node, so it owns the failure. A plain
+          // 'no-route' stays uncredited: that is a wiring mistake by the
+          // student, not something the node did.
+          state.errors.add(this.now, 1);
+          state.totalFailed++;
+        }
+        this.resolve(req, false, reason, req.ownMs);
         return;
       }
       req.pending = 1;
@@ -708,24 +1012,46 @@ export class Engine {
     }
   }
 
-  /** Weighted-random when weights differ, least-loaded when they are equal. */
-  private pickEdge(out: SimEdge[]): SimEdge | null {
-    if (out.length === 1) return out[0];
+  /**
+   * The shared edge-selection policy: weighted-random when the weights differ,
+   * least-loaded when they are all equal. Exposed on BehaviourCtx so a
+   * behaviour can reuse it instead of reimplementing the tie-break.
+   */
+  pickWeightedOrLeastLoaded(out: readonly SimEdge[]): SimEdge | null {
+    // A partitioned edge is not a candidate. This matters more than it looks:
+    // the least-loaded rule below measures load at the TARGET, and a cut edge
+    // delivers nothing, so its target is permanently the idlest thing in the
+    // set. A dispatcher would therefore lock onto the one broken link and send
+    // it every single request -- one cut edge would take down a load balancer
+    // with three healthy peers. Excluding cut edges up front is what makes a
+    // partition behave like a lost link rather than a black hole with gravity.
+    //
+    // `cutEdges` is empty on every healthy run, so this costs one Set size
+    // check and nothing else.
+    const cut = this.cutEdges;
+    const anyCut = cut.size > 0;
+
+    if (out.length === 1) return anyCut && cut.has(out[0].id) ? null : out[0];
 
     let total = 0;
     let uniform = true;
-    const first = out[0].weight;
+    let firstLive = -1;
     for (let i = 0; i < out.length; i++) {
+      if (anyCut && cut.has(out[i].id)) continue;
       const w = out[i].weight > 0 ? out[i].weight : 0;
       total += w;
-      if (Math.abs(out[i].weight - first) > 1e-9) uniform = false;
+      if (firstLive < 0) firstLive = i;
+      else if (Math.abs(out[i].weight - out[firstLive].weight) > 1e-9) uniform = false;
     }
+    // Every edge is cut: there is no route, and the caller reports it as such.
+    if (firstLive < 0) return null;
 
     if (uniform) {
       // Least-loaded: fewest queued+busy relative to capacity, ties by index.
       let best: SimEdge | null = null;
       let bestLoad = Infinity;
       for (let i = 0; i < out.length; i++) {
+        if (anyCut && cut.has(out[i].id)) continue;
         const target = this.nodes.get(out[i].to);
         if (!target) continue;
         const depth = target.busy + (target.waiting.length - target.waitHead);
@@ -736,23 +1062,43 @@ export class Engine {
           best = out[i];
         }
       }
-      return best ?? out[0];
+      return best ?? out[firstLive];
     }
 
-    if (total <= 0) return out[0];
+    if (total <= 0) return out[firstLive];
     let r = this.rng.next() * total;
+    let last = out[firstLive];
     for (let i = 0; i < out.length; i++) {
+      if (anyCut && cut.has(out[i].id)) continue;
       const w = out[i].weight > 0 ? out[i].weight : 0;
+      last = out[i];
       r -= w;
       if (r <= 0) return out[i];
     }
-    return out[out.length - 1];
+    return last;
   }
 
   private sendChild(parentState: NodeState, parent: Req, edge: SimEdge, attempt: number): void {
     const target = this.nodes.get(edge.to);
     if (!target) {
       this.childResolved(parent, false, 'no-route', 0);
+      return;
+    }
+
+    // A partitioned link fails at the CALLER: the packet never arrives, so the
+    // target node is untouched and sees no arrival at all. Reported through
+    // childResolvedFrom rather than childResolved so the caller's retry budget
+    // applies -- retrying across a cut link is exactly the behaviour that makes
+    // a partition look like a slow outage rather than a clean failure.
+    if (this.cutEdges.size > 0 && this.cutEdges.has(edge.id)) {
+      parentState.errors.add(this.now, 1);
+      parentState.totalFailed++;
+      const stub = this.acquireReq();
+      stub.attempt = attempt;
+      stub.retryTarget = edge.id;
+      stub.resolved = true;
+      this.childResolvedFrom(stub, parent, false, 'partitioned', 0);
+      this.recycle(stub);
       return;
     }
 
@@ -766,13 +1112,28 @@ export class Engine {
     child.viaEdge = edge.id;
     child.retryTarget = edge.id;
     child.detached = parent.detached;
+    child.key = parent.key;
+    child.isWrite = parent.isWrite;
 
     const counter = this.edgeFlow.get(edge.id);
     if (counter) counter.add(this.now, 1);
 
     // The caller's timeout bounds THIS attempt, not the whole retry budget:
     // each re-issued call gets a fresh deadline, exactly like a real client.
+    // It is armed at send time, so link latency counts against the deadline
+    // exactly as propagation delay does for a real caller.
     this.armTimeout(parentState, child);
+
+    // Link propagation delay. Absent (the case for every topology today) this
+    // is a plain synchronous admission and the event stream is unchanged.
+    // bandwidthRps and lossRate are declared on SimEdge but not yet applied;
+    // the networking phase adds them alongside this delay.
+    const linkMs = edge.latencyMs;
+    if (linkMs !== undefined && linkMs > 0) {
+      this.push(this.now + linkMs, EV_LINK_ARRIVE, target.id, child, child.token);
+      return;
+    }
+
     this.admit(target, child);
   }
 
@@ -782,52 +1143,80 @@ export class Engine {
   private admit(state: NodeState, req: Req): void {
     state.arrivals.add(this.now, 1);
 
-    if (state.kind === 'queue') {
-      this.admitToQueueNode(state, req);
+    // A crashed node accepts nothing. Checked before the behaviour runs, so a
+    // crash takes a node out whatever kind it is, and the caller sees an
+    // immediate failure it can retry (or that its breaker can count).
+    const fault = this.faults.get(state.id);
+    if (fault && fault.kind === 'crash') {
+      state.errors.add(this.now, 1);
+      state.totalFailed++;
+      this.resolve(req, false, 'crashed', 0);
       return;
     }
 
-    if (state.kind === 'lb' || state.kind === 'client') {
+    const b = state.behaviour;
+    const action = b.onAdmit ? b.onAdmit(this, state, req) : 'serve';
+
+    if (action === 'handled') return;
+
+    if (action === 'shed') {
+      this.shed(state, req);
+      return;
+    }
+
+    if (action === 'passthru') {
       // Effectively zero-capacity dispatchers: no queueing, immediate hand-off.
       req.ownMs = 0;
       this.beginZeroService(state, req);
       return;
     }
 
-    const capacity = Math.max(1, Math.floor(state.config.capacity));
+    const capacity = this.effectiveCapacity(state);
     if (state.busy < capacity) {
       this.startService(state, req);
       return;
     }
 
-    const depth = state.waiting.length - state.waitHead;
-    const limit = Math.max(0, Math.floor(state.config.queueLimit));
-    if (depth >= limit) {
-      state.sheds.add(this.now, 1);
-      state.totalFailed++;
-      this.resolve(req, false, 'shed', 0);
+    if (this.queueDepth(state) >= this.effectiveQueueLimit(state)) {
+      this.shed(state, req);
       return;
     }
     state.waiting.push(req);
   }
 
   /**
-   * A queue node acknowledges immediately: the caller's chain resolves as a
-   * success right here, and the message is buffered for the workers.
+   * Draw one service time for a node, with any injected 'slow' fault applied.
+   *
+   * Every service-time draw in the engine goes through here, so a slow fault
+   * cannot be bypassed by whichever path a kind happens to take. The RNG is
+   * consumed identically whether or not a fault is present -- the multiplier
+   * scales the drawn value rather than changing the distribution's parameters
+   * -- which keeps a faulted run's random stream aligned with a healthy one.
    */
-  private admitToQueueNode(state: NodeState, req: Req): void {
-    const limit = Math.max(0, Math.floor(state.config.queueLimit));
-    const depth = state.waiting.length - state.waitHead;
-    if (depth >= limit) {
-      state.sheds.add(this.now, 1);
-      state.totalFailed++;
-      this.resolve(req, false, 'shed', 0);
-      return;
-    }
+  private serviceTimeFor(state: NodeState): number {
+    if (!(state.config.serviceMs > 0)) return 0;
+    const ms = this.rng.serviceTime(state.config.serviceMs, state.config.serviceCv);
+    const fault = this.faults.get(state.id);
+    if (fault && fault.kind === 'slow') return ms * fault.factor;
+    return ms;
+  }
 
-    const ackMs = state.config.serviceMs > 0
-      ? this.rng.serviceTime(state.config.serviceMs, state.config.serviceCv)
-      : 0;
+  /** Book a shed against a node and fail the call. */
+  private shed(state: NodeState, req: Req): void {
+    state.sheds.add(this.now, 1);
+    state.totalFailed++;
+    this.resolve(req, false, 'shed', 0);
+  }
+
+  /**
+   * A buffering node acknowledges immediately: the caller's chain resolves as
+   * a success right here, and the message is parked for the consumers. Called
+   * by the queue behaviour, which has already checked the depth limit.
+   */
+  ackAndBuffer(stateLike: NodeStateLike, reqLike: ReqLike): void {
+    const state = stateLike as NodeState;
+    const req = reqLike as Req;
+    const ackMs = this.serviceTimeFor(state);
 
     // Detach a buffered copy for the workers, then ack the caller.
     const msg = this.acquireReq();
@@ -850,7 +1239,7 @@ export class Engine {
 
   private wakeWorkersFor(queueId: string): void {
     for (const state of this.nodes.values()) {
-      if (state.kind !== 'worker') continue;
+      if (!state.behaviour.pullsFromQueues) continue;
       if (!state.sources.includes(queueId)) continue;
       this.pumpWorker(state);
     }
@@ -858,9 +1247,7 @@ export class Engine {
 
   /** lb / client style pass-through with a tiny (possibly zero) service time. */
   private beginZeroService(state: NodeState, req: Req): void {
-    const ms = state.config.serviceMs > 0
-      ? this.rng.serviceTime(state.config.serviceMs, state.config.serviceCv)
-      : 0;
+    const ms = this.serviceTimeFor(state);
     req.ownMs = ms;
     if (ms > 0) {
       state.busy++;
@@ -875,7 +1262,7 @@ export class Engine {
     state.busy++;
     req.holdingSlot = true;
     req.enterMs = this.now;
-    const ms = this.rng.serviceTime(state.config.serviceMs, state.config.serviceCv);
+    const ms = this.serviceTimeFor(state);
     req.ownMs = ms;
     if (ms > 0) {
       this.push(this.now + ms, EV_SERVICE_DONE, state.id, req, req.token);
@@ -889,6 +1276,15 @@ export class Engine {
     // the caller already gave up — abandoned work burned the slot until now.
     this.releaseSlot(state, req);
     this.pumpQueue(state);
+    // A self-managing kind (a sharded store) holds its slot bookkeeping in
+    // `ext` rather than in state.busy, so it is told to free that slot here,
+    // at exactly the moment the engine frees an ordinary one. Cleared first so
+    // a recycled request can never re-fire a stale callback.
+    const drained = req.onDrained;
+    if (drained !== null) {
+      req.onDrained = null;
+      drained(this, state, req);
+    }
     this.onServiceComplete(state, req);
   }
 
@@ -900,12 +1296,13 @@ export class Engine {
 
   /** Start serving whoever is next in line, if a slot is free. */
   private pumpQueue(state: NodeState): void {
-    if (state.kind === 'queue' || state.kind === 'client') return;
-    if (state.kind === 'worker') {
+    const mode = state.behaviour.pump;
+    if (mode === 'none') return;
+    if (mode === 'sources') {
       this.pumpWorker(state);
       return;
     }
-    const capacity = Math.max(1, Math.floor(state.config.capacity));
+    const capacity = this.effectiveCapacity(state);
     while (state.busy < capacity && state.waitHead < state.waiting.length) {
       const req = state.waiting[state.waitHead];
       state.waiting[state.waitHead] = undefined as unknown as Req;
@@ -918,7 +1315,7 @@ export class Engine {
 
   /** Workers pull messages out of the queue nodes that feed them. */
   private pumpWorker(state: NodeState): void {
-    const capacity = Math.max(1, Math.floor(state.config.capacity));
+    const capacity = this.effectiveCapacity(state);
     while (state.busy < capacity) {
       const msg = this.takeFromSources(state);
       if (!msg) break;
@@ -963,6 +1360,18 @@ export class Engine {
   private onServiceComplete(state: NodeState, req: Req): void {
     if (req.resolved) return;
 
+    const fault = this.faults.get(state.id);
+
+    // The node died while this request was in service. Its work is lost; the
+    // slot it held has already been released by the normal path above, so the
+    // accounting stays in one place.
+    if (fault && fault.kind === 'crash') {
+      state.errors.add(this.now, 1);
+      state.totalFailed++;
+      this.resolve(req, false, 'crashed', req.ownMs);
+      return;
+    }
+
     // Independent per-attempt failure.
     if (state.config.errorRate > 0 && this.rng.next() < state.config.errorRate) {
       state.errors.add(this.now, 1);
@@ -971,20 +1380,19 @@ export class Engine {
       return;
     }
 
-    if (state.kind === 'cache') {
-      const hit = this.rng.next() < clamp01(state.config.hitRate);
-      if (hit) {
-        state.hits.add(this.now, 1);
-        this.completeNode(state, req, req.ownMs);
-        return;
-      }
-      state.misses.add(this.now, 1);
-      if (state.out.length === 0) {
-        // No backing store wired up: a miss is still answered, just slowly.
-        this.completeNode(state, req, req.ownMs);
-        return;
-      }
-      this.dispatchDownstream(state, req);
+    // Injected error rate, rolled after (and independently of) the node's own.
+    // Two separate rolls rather than a combined probability, so clearing the
+    // fault leaves the configured errorRate behaving exactly as before.
+    if (fault && fault.kind === 'errors' && this.rng.next() < fault.rate) {
+      state.errors.add(this.now, 1);
+      state.totalFailed++;
+      this.resolve(req, false, 'error', req.ownMs);
+      return;
+    }
+
+    const hook = state.behaviour.onServiceComplete;
+    if (hook && hook(this, state, req) === 'complete') {
+      this.completeNode(state, req, req.ownMs);
       return;
     }
 
@@ -1112,6 +1520,17 @@ export class Engine {
   ): void {
     if (parent.resolved) return; // Parent already gave up: discard the result.
 
+    // Report the outcome to the caller's behaviour, for kinds that watch their
+    // dependency's health. Deliberately BEFORE the retry decision, so a
+    // breaker sees every individual attempt rather than only the last one --
+    // a dependency failing three times and succeeding on the fourth retry is
+    // three failures' worth of evidence, not zero. Purely observational: it
+    // cannot change what happens next.
+    const caller = this.nodes.get(parent.nodeId);
+    if (caller && caller.behaviour.observesOutcome) {
+      caller.behaviour.onDownstreamResult!(this, caller, child, ok, reason);
+    }
+
     if (!ok) {
       const parentState = this.nodes.get(parent.nodeId);
       const retries = parentState ? Math.max(0, Math.floor(parentState.config.retries)) : 0;
@@ -1159,19 +1578,176 @@ export class Engine {
 
     if (parent.childFailed) {
       // Same as above: resolve() books the client's failure itself.
-      if (parentState && parentState.kind !== 'client') parentState.totalFailed++;
+      if (parentState && parentState.behaviour.creditsJoinCompletion) parentState.totalFailed++;
       this.resolve(parent, false, parent.childReason, total);
       return;
     }
 
     // A client is credited once, in resolve(), where end-to-end latency is
     // measured. Counting it here as well would double every root request.
-    if (parentState && parentState.kind !== 'client') {
+    if (parentState && parentState.behaviour.creditsJoinCompletion) {
       parentState.completions.add(this.now, 1);
       parentState.totalCompleted++;
       parentState.latency.add(this.now, total);
     }
     this.resolve(parent, true, 'error', total);
+  }
+
+  /* ---------------- BehaviourCtx surface ---------------- *
+   *
+   * The small, deliberate set of engine operations a behaviour may drive.
+   * Everything a behaviour needs goes through here; nothing exposes the heap,
+   * the request pool, or a writable clock, so a behaviour cannot desynchronise
+   * the simulation.
+   * ------------------------------------------------------ */
+
+  /** One draw from the deterministic RNG. */
+  roll(): number {
+    return this.rng.next();
+  }
+
+  /** Queued (not yet in service) request count. */
+  queueDepth(state: NodeStateLike): number {
+    const s = state as NodeState;
+    return s.waiting.length - s.waitHead;
+  }
+
+  effectiveQueueLimit(state: NodeStateLike): number {
+    return Math.max(0, Math.floor(state.config.queueLimit));
+  }
+
+  effectiveCapacity(state: NodeStateLike): number {
+    return Math.max(1, Math.floor(state.config.capacity));
+  }
+
+  countHit(state: NodeStateLike): void {
+    (state as NodeState).hits.add(this.now, 1);
+  }
+
+  countMiss(state: NodeStateLike): void {
+    (state as NodeState).misses.add(this.now, 1);
+  }
+
+  fail(req: ReqLike, reason: FailureReason, latencyMs: number): void {
+    this.resolve(req as Req, false, reason, latencyMs);
+  }
+
+  /**
+   * Refuse a request at a node with an arbitrary reason. This is the general
+   * form of the engine's own shed path; the two differ only in which counter
+   * is credited. Booked against `errors` rather than `sheds` because a
+   * throttle or an open circuit is a deliberate refusal, not queue overflow.
+   */
+  reject(stateLike: NodeStateLike, req: ReqLike, reason: FailureReason): void {
+    const state = stateLike as NodeState;
+    state.errors.add(this.now, 1);
+    state.totalFailed++;
+    this.resolve(req as Req, false, reason, 0);
+  }
+
+  countCustom(stateLike: NodeStateLike, name: string, n: number): void {
+    const state = stateLike as NodeState;
+    let map = state.custom;
+    if (!map) {
+      map = new Map<string, RateCounter>();
+      state.custom = map;
+    }
+    let counter = map.get(name);
+    if (!counter) {
+      counter = new RateCounter();
+      map.set(name, counter);
+    }
+    counter.add(this.now, n);
+  }
+
+  counterRate(stateLike: NodeStateLike, name: string): number {
+    const counter = (stateLike as NodeState).custom?.get(name);
+    return counter ? counter.rate(this.now) : 0;
+  }
+
+  /* ---- controller surface ---- */
+
+  utilizationOf(nodeId: string): number | null {
+    const state = this.nodes.get(nodeId);
+    return state ? state.utilization : null;
+  }
+
+  capacityOf(nodeId: string): number | null {
+    const state = this.nodes.get(nodeId);
+    return state ? this.effectiveCapacity(state) : null;
+  }
+
+  /**
+   * Write a node's capacity. Both the runtime state and the stored topology
+   * are updated, so the Inspector shows what the controller actually did
+   * rather than the value the student last typed. Newly freed slots are
+   * pumped immediately, exactly as a manual capacity change is.
+   */
+  setCapacity(nodeId: string, capacity: number): void {
+    const next = Math.max(1, Math.floor(capacity));
+    const state = this.nodes.get(nodeId);
+    if (!state) return;
+    if (state.config.capacity === next) return;
+    state.config.capacity = next;
+    const node = this.topology.nodes.find((n) => n.id === nodeId);
+    if (node) node.config.capacity = next;
+    this.pumpQueue(state);
+  }
+
+  isCrashed(nodeId: string): boolean {
+    return this.faults.get(nodeId)?.kind === 'crash';
+  }
+
+  /**
+   * Service a request on behalf of a behaviour that runs its own slot
+   * discipline. Deliberately does NOT touch state.busy: for a sharded store
+   * the meaningful occupancy is per-shard, and double-counting it in the
+   * node-level counter would make `utilization` wrong. Everything after the
+   * service time -- error roll, onServiceComplete, routing, completion -- is
+   * the same path every other kind takes.
+   */
+  serveWithin(
+    stateLike: NodeStateLike,
+    reqLike: ReqLike,
+    onDrained: (ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike) => void,
+  ): void {
+    const state = stateLike as NodeState;
+    const req = reqLike as Req;
+    req.enterMs = this.now;
+    req.onDrained = onDrained;
+    const ms =
+      this.rng.serviceTime(state.config.serviceMs, state.config.serviceCv) + req.extraServiceMs;
+    req.extraServiceMs = 0;
+    req.ownMs = ms;
+    if (ms > 0) {
+      this.push(this.now + ms, EV_SERVICE_DONE, state.id, req, req.token);
+    } else {
+      this.onServiceDone(state, req);
+    }
+  }
+
+  addServiceDelay(reqLike: ReqLike, extraMs: number): void {
+    if (!(extraMs > 0)) return;
+    (reqLike as Req).extraServiceMs += extraMs;
+  }
+
+  markWrite(reqLike: ReqLike, isWrite: boolean): void {
+    (reqLike as Req).isWrite = isWrite;
+  }
+
+  /**
+   * Store a per-shard utilisation vector for the snapshot. Copied rather than
+   * retained, so a behaviour reusing its own scratch array cannot mutate what
+   * the UI is about to read.
+   */
+  reportShardUtilization(stateLike: NodeStateLike, perShard: readonly number[]): void {
+    const dst = (stateLike as NodeState).shardUtil;
+    dst.length = perShard.length;
+    for (let i = 0; i < perShard.length; i++) dst[i] = perShard[i];
+  }
+
+  isEdgeCut(edgeId: string): boolean {
+    return this.cutEdges.has(edgeId);
   }
 
   /* ---------------- utilization integration ---------------- */
@@ -1181,12 +1757,28 @@ export class Engine {
       const dt = this.now - state.lastIntegrateMs;
       state.lastIntegrateMs = this.now;
       if (dt <= 0) continue;
-      const capacity = Math.max(1, Math.floor(state.config.capacity));
-      const instant = state.kind === 'queue' ? 0 : Math.min(state.busy / capacity, 1);
+      const capacity = this.effectiveCapacity(state);
+      // A buffer's slot count is meaningless, so it reports zero utilisation.
+      const instant = state.behaviour.servesRequests
+        ? Math.min(state.busy / capacity, 1)
+        : 0;
       // Exponential smoothing over roughly a 1s window.
       const alpha = 1 - Math.exp(-dt / 500);
       state.utilization += (instant - state.utilization) * alpha;
       state.busyMsAccum += state.busy * dt;
+    }
+  }
+
+  /**
+   * Autonomous per-advance work for kinds that act without a request arriving.
+   * No current kind declares onTick, so tickNodes is empty and this is never
+   * reached; it exists so an autoscaler or circuit breaker can be added as a
+   * pure registry entry.
+   */
+  private runTicks(dtMs: number): void {
+    for (let i = 0; i < this.tickNodes.length; i++) {
+      const state = this.tickNodes[i];
+      state.behaviour.onTick!(this, state, dtMs);
     }
   }
 
@@ -1262,6 +1854,10 @@ export class Engine {
       pooled.retryAttempt = 0;
       pooled.ownMs = 0;
       pooled.resolved = false;
+      pooled.key = 0;
+      pooled.isWrite = false;
+      pooled.extraServiceMs = 0;
+      pooled.onDrained = null;
       return pooled;
     }
     return {
@@ -1285,6 +1881,10 @@ export class Engine {
       ownMs: 0,
       next: null,
       resolved: false,
+      key: 0,
+      isWrite: false,
+      extraServiceMs: 0,
+      onDrained: null,
     };
   }
 
@@ -1306,6 +1906,7 @@ function createNodeState(node: SimNode): NodeState {
   return {
     id: node.id,
     kind: node.kind,
+    behaviour: behaviourFor(node.kind),
     config: { ...node.config },
     busy: 0,
     waiting: [],
@@ -1326,7 +1927,27 @@ function createNodeState(node: SimNode): NodeState {
     totalCompleted: 0,
     totalFailed: 0,
     pollScheduled: false,
+    shardUtil: [],
+    ext: null,
+    custom: null,
   };
+}
+
+/**
+ * Project an internal Fault into the public ActiveFailure shape, carrying only
+ * the knobs that actually apply to its kind so the UI does not render a
+ * meaningless "factor 1" against a crash.
+ */
+function describeFault(nodeId: string, f: Fault): ActiveFailure {
+  const out: ActiveFailure = { nodeId, kind: f.kind, sinceMs: f.sinceMs };
+  if (f.kind === 'slow') out.factor = f.factor;
+  else if (f.kind === 'errors') out.rate = f.rate;
+  else if (f.kind === 'partition') out.edgeIds = f.edgeIds.slice();
+  return out;
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
 function cloneTopology(t: Topology): Topology {
@@ -1334,8 +1955,4 @@ function cloneTopology(t: Topology): Topology {
     nodes: t.nodes.map((n) => ({ ...n, config: { ...n.config } })),
     edges: t.edges.map((e) => ({ ...e })),
   };
-}
-
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
 }

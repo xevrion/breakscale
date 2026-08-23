@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import type { ReactNode } from 'react';
 import type { NodeConfig, NodeKind, NodeStats, SimNode, SystemStats } from '../sim/types';
+import { defaultConfig } from '../sim/presets';
 import {
   NA,
   formatCount,
@@ -33,7 +34,28 @@ type Field =
   | 'hitRate'
   | 'errorRate'
   | 'timeoutMs'
-  | 'retries';
+  | 'retries'
+  | 'replicaCount'
+  | 'replicationLagMs'
+  | 'readFraction'
+  | 'shardCount'
+  | 'shardCapacity'
+  | 'hotKeyFraction'
+  | 'targetUtil'
+  | 'minCapacity'
+  | 'maxCapacity'
+  | 'cooldownMs'
+  | 'scaleStepPct'
+  | 'warmupMs'
+  | 'regions'
+  | 'activeRegion'
+  | 'failoverMs'
+  | 'rateLimitRps'
+  | 'burst'
+  | 'errorThreshold'
+  | 'windowMs'
+  | 'openMs'
+  | 'halfOpenProbes';
 
 const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   // The client generates load and decides how long to wait for an answer.
@@ -52,6 +74,27 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   queue: ['queueLimit', 'serviceMs'],
   // Workers drain a queue. No inbound queue limit of their own.
   worker: ['capacity', 'serviceMs', 'serviceCv', 'errorRate'],
+  // The three knobs that trade read scale against staleness, plus the
+  // per-replica service cost.
+  replica: ['replicaCount', 'replicationLagMs', 'readFraction', 'capacity', 'serviceMs', 'serviceCv', 'queueLimit'],
+  // Partition count and per-shard slots set the ceiling; hotKeyFraction
+  // is the knob that destroys it.
+  shard: ['shardCount', 'shardCapacity', 'hotKeyFraction', 'serviceMs', 'serviceCv', 'queueLimit'],
+  // A controller has no request-path knobs at all: every field it exposes is
+  // about the control loop it runs on the node it watches.
+  autoscaler: ['targetUtil', 'minCapacity', 'maxCapacity', 'cooldownMs', 'scaleStepPct', 'warmupMs'],
+  // Which region serves, how many there are, and what an outage costs.
+  region: ['regions', 'activeRegion', 'failoverMs'],
+  // A CDN is a cache whose whole story is the hit rate: how much load never
+  // reaches you. Capacity and service time are shown because a saturated
+  // edge is still a real failure mode.
+  cdn: ['hitRate', 'capacity', 'serviceMs', 'queueLimit'],
+  // A limiter has exactly two knobs, and the pair is the lesson: sustained
+  // rate, and how much burst you forgive on top of it.
+  ratelimiter: ['rateLimitRps', 'burst'],
+  // The four knobs of a breaker are the four questions it answers: how bad,
+  // measured over how long, shut for how long, and reopened on what evidence.
+  breaker: ['errorThreshold', 'windowMs', 'openMs', 'halfOpenProbes'],
 };
 
 /** Kinds whose throughput ceiling is capacity x (1000 / serviceMs). */
@@ -71,6 +114,13 @@ const KIND_LABEL: Record<NodeKind, string> = {
   db: 'Database',
   queue: 'Queue',
   worker: 'Worker',
+  replica: 'Read Replicas',
+  shard: 'Sharded Store',
+  autoscaler: 'Autoscaler',
+  region: 'Region',
+  cdn: 'CDN',
+  ratelimiter: 'Rate Limiter',
+  breaker: 'Circuit Breaker',
 };
 
 /**
@@ -88,6 +138,20 @@ const KIND_BLURB: Record<NodeKind, string> = {
   db: 'Slots and service time. It does not retry for you, so its queue is where pressure shows.',
   queue: 'A buffer. Depth is the whole story: it absorbs bursts up to the limit, then sheds.',
   worker: 'Drains a queue at its own pace. Too few workers and the backlog never recovers.',
+  replica:
+    'Reads scale with the replica count, but a read can arrive before the last write has propagated. Watch the stale rate as you raise the lag.',
+  shard:
+    'Splits data across partitions by key, so capacity adds up -- until one key gets hot and a single shard has to carry it alone.',
+  autoscaler:
+    'Watches one node and adds capacity when it runs hot. New capacity takes warmup ms to arrive, so load always leads it.',
+  region:
+    'Sends traffic to one region at a time. If that region dies, failover costs you a full outage window before the next one takes over.',
+  cdn:
+    'An edge cache in front of everything. At a 0.9 hit rate your origin sees a tenth of the traffic -- the cheapest capacity you will ever add.',
+  ratelimiter:
+    'A token bucket. Refuses excess traffic instantly instead of queueing it, which is what stops a busy system turning into a dead one.',
+  breaker:
+    'Watches its downstream and stops calling it once it is failing. Cutting the traffic to zero is what gives a struggling dependency room to recover.',
 };
 
 /* ------------------------------------------------------------------ *
@@ -186,6 +250,174 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     unit: 'attempts',
     min: 0,
     max: 10,
+    step: 1,
+  },
+  replicaCount: {
+    control: 'number',
+    label: 'Replicas',
+    unit: 'nodes',
+    min: 1,
+    max: 64,
+    step: 1,
+  },
+  replicationLagMs: {
+    control: 'slider',
+    label: 'Replication lag',
+    min: 0,
+    max: 2000,
+    step: 5,
+    display: (v) => (v === 0 ? 'synchronous' : formatMs(v)),
+  },
+  readFraction: {
+    control: 'slider',
+    label: 'Read fraction',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    display: (v) => formatPct(v),
+  },
+  shardCount: {
+    control: 'number',
+    label: 'Shards',
+    unit: 'partitions',
+    min: 1,
+    max: 64,
+    step: 1,
+  },
+  shardCapacity: {
+    control: 'number',
+    label: 'Slots per shard',
+    unit: 'slots',
+    min: 1,
+    max: 512,
+    step: 1,
+  },
+  hotKeyFraction: {
+    control: 'slider',
+    label: 'Hot key share',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    display: (v) => (v === 0 ? 'even' : formatPct(v)),
+  },
+  targetUtil: {
+    control: 'slider',
+    label: 'Target utilisation',
+    min: 0.1,
+    max: 0.95,
+    step: 0.05,
+    display: (v) => formatPct(v),
+  },
+  minCapacity: {
+    control: 'number',
+    label: 'Min capacity',
+    unit: 'slots',
+    min: 1,
+    max: 512,
+    step: 1,
+  },
+  maxCapacity: {
+    control: 'number',
+    label: 'Max capacity',
+    unit: 'slots',
+    min: 1,
+    max: 512,
+    step: 1,
+  },
+  cooldownMs: {
+    control: 'slider',
+    label: 'Cooldown',
+    min: 0,
+    max: 30000,
+    step: 250,
+    display: (v) => formatMs(v),
+  },
+  scaleStepPct: {
+    control: 'slider',
+    label: 'Scale step',
+    min: 0.05,
+    max: 1,
+    step: 0.05,
+    display: (v) => formatPct(v),
+  },
+  warmupMs: {
+    control: 'slider',
+    label: 'Warmup delay',
+    min: 0,
+    max: 60000,
+    step: 500,
+    display: (v) => (v === 0 ? 'instant' : formatMs(v)),
+  },
+  regions: {
+    control: 'number',
+    label: 'Regions',
+    unit: 'regions',
+    min: 1,
+    max: 8,
+    step: 1,
+  },
+  activeRegion: {
+    control: 'number',
+    label: 'Active region',
+    unit: 'index',
+    min: 0,
+    max: 7,
+    step: 1,
+  },
+  failoverMs: {
+    control: 'slider',
+    label: 'Failover time',
+    min: 0,
+    max: 60000,
+    step: 500,
+    display: (v) => (v === 0 ? 'instant' : formatMs(v)),
+  },
+  rateLimitRps: {
+    control: 'slider',
+    label: 'Rate limit',
+    min: 0,
+    max: 2000,
+    step: 5,
+    display: (v) => (v === 0 ? 'unlimited' : `${Math.round(v)}/s`),
+  },
+  burst: {
+    control: 'number',
+    label: 'Burst',
+    unit: 'tokens',
+    min: 1,
+    max: 5000,
+    step: 1,
+  },
+  errorThreshold: {
+    control: 'slider',
+    label: 'Error threshold',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    display: (v) => `${Math.round(v * 100)}%`,
+  },
+  windowMs: {
+    control: 'slider',
+    label: 'Error window',
+    min: 200,
+    max: 30000,
+    step: 100,
+    display: (v) => formatMs(v),
+  },
+  openMs: {
+    control: 'slider',
+    label: 'Open for',
+    min: 100,
+    max: 60000,
+    step: 100,
+    display: (v) => formatMs(v),
+  },
+  halfOpenProbes: {
+    control: 'number',
+    label: 'Half-open probes',
+    unit: 'requests',
+    min: 1,
+    max: 50,
     step: 1,
   },
 };
@@ -360,7 +592,12 @@ export function Inspector({ node, stats, onChange, onDelete, onRename }: Inspect
         <div className="ins-fields">
           {fields.map((field) => {
             const spec = FIELD_SPECS[field];
-            const value = cfg[field];
+            // Fields that only some kinds read are optional on NodeConfig, so
+            // a node saved by an older build can be missing one. Fall back to
+            // this kind's default rather than to the spec's minimum, which
+            // would silently show the student a value that is not the one the
+            // engine is actually running with.
+            const value = cfg[field] ?? defaultConfig(node.kind)[field] ?? 0;
             return spec.control === 'slider' ? (
               <SliderRow
                 key={field}
@@ -502,6 +739,8 @@ export interface TrafficControlProps {
   onStep: () => void;
   onReset: () => void;
   system: SystemStats;
+  /** Requests actually lost per second, from the engine's per-reason counters. */
+  lost: number;
 }
 
 export function TrafficControl({
@@ -512,16 +751,19 @@ export function TrafficControl({
   onStep,
   onReset,
   system,
+  lost,
 }: TrafficControlProps) {
   const sliderId = useId();
 
   const p99Tone = toneClass(healthOfLatency(system.p99));
   const errTone = toneClass(healthOfErr(system.errorRate));
 
-  // Traffic offered but never completed. While this is non-zero the student
-  // is watching requests disappear, which is the entire lesson of three of
-  // the five presets, so it earns a slot the moment it exists.
-  const dropped = Math.max(0, system.offeredRps - system.goodputRps);
+  // Traffic that actually FAILED, while it is failing. Deliberately not
+  // `offered - goodput`: that gap is mostly in-flight work and is largest
+  // during warm-up, so using it made a healthy system flash a red
+  // "Dropped 10/s" next to an error rate of exactly zero. `errorRate` is
+  // the engine's own fraction of requests that errored or were shed.
+  const dropped = Number.isFinite(lost) ? Math.max(0, lost) : 0;
   const showDropped = dropped > 0.5;
 
   return (

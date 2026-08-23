@@ -7,8 +7,31 @@ export interface Preset {
   topology: Topology;
 }
 
+/**
+ * Defaults for config fields that only some kinds read.
+ *
+ * Every `case` below returns a literal for the knobs that kind actually
+ * exposes; these fill in the rest. Keeping them in one spread means adding a
+ * field to NodeConfig does not force an edit to all the existing cases.
+ */
+const EXTRA_DEFAULTS = {
+  // replica: a 3-node read replica set, 50ms behind, mostly-read traffic.
+  replicaCount: 3,
+  replicationLagMs: 50,
+  readFraction: 0.9,
+  // shard: 4 partitions, keys spread evenly (no hot key) until you make one.
+  shardCount: 4,
+  shardCapacity: 4,
+  hotKeyFraction: 0,
+} satisfies Partial<NodeConfig>;
+
 /** Sensible starting knobs for a freshly dropped node of each kind. */
 export function defaultConfig(kind: NodeKind): NodeConfig {
+  return { ...EXTRA_DEFAULTS, ...baseConfig(kind) };
+}
+
+/** Per-kind knobs. Fields a kind does not care about come from EXTRA_DEFAULTS. */
+function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULTS> {
   switch (kind) {
     case 'client':
       return {
@@ -94,6 +117,121 @@ export function defaultConfig(kind: NodeKind): NodeConfig {
         retries: 0,
         rps: 0,
       };
+    case 'replica':
+      // Reads fan across the replicas, so per-replica capacity is modest.
+      return {
+        capacity: 4,
+        serviceMs: 20,
+        serviceCv: 0.6,
+        queueLimit: 64,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+      };
+    case 'shard':
+      // Per-shard slots live in shardCapacity; `capacity` is unused here.
+      return {
+        capacity: 4,
+        serviceMs: 25,
+        serviceCv: 0.6,
+        queueLimit: 32,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+      };
+    case 'cdn':
+      // An edge PoP: very fast, very high hit rate, lots of concurrency.
+      // At hitRate 0.92 the origin behind it sees 8% of the offered load.
+      return {
+        capacity: 256,
+        serviceMs: 2,
+        serviceCv: 0.3,
+        queueLimit: 2048,
+        hitRate: 0.92,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+      };
+    case 'ratelimiter':
+      // A doorman: refusing costs nothing, so no service time and no slots.
+      // 100 rps sustained with one second of burst headroom.
+      return {
+        capacity: 1,
+        serviceMs: 0,
+        serviceCv: 0,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        rateLimitRps: 100,
+        burst: 100,
+      };
+    case 'breaker':
+      // Trips once half the downstream calls in a 5s window fail, stays open
+      // 3s, then lets 3 probes decide whether to close.
+      return {
+        capacity: 1,
+        serviceMs: 0,
+        serviceCv: 0,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        errorThreshold: 0.5,
+        windowMs: 5000,
+        openMs: 3000,
+        halfOpenProbes: 3,
+      };
+    case 'autoscaler':
+      // Holds its target at 70% utilisation, steps by half the current
+      // capacity, and waits 3s between decisions. The 10s warmup is the knob
+      // worth playing with: it is deliberately long enough that the lag
+      // between load arriving and capacity answering is visible on the graph
+      // rather than being something you have to take on faith.
+      return {
+        capacity: 1,
+        serviceMs: 0,
+        serviceCv: 0,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        targetUtil: 0.7,
+        minCapacity: 1,
+        maxCapacity: 32,
+        cooldownMs: 3000,
+        scaleStepPct: 0.5,
+        warmupMs: 10000,
+      };
+    case 'region':
+      // Two regions, serving from the first. The 5s failover is long enough
+      // to see as a real outage on the error graph and short enough that a
+      // student does not think the simulation has hung.
+      return {
+        capacity: 1,
+        serviceMs: 0,
+        serviceCv: 0,
+        queueLimit: 0,
+        hitRate: 0,
+        errorRate: 0,
+        timeoutMs: 0,
+        retries: 0,
+        rps: 0,
+        regions: 2,
+        activeRegion: 0,
+        failoverMs: 5000,
+      };
     default:
       return {
         capacity: 1,
@@ -117,6 +255,13 @@ const DEFAULT_LABEL: Record<NodeKind, string> = {
   db: 'Database',
   queue: 'Queue',
   worker: 'Worker',
+  replica: 'Read Replicas',
+  shard: 'Sharded Store',
+  cdn: 'CDN',
+  ratelimiter: 'Rate Limiter',
+  breaker: 'Circuit Breaker',
+  autoscaler: 'Autoscaler',
+  region: 'Region',
 };
 
 let nodeCounter = 0;

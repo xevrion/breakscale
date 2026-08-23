@@ -263,10 +263,15 @@ const Spark = memo(function Spark({ data, unit }: SparkProps) {
   const points = useMemo(() => {
     if (!data || data.length < 2) return '';
     let max = 0;
+    let filled = 0;
     for (let i = 0; i < data.length; i++) {
       const v = data[i];
-      if (Number.isFinite(v) && v > max) max = v;
+      if (!Number.isFinite(v)) continue;
+      filled += 1;
+      if (v > max) max = v;
     }
+    // A single sample is a dot, not a trend; draw nothing until there are two.
+    if (filled < 2) return '';
     /**
      * Fractional series read against a fixed 0..1 domain, so a node at 20%
      * looks like a node at 20% rather than being auto-scaled to fill the box.
@@ -280,9 +285,14 @@ const Spark = memo(function Spark({ data, unit }: SparkProps) {
     const top = unit && max >= 0.1 ? 1 : niceCeil(max * 1.15);
     const n = data.length;
     const out: string[] = [];
-    for (let i = 0; i < n; i++) {
-      const v = Number.isFinite(data[i]) ? data[i] : 0;
-      const x = (i / (n - 1)) * SPARK_W;
+    // Only sampled slots are plotted. The newest sample stays pinned to the
+    // right edge and the trace grows leftwards as history accumulates, so a
+    // 5-second-old node shows a short honest trace instead of a full-width
+    // line that is mostly fabricated zeros.
+    for (let i = n - filled; i < n; i++) {
+      const v = data[i];
+      if (!Number.isFinite(v)) continue;
+      const x = filled > 1 ? ((i - (n - filled)) / (filled - 1)) * SPARK_W : SPARK_W;
       const y = SPARK_H - clamp(v / top, 0, 1) * SPARK_H;
       out.push(`${x.toFixed(1)},${y.toFixed(1)}`);
     }
@@ -633,7 +643,10 @@ const NodeView = memo(function NodeView({
       {/* Traffic is actively being lost here. The only added decoration, and
           it appears only when the statement is true. */}
       {full && readout?.losing && (
-        <rect className="cv-node-loss" x={164} y={6} width={4} height={4} />
+        // x=156, not 164: the health dot occupies 168..176 (cx 172, r 4), so
+        // a square at 164 shared an edge with it and the two read as a single
+        // smudge at 100% zoom. 156 leaves a clear 8px gap between them.
+        <rect className="cv-node-loss" x={156} y={6} width={4} height={4} />
       )}
 
       {full && readout && (

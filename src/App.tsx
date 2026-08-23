@@ -87,6 +87,10 @@ const NODE_KINDS: readonly NodeKind[] = [
   'db',
   'queue',
   'worker',
+  'replica',
+  'shard',
+  'autoscaler',
+  'region',
 ];
 
 /**
@@ -267,7 +271,11 @@ export default function App() {
     for (const n of topology.nodes) {
       const s = snapshot.nodes[n.id];
       const old = rewound ? undefined : prev.get(n.id);
-      const buf = new Float32Array(SPARK_LEN);
+      // NaN, not 0, marks "not yet sampled". A zero-filled buffer made a
+      // young trace draw a long false flat line along the baseline and then
+      // jump vertically to the first real sample, which read as a broken
+      // axis rather than as data. Spark skips non-finite slots entirely.
+      const buf = new Float32Array(SPARK_LEN).fill(Number.NaN);
       if (old) buf.set(old.subarray(1));
       buf[SPARK_LEN - 1] = s ? sparkValue(n.kind, s, n.config.queueLimit) : 0;
       next.set(n.id, buf);
@@ -547,6 +555,24 @@ export default function App() {
   const selectedStats =
     selectedNode && snapshot ? (snapshot.nodes[selectedNode.id] ?? null) : null;
 
+  /**
+   * Requests actually lost per second, summed from the engine's own
+   * per-reason counters. This is the single source of truth for "dropped":
+   * the top bar and the throughput chart previously derived it two different
+   * ways (`errorRate * offeredRps` and `offered - goodput`) and disagreed with
+   * each other and with the failures panel. Neither derivation is loss —
+   * `offered - goodput` counts in-flight work, and the errorRate product
+   * rides a smoothed fraction against an instantaneous rate.
+   */
+  const lostRps = useMemo(() => {
+    if (!snapshot) return 0;
+    let s = 0;
+    for (const v of Object.values(snapshot.failuresByReason)) {
+      if (Number.isFinite(v)) s += v;
+    }
+    return s;
+  }, [snapshot]);
+
   return (
     <div className="app">
       <header className="app-bar">
@@ -559,6 +585,7 @@ export default function App() {
           onStep={handleStep}
           onReset={handleReset}
           system={snapshot?.system ?? EMPTY_SYSTEM}
+          lost={lostRps}
         />
       </header>
 

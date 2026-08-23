@@ -417,3 +417,32 @@
   fill: var(--line-4);
   background: var(--line-4);
 }
+
+/* Injection-only reasons. These share the neutral ramp and the two category
+   hues rather than introducing new colors: the palette budget is spent, and
+   these bands are only ever on screen while a fault is deliberately injected. */
+
+.mx-fill-throttled {
+  fill: var(--cat-violet);
+  background: var(--cat-violet);
+}
+
+.mx-fill-rejected {
+  fill: var(--line-5);
+  background: var(--line-5);
+}
+
+.mx-fill-crashed {
+  fill: var(--danger);
+  background: var(--danger);
+}
+
+.mx-fill-partitioned {
+  fill: var(--cat-blue);
+  background: var(--cat-blue);
+}
+
+.mx-fill-region-down {
+  fill: var(--line-3);
+  background: var(--line-3);
+}

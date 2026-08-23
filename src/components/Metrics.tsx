@@ -427,12 +427,21 @@ interface ThroughputChartProps {
   history: HistoryPoint[];
   offered: number;
   goodput: number;
+  /**
+   * True loss, summed from the engine's `failuresByReason`. This is NOT
+   * `offered - goodput`: that difference is also produced by requests still
+   * in flight, which is the normal steady state of any pipeline and is not
+   * a failure. Deriving loss from the gap made a healthy system report
+   * "Dropped 10/s" during warm-up while every failure counter read zero.
+   */
+  lost: number;
 }
 
 const ThroughputChart = memo(function ThroughputChart({
   history,
   offered,
   goodput,
+  lost,
 }: ThroughputChartProps) {
   const { ref, w } = useMeasuredWidth<HTMLDivElement>();
   const { at } = useXScale(history);
@@ -456,15 +465,11 @@ const ThroughputChart = memo(function ThroughputChart({
     // A single sample has no area, so the fill is skipped entirely.
     let gap = '';
     if (history.length > 1) {
-      // Only draw where traffic is actually being lost, so a healthy
-      // system shows a clean trace with no red haze over it.
-      const anyGap = history.some(
-        (p) =>
-          Number.isFinite(p.offered) &&
-          Number.isFinite(p.goodput) &&
-          p.offered - p.goodput > 0.5,
-      );
-      if (anyGap) {
+      // Only draw when traffic is actually being LOST. `offered - goodput`
+      // is not loss: it is also the in-flight backlog, which is non-zero in
+      // every healthy pipeline and spikes during warm-up. Gating on the
+      // engine's real failure total keeps a working system free of red haze.
+      if (lost > 0.5) {
         const fwd = history.map(
           (p) => `${at(p.t).toFixed(2)},${yOf(p.offered, top).toFixed(2)}`,
         );
@@ -475,13 +480,13 @@ const ThroughputChart = memo(function ThroughputChart({
       }
     }
     return { offeredPts: o, goodputPts: g, gapPts: gap };
-  }, [history, at, top]);
+  }, [history, at, top, lost]);
 
   // Sanitize before arithmetic: a non-finite rate from the engine would
   // otherwise reach the DOM as "NaN%".
   const safeOffered = Number.isFinite(offered) ? Math.max(0, offered) : 0;
   const safeGoodput = Number.isFinite(goodput) ? Math.max(0, goodput) : 0;
-  const dropped = Math.max(0, safeOffered - safeGoodput);
+  const dropped = Number.isFinite(lost) ? Math.max(0, lost) : 0;
   const live = dropped > 0.5;
   const empty = history.length === 0;
 
@@ -538,7 +543,25 @@ const ThroughputChart = memo(function ThroughputChart({
  * Failure breakdown — a 60s stacked area chart by reason
  * ------------------------------------------------------------------ */
 
-const REASON_ORDER: FailureReason[] = ['error', 'shed', 'timeout', 'no-route', 'depth'];
+const REASON_ORDER: FailureReason[] = [
+  'error',
+  'shed',
+  'timeout',
+  'no-route',
+  'depth',
+  'throttled',
+  'rejected',
+  'crashed',
+  'partitioned',
+  'region-down',
+];
+
+/**
+ * The first N entries of REASON_ORDER are the reasons ordinary traffic can
+ * produce. They always hold a legend row. Everything after them is only
+ * reachable through injected faults and appears on demand.
+ */
+const CORE_REASONS = 5;
 
 const REASON_LABEL: Record<FailureReason, string> = {
   error: 'error',
@@ -546,6 +569,11 @@ const REASON_LABEL: Record<FailureReason, string> = {
   timeout: 'timeout',
   'no-route': 'no route',
   depth: 'depth',
+  throttled: 'throttled',
+  rejected: 'rejected',
+  crashed: 'crashed',
+  partitioned: 'partitioned',
+  'region-down': 'region down',
 };
 
 /**
@@ -570,7 +598,7 @@ const FailureChart = memo(function FailureChart({
 }: FailureChartProps) {
   const { ref, w } = useMeasuredWidth<HTMLDivElement>();
 
-  const rows = useMemo(
+  const all = useMemo(
     () =>
       REASON_ORDER.map((reason) => {
         const raw = failures[reason];
@@ -579,7 +607,18 @@ const FailureChart = memo(function FailureChart({
     [failures],
   );
 
-  const total = rows.reduce((s, r) => s + r.rate, 0);
+  // Total counts EVERY reason, including ones not given a legend row.
+  const total = all.reduce((s, r) => s + r.rate, 0);
+
+  /* The engine defines ten failure reasons, but five of them only ever fire
+     under injected faults. Listing all ten would put a permanent column of
+     dead rows under the plot. The five core reasons always hold a row so the
+     legend does not reflow under a moving slider; the injected ones appear
+     only once they actually carry traffic. */
+  const rows = useMemo(
+    () => all.filter((r, i) => i < CORE_REASONS || r.rate > 0),
+    [all],
+  );
 
   // Axis top tracks the largest stacked total in the window.
   const max = useMemo(() => {
@@ -696,16 +735,36 @@ export interface MetricsProps {
   snapshot: SimSnapshot;
 }
 
-const EMPTY_BY: Record<FailureReason, number> = {
-  error: 0,
-  shed: 0,
-  timeout: 0,
-  'no-route': 0,
-  depth: 0,
-};
+/* Derived from REASON_ORDER rather than written out, so adding a failure
+   reason to the engine cannot leave this map silently missing a key. */
+const EMPTY_BY: Record<FailureReason, number> = Object.fromEntries(
+  REASON_ORDER.map((r) => [r, 0]),
+) as Record<FailureReason, number>;
 
 export function Metrics({ snapshot }: MetricsProps) {
   const { system, history, failuresByReason } = snapshot;
+
+  /* Real loss, per second. The throughput chart must not infer drops from
+     `offered - goodput`: that difference is dominated by in-flight requests
+     and is large during warm-up, which made a perfectly healthy system
+     announce "Dropped 10/s" while every failure counter read zero. */
+  let totalLost = 0;
+  for (const v of Object.values(failuresByReason)) {
+    if (Number.isFinite(v)) totalLost += v;
+  }
+
+  /* The engine returns THE SAME `failuresByReason` object on every snapshot
+     and mutates it in place, exactly as it does with `history`. React.memo
+     on FailureChart therefore saw an unchanged prop reference and skipped
+     every re-render, freezing the panel at its initial zeros while the
+     engine was reporting thousands of shed requests per second. Copying
+     here gives both memo() and the child's useMemo a dependency that
+     actually changes. `src/sim` is off-limits, so this is the right place. */
+  const failuresNow = useMemo(
+    () => ({ ...EMPTY_BY, ...failuresByReason }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [failuresByReason, totalLost, system.timeMs],
+  );
 
   /* The engine returns THE SAME history array instance on every snapshot
      and mutates it in place (push + splice). Memoizing on `[history]`
@@ -754,14 +813,11 @@ export function Metrics({ snapshot }: MetricsProps) {
     if (bucket === lastBucket.current) return;
     lastBucket.current = bucket;
 
-    const next = failRef.current.concat({
-      t: timeMs,
-      by: { ...EMPTY_BY, ...failuresByReason },
-    });
+    const next = failRef.current.concat({ t: timeMs, by: failuresNow });
     // 60 samples at 1Hz = the same 60s window the other charts show.
     failRef.current = next.length > 60 ? next.slice(next.length - 60) : next;
     setFailSamples(failRef.current);
-  }, [timeMs, failuresByReason]);
+  }, [timeMs, failuresNow]);
 
   return (
     <div className="mx">
@@ -775,8 +831,9 @@ export function Metrics({ snapshot }: MetricsProps) {
         history={windowed}
         offered={system.offeredRps}
         goodput={system.goodputRps}
+        lost={totalLost}
       />
-      <FailureChart samples={failSamples} failures={failuresByReason} />
+      <FailureChart samples={failSamples} failures={failuresNow} />
     </div>
   );
 }
