@@ -1396,8 +1396,10 @@ const eventDriven: Topology = {
     node('gw', 'apigateway', 'API Gateway', 250, 140, {
       capacity: 64,
       serviceMs: 2,
-      rateLimitRps: 300,
-      burst: 300,
+      // 60 rps of interactive traffic fits comfortably; at 4x the door is
+      // exactly what refuses the excess, which is its job and its lesson.
+      rateLimitRps: 150,
+      burst: 150,
       authFailRate: 0.01,
     }),
     node('api', 'service', 'API Service', 470, 140, {
@@ -1417,26 +1419,26 @@ const eventDriven: Topology = {
       serviceCv: 0.6,
       queueLimit: 32,
     }),
-    node('billing', 'service', 'Billing', 930, 110, {
+    node('billing', 'service', 'Billing', 930, 130, {
       capacity: 4,
       serviceMs: 12,
       serviceCv: 0.5,
       queueLimit: 32,
     }),
     node('topic', 'pubsub', 'Fan-out Topic', 700, 230, { serviceMs: 0.5 }),
-    node('push', 'service', 'Push Notifs', 930, 200, {
+    node('push', 'service', 'Push Notifs', 930, 240, {
       capacity: 4,
       serviceMs: 8,
       serviceCv: 0.5,
       queueLimit: 32,
     }),
-    node('audit', 'service', 'Audit Log', 930, 290, {
+    node('audit', 'service', 'Audit Log', 930, 350, {
       capacity: 2,
       serviceMs: 40,
       serviceCv: 0.6,
       queueLimit: 24,
     }),
-    node('metrics', 'service', 'Metrics', 930, 380, {
+    node('metrics', 'service', 'Metrics', 930, 460, {
       capacity: 4,
       serviceMs: 5,
       serviceCv: 0.4,
@@ -1512,11 +1514,13 @@ const eventDriven: Topology = {
  *                 Invisible at 1x, and at 4x it drops the best-effort tier
  *                 first while the important traffic keeps its tokens.
  *       api       16 slots / 6ms -> 2600 rps, never the bottleneck.
- *       bulkhead  6 concurrent calls around recommendations. At 240 rps a
- *                 15ms dependency needs ~3.6 in flight, so the pool is
- *                 half-empty; slow the dependency 5x (inject 'slow') and
- *                 the pool fills within one round trip, after which the
- *                 excess fails in microseconds instead of queueing.
+ *       bulkhead  12 concurrent calls around recommendations. At 240 rps
+ *                 a 15ms dependency holds ~3.6 in flight on average, and
+ *                 the pool is sized at 3x that mean because concurrency is
+ *                 Poisson: a pool at the mean would clip ordinary bursts.
+ *                 Slow the dependency (inject 'slow') and the pool fills
+ *                 within one round trip, after which the excess fails in
+ *                 microseconds instead of queueing.
  *       recs      6 slots / 15ms -> 400 rps ceiling behind the bulkhead.
  *       writebehind  acks every write in ~1ms and holds it dirty for
  *                 200ms before the flush lands on the db: a standing
@@ -1550,7 +1554,7 @@ const resilientDelivery: Topology = {
       queueLimit: 128,
     }),
     node('bulkhead', 'bulkhead', 'Recs Bulkhead', COL(3), ROW(0), {
-      bulkheadMax: 6,
+      bulkheadMax: 12,
     }),
     node('recs', 'service', 'Recommendations', COL(4), ROW(0), {
       capacity: 6,

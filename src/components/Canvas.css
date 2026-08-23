@@ -1022,8 +1022,12 @@
   stroke-linejoin: round;
 }
 
+/* INK, not stroke. The `stroke` role is tuned for a 1.5px outline (~3:1,
+   the AA bar for a graphical object); as text on paper it measures 3.58:1
+   and fails the 4.5:1 body-text bar. `ink` is the per-kind role meant for
+   type and measures 7.48:1 on the same ground. */
 .cv-edge-label.is-control {
-  fill: var(--kind-autoscaler-stroke);
+  fill: var(--kind-autoscaler-ink);
   font-family: var(--sans);
   font-weight: var(--fw-med);
   letter-spacing: var(--tr-label);

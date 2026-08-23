@@ -394,6 +394,36 @@ function readoutFor(
     }
 
     // service, db, worker
+    case 'autoscaler': {
+      /* A controller serves no requests, so utilisation, p99 and queue depth
+         are all permanently zero for it. Showing them made the autoscaler look
+         broken and identical to every other box. What it is actually doing is
+         watching someone else's utilisation against a setpoint, so report
+         that instead: the number it is reacting to, the fleet size it wants,
+         and what it is doing about it right now. */
+      const watched = clamp(s.watchedUtil ?? 0, 0, 1);
+      const setpoint = s.setpoint ?? 0.7;
+      const want = s.targetInstances ?? 0;
+      const have = s.watchedInstances ?? 0;
+
+      // Distance from setpoint drives the meter, so the node reads calm when
+      // the controller has converged and hot when it is chasing a spike.
+      const drift = setpoint > 0 ? clamp(watched / setpoint, 0, 1) : 0;
+
+      return {
+        primary: { value: formatPct(watched), label: 'watching' },
+        a: { value: `${have}/${want}`, label: 'fleet' },
+        b: {
+          value: s.scalePhase ?? 'idle',
+          label: want > have ? 'scaling up' : want < have ? 'scaling down' : 'steady',
+        },
+        load: drift,
+        health: healthOfLoad(drift),
+        spark: watched,
+        losing: false,
+      };
+    }
+
     default:
       return {
         primary: { value: formatPct(util), label: 'util' },
