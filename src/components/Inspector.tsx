@@ -1520,12 +1520,22 @@ function RegionPanel({ stats }: { stats: NodeStats }) {
 function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
   switch (kind) {
     case 'cache':
-      return <StatRow label="Hit rate, measured" term="hit-rate" value={formatPct(stats.hitRate)} />;
+      return (
+        <StatRow
+          label="Hit rate, measured"
+          term="hit-rate"
+          value={formatPct(stats.hitRate)}
+        />
+      );
 
     case 'cdn':
       return (
         <>
-          <StatRow label="Hit rate, measured" term="hit-rate" value={formatPct(stats.hitRate)} />
+          <StatRow
+            label="Hit rate, measured"
+            term="hit-rate"
+            value={formatPct(stats.hitRate)}
+          />
           <StatRow
             label="Fetched from origin"
             value={formatRate(stats.originFetchRate)}
@@ -1581,7 +1591,11 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
             value={formatRate(stats.rejectedRate)}
             tone={(stats.rejectedRate ?? 0) > 0 ? 'is-danger' : undefined}
           />
-          <StatRow label="Times tripped" term="breaker" value={formatCount(stats.breakerTrips)} />
+          <StatRow
+            label="Times tripped"
+            term="breaker"
+            value={formatCount(stats.breakerTrips)}
+          />
         </>
       );
     }
@@ -1621,7 +1635,11 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
             value={formatRate(stats.rejectedRate)}
             tone={(stats.rejectedRate ?? 0) > 0 ? 'is-danger' : undefined}
           />
-          <StatRow label="Times ejected" term="outlier-ejection" value={formatCount(stats.breakerTrips)} />
+          <StatRow
+            label="Times ejected"
+            term="outlier-ejection"
+            value={formatCount(stats.breakerTrips)}
+          />
         </>
       );
     }
@@ -1661,7 +1679,11 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
     case 'streambroker':
       return (
         <>
-          <StatRow label="Worst group lag" term="consumer-lag" value={formatCount(stats.consumerLag)} />
+          <StatRow
+            label="Worst group lag"
+            term="consumer-lag"
+            value={formatCount(stats.consumerLag)}
+          />
           <StatRow label="Delivering" value={formatRate(stats.deliveryRate)} />
           <StatRow
             label="Lost to retention"
@@ -1675,7 +1697,11 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
     case 'pubsub':
       return (
         <>
-          <StatRow label="Subscribers" term="fanout" value={formatCount(stats.fanout)} />
+          <StatRow
+            label="Subscribers"
+            term="fanout"
+            value={formatCount(stats.fanout)}
+          />
           <StatRow label="Delivering" value={formatRate(stats.deliveryRate)} />
         </>
       );
@@ -2055,7 +2081,11 @@ function AutoscalerPanel({ stats }: { stats: NodeStats }) {
         />
         <StatRow label="Instances running" term="instances" value={formatCount(have)} />
         {want !== have && (
-          <StatRow label="Instances wanted" term="autoscaler" value={formatCount(want)} />
+          <StatRow
+            label="Instances wanted"
+            term="autoscaler"
+            value={formatCount(want)}
+          />
         )}
         {booting > 0 && (
           <StatRow label="Booting now" value={formatCount(booting)} tone="is-warn" />
@@ -2125,7 +2155,11 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
             value={formatPct(primary)}
             tone={toneClass(healthOfLoad(primary))}
           />
-          <StatRow label="Read replicas" term="read-replica" value={formatCount(reads.length)} />
+          <StatRow
+            label="Read replicas"
+            term="read-replica"
+            value={formatCount(reads.length)}
+          />
           <StatRow
             label="Read replicas, average"
             value={formatPct(readAvg)}
@@ -2134,7 +2168,7 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
           {stats.staleReadRate > 0 && (
             <StatRow
               label="Reads served stale"
-            term="stale-read"
+              term="stale-read"
               value={formatPct(stats.staleReadRate)}
               tone={toneClass(healthOfErr(stats.staleReadRate))}
             />
@@ -2195,7 +2229,9 @@ function QueuePanel({ stats }: { stats: NodeStats }) {
     <Section title="The backlog">
       <div className="ins-util">
         <div className="ins-util-head">
-          <span className="label">How full it is</span>
+          <span className="label">
+            <Term id="backlog">How full it is</Term>
+          </span>
           <span className="num num-md">
             {formatCount(depth)} / {formatCount(limit)}
           </span>
@@ -2345,7 +2381,11 @@ function SingleInspector({
         {showCeiling && (
           <Section title="What that works out to">
             <div className="ins-stats">
-              <StatRow label="Most it can finish" term="capacity" value={formatRate(maxThroughput)} />
+              <StatRow
+                label="Most it can finish"
+                term="capacity"
+                value={formatRate(maxThroughput)}
+              />
               <p className="ins-expr">
                 {fleet > 1
                   ? `${formatCount(fleet)} instances x ${formatCount(cfg.capacity)} slots ÷ ${serviceMsLabel}ms each`
@@ -2387,8 +2427,16 @@ function SingleInspector({
                     />
                   </>
                 )}
-                <StatRow label="Finishing" term="throughput" value={formatRate(stats.throughput)} />
-                <StatRow label="Arriving" term="offered" value={formatRate(stats.arrivalRate)} />
+                <StatRow
+                  label="Finishing"
+                  term="throughput"
+                  value={formatRate(stats.throughput)}
+                />
+                <StatRow
+                  label="Arriving"
+                  term="offered"
+                  value={formatRate(stats.arrivalRate)}
+                />
                 <KindStatRows kind={node.kind} stats={stats} />
                 <StatRow label="p50" term="p50" value={formatMs(stats.p50)} />
                 <StatRow label="p95" term="p95" value={formatMs(stats.p95)} />

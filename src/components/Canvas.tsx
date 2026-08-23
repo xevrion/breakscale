@@ -3634,8 +3634,8 @@ export default function Canvas({
         <div className="cv-empty">
           <p className="cv-empty-lead">Start with an empty canvas</p>
           <p className="cv-empty-body">
-            Drag a component in from the left, or open Examples to load a system
-            that already works and take it apart.
+            Drag a component in from the left, or open Examples to load a system that
+            already works and take it apart.
           </p>
         </div>
       )}
