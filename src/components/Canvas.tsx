@@ -344,13 +344,20 @@ function readoutFor(
   switch (kind) {
     case 'client': {
       const err = clamp(s.errorRate, 0, 1);
+      /* The headline is what the client is SENDING, not what came back.
+         Throughput counts successes, so during a total collapse it is
+         genuinely 0 and the node read "0/s rps, 100% err", which looks like a
+         client that has stopped generating load rather than one whose every
+         request is dying. Offered load is the honest headline; the success
+         rate belongs beside it, where the contrast between the two is the
+         thing worth seeing. */
       return {
-        primary: { value: formatRate(s.throughput), label: 'rps' },
-        a: { value: formatMs(s.p99), label: 'p99' },
+        primary: { value: formatRate(s.arrivalRate), label: 'sent' },
+        a: { value: formatRate(s.throughput), label: 'ok' },
         b: { value: formatPct(err), label: 'err' },
         load: err,
         health: healthOfErr(err),
-        spark: s.throughput,
+        spark: s.arrivalRate,
         losing,
       };
     }
