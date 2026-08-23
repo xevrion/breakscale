@@ -2087,6 +2087,22 @@ export default function Canvas({
       const p = pendingRef.current;
       if (!p || p.pointerId !== e.pointerId) return;
 
+      // The button is no longer down, so whatever this gesture was, it ended
+      // somewhere we could not see.
+      //
+      // Capture is deliberately deferred until the drag threshold, which is
+      // what keeps overlay buttons clickable. The cost is a window where a
+      // press can leave the surface uncaptured: press a node, slide off before
+      // the threshold, release outside the window, and no pointerup ever
+      // reaches us. A mouse keeps one pointerId for its whole life, so the
+      // next time the cursor crossed the canvas the stale entry would clear
+      // the threshold and promote a drag with no button held, leaving a node
+      // stuck to the cursor.
+      if (e.buttons === 0) {
+        cancelGesture();
+        return;
+      }
+
       if (!p.active) {
         const dx = e.clientX - p.screenX;
         const dy = e.clientY - p.screenY;
