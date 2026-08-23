@@ -166,19 +166,28 @@ export function Glossary({ open, onClose, focusId }: GlossaryProps) {
     // opens the panel.
     closeTooltip();
 
-    returnFocusRef.current =
+    const opener =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    returnFocusRef.current = opener;
 
     // Focus the search box: the panel's primary job is lookup, and a student
     // who opened it almost always arrived with a word in mind.
     searchRef.current?.focus();
 
+    /* Captured into locals for the cleanup rather than read off the refs when
+       it runs. By then the sheet has unmounted and sheetRef.current is null,
+       so reading it there would silently skip the focus restore. */
+    const sheet = sheetRef.current;
+
     return () => {
-      // Only restore focus if it is still inside the sheet. If the student
-      // has clicked away in the meantime, yanking focus back would be rude.
+      // Only restore focus if it is still inside the sheet, or nowhere in
+      // particular. If the student has clicked away in the meantime, yanking
+      // focus back would be rude.
       const active = document.activeElement;
-      const inside = sheetRef.current?.contains(active as Node) ?? false;
-      if (inside || active === document.body) returnFocusRef.current?.focus();
+      const inside = sheet?.contains(active as Node) ?? false;
+      if (inside || active === document.body || active === null) {
+        opener?.focus();
+      }
       returnFocusRef.current = null;
     };
   }, [open]);

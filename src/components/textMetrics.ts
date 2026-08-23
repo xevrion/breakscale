@@ -1,0 +1,166 @@
+/**
+ * Real text measurement for the SVG canvas.
+ *
+ * WHY THIS EXISTS.
+ *
+ * Every label on a node used to be fitted with a fixed advance-width
+ * constant — one number standing in for the width of any character. That is
+ * wrong in both directions at once, because the sans stack is proportional:
+ *
+ *   measured at 14px/550, the actual per-character advance
+ *     "l"  3.71px      "W"  13.10px      lowercase avg 7.51      caps avg 8.94
+ *
+ * A single constant cannot serve a 3.5x spread. The shipped value of 9.0px
+ * was tuned to be safe for capitals, which meant:
+ *
+ *   - "WWWWWWWWWWWWWWWW" cleared a 15-character budget untouched and then
+ *     rendered 209.7px wide against 144px of room — 65px of overhang,
+ *     straight through the status mark and out of the node.
+ *   - "llllllllllllllll" was truncated at 15 characters despite the whole
+ *     string measuring 59.4px, wasting 85px of the room it had.
+ *
+ * Both were verified in the live document with getComputedTextLength().
+ *
+ * THE FIX. Measure the actual string with a 2D canvas context, which returns
+ * the same advance widths the SVG text layout uses for the same font, and
+ * cache the result. Measurement is only reached on a cache miss, so the 10Hz
+ * snapshot loop pays for a given string exactly once.
+ *
+ * Fonts load asynchronously, so a measurement taken before the stack settles
+ * can be stale. `resetTextMetrics` clears the cache; Canvas calls it from a
+ * document.fonts.ready handler.
+ */
+
+/** Cache key -> measured width in CSS px. */
+const cache = new Map<string, number>();
+
+let ctx: CanvasRenderingContext2D | null = null;
+let ctxFailed = false;
+
+function context(): CanvasRenderingContext2D | null {
+  if (ctx || ctxFailed) return ctx;
+  // A jsdom test environment has no canvas backend; measurement degrades to
+  // the estimate path rather than throwing.
+  try {
+    ctx = document.createElement('canvas').getContext('2d');
+  } catch {
+    ctx = null;
+  }
+  if (!ctx) ctxFailed = true;
+  return ctx;
+}
+
+/**
+ * Resolve a CSS custom property from the document root.
+ *
+ * The font stacks live in index.css as --sans / --mono and must not be
+ * duplicated here: a second copy is a second thing to keep in sync, and the
+ * whole point of this module is to stop guessing at what the browser will do.
+ */
+function rootValue(name: string, fallback: string): string {
+  if (typeof getComputedStyle !== 'function') return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+let sansStack: string | null = null;
+let monoStack: string | null = null;
+
+function stack(family: 'sans' | 'mono'): string {
+  if (family === 'sans') {
+    sansStack ??= rootValue('--sans', 'system-ui, sans-serif');
+    return sansStack;
+  }
+  monoStack ??= rootValue('--mono', 'ui-monospace, monospace');
+  return monoStack;
+}
+
+/**
+ * Per-character fallback widths, used only when a canvas context is
+ * unavailable (jsdom). Deliberately generous: over-measuring condenses a
+ * string slightly early, which is invisible, while under-measuring overruns
+ * the node, which is the defect this module exists to remove.
+ */
+const FALLBACK_CHAR_W = 9.0;
+
+export interface TextStyle {
+  size: number;
+  weight: number;
+  family: 'sans' | 'mono';
+  /** Extra advance per character, for a letter-spaced style. */
+  tracking?: number;
+  /** Measure the uppercased string, for a text-transform: uppercase style. */
+  uppercase?: boolean;
+}
+
+/**
+ * Width in CSS px of `text` rendered in `style`.
+ *
+ * Letter-spacing is added per character rather than asked of the canvas,
+ * because `CanvasRenderingContext2D.letterSpacing` is not supported
+ * everywhere and silently does nothing where it is not.
+ */
+export function measureText(text: string, style: TextStyle): number {
+  if (!text) return 0;
+  const s = style.uppercase ? text.toUpperCase() : text;
+  const key = `${style.size}|${style.weight}|${style.family}|${style.tracking ?? 0}|${s}`;
+  const hit = cache.get(key);
+  if (hit !== undefined) return hit;
+
+  const c = context();
+  let w: number;
+  if (c) {
+    c.font = `${style.weight} ${style.size}px ${stack(style.family)}`;
+    w = c.measureText(s).width + (style.tracking ?? 0) * s.length;
+  } else {
+    w = s.length * FALLBACK_CHAR_W * (style.size / 14);
+  }
+  cache.set(key, w);
+  return w;
+}
+
+/**
+ * Longest prefix of `text` that fits `budget` px in `style`, with a single
+ * U+2026 appended when anything was dropped.
+ *
+ * Binary search over the prefix length: the cost is log(n) cached
+ * measurements rather than the n a linear walk would take, and every
+ * intermediate measurement is itself cached for the next frame.
+ *
+ * Returns the ellipsis alone if not even one character fits, and never
+ * returns a string wider than the budget.
+ */
+export function truncateToWidth(
+  text: string,
+  budget: number,
+  style: TextStyle,
+): string {
+  if (budget <= 0) return '';
+  if (measureText(text, style) <= budget) return text;
+
+  const ell = '…';
+  const ellW = measureText(ell, style);
+  if (ellW > budget) return '';
+
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (measureText(text.slice(0, mid), style) + ellW <= budget) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo === 0 ? ell : `${text.slice(0, lo).trimEnd()}${ell}`;
+}
+
+/**
+ * Drop every cached measurement.
+ *
+ * Called once the webfont stack has settled, because a width measured
+ * against the fallback font is not the width the glyphs will actually
+ * occupy once the intended face is in use.
+ */
+export function resetTextMetrics(): void {
+  cache.clear();
+  sansStack = null;
+  monoStack = null;
+}

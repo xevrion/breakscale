@@ -248,7 +248,10 @@
   margin: 0;
   font-size: var(--fs-label);
   line-height: var(--lh-sm);
-  color: var(--text-dim);
+  /* Resolves through --status-ink so `.ins-hint.is-warn` actually turns
+     warm — see the status block in index.css for why this indirection
+     exists rather than a plain `color`. */
+  color: var(--status-ink, var(--text-dim));
   text-wrap: pretty;
 }
 

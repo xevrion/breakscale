@@ -443,8 +443,22 @@ function place(t: DOMRect, pw: number, ph: number): Placement {
     top = side === 'top' ? t.top - OFFSET - ph : t.bottom + OFFSET;
   } else {
     left = side === 'left' ? t.left - OFFSET - pw : t.right + OFFSET;
-    top = clampY(cy - ph / 2);
+    top = cy - ph / 2;
   }
+
+  /*
+   * Clamp BOTH axes unconditionally, including the axis the chosen side was
+   * supposed to satisfy.
+   *
+   * The reason is the last branch above: when no side fits, `side` is a
+   * best-effort guess and its own axis is not guaranteed. Clamping only the
+   * cross axis let the panel run off the top of a short viewport, where it is
+   * not merely misplaced but completely invisible — a failure that looks
+   * exactly like the tooltip never opening. Better a panel that overlaps its
+   * trigger than one the student cannot see at all.
+   */
+  left = clampX(left);
+  top = clampY(top);
 
   /*
    * The arrow tracks the TRIGGER even after the panel has been shifted, so
@@ -669,3 +683,22 @@ function TermDescriptions() {
 export function closeTooltip(): void {
   closeNow();
 }
+
+/* ------------------------------------------------------------------ *
+ * Test surface
+ *
+ * The placement maths is the part most likely to break silently — a panel
+ * off the bottom of the screen looks like nothing at all rather than like a
+ * bug — so it is exercised directly. Exported under a __ name to make it
+ * obvious that it is not part of the component's public API.
+ * ------------------------------------------------------------------ */
+
+export const __placeForTest = place;
+
+export const TOOLTIP_GEOMETRY = {
+  VIEWPORT_MARGIN,
+  OFFSET,
+  ARROW,
+  ARROW_INSET,
+  PANEL_MAX_W,
+} as const;

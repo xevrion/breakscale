@@ -1,0 +1,376 @@
+/* ==========================================================================
+   Glossary — the browsable reference.
+
+   A right-hand side sheet, fixed to the viewport. See the header comment in
+   Glossary.tsx for why a sheet and not a modal: the student opens this
+   BECAUSE a live number confused them, so the canvas and the metrics strip
+   must stay visible behind it.
+
+   THE PAGE NEVER SCROLLS. Everything here is position:fixed and the entry
+   list is the only scroll container, so opening the glossary can never make
+   the app itself scrollable — which on this fixed-viewport layout would push
+   the top bar off screen.
+
+   This file owns .gl-* only. It reuses .btn, .label, .empty and .scroll from
+   index.css and re-declares none of them.
+   ========================================================================== */
+
+.gl-root {
+  position: fixed;
+  inset: 0;
+  /* Above the tooltip layer (400): a tooltip must never float over the sheet
+     that has just covered its trigger. */
+  z-index: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Scrim
+
+   Deliberately light. Its job is to say "this layer is active and clicking
+   out here leaves", not to hide the simulation — which is the thing the
+   student came here to understand. No backdrop-filter.
+   -------------------------------------------------------------------------- */
+
+.gl-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  cursor: default;
+}
+
+/* --------------------------------------------------------------------------
+   Sheet
+
+   Sized to the reading measure, not to the rail it covers. 400px holds the
+   entry prose at a comfortable ~62 characters; the inspector's 320px would
+   have forced a cramped line. Capped at the viewport so it still behaves on
+   a narrow window.
+   -------------------------------------------------------------------------- */
+
+.gl-sheet {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100vw);
+  min-height: 0;
+  background: var(--surface);
+  /* A full-height edge panel, so it takes a hairline rather than a radius:
+     rounding a corner that meets the viewport edge leaves a sliver of canvas
+     showing through. */
+  border-left: var(--bw) solid var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+/* --------------------------------------------------------------------------
+   Header — title, search, count. Fixed; only the list below it scrolls.
+   -------------------------------------------------------------------------- */
+
+.gl-head {
+  flex: none;
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: var(--bw) solid var(--border);
+}
+
+.gl-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.gl-title {
+  margin: 0;
+  font-size: var(--fs-num);
+  font-weight: var(--fw-num);
+  line-height: var(--lh-label);
+  letter-spacing: var(--tr-num);
+  color: var(--text);
+}
+
+.gl-sub {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+/* --------------------------------------------------------------------------
+   Search
+
+   The icon and the clear button are positioned over a single input rather
+   than sitting in a wrapper with its own border. A bordered wrapper holding
+   a bordered input is the card-inside-a-card the rules forbid, and it also
+   breaks the focus ring.
+   -------------------------------------------------------------------------- */
+
+.gl-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: var(--sp-3);
+}
+
+.gl-search-icon {
+  position: absolute;
+  left: var(--sp-3);
+  color: var(--text-faint);
+  /* The input beneath must receive the click. */
+  pointer-events: none;
+}
+
+/* Inherits every input rule from index.css. Only the padding that makes room
+   for the two overlaid affordances is set here.
+
+   THE SELECTOR IS input.gl-search-input, NOT .gl-search-input, AND THAT IS
+   LOAD-BEARING.
+
+   index.css styles the field as `input[type='text']`, whose specificity is
+   (0,1,1) — an attribute selector plus a type selector. A lone class is
+   (0,1,0) and therefore LOSES, so the padding here was silently dropped and
+   the magnifier sat on top of the placeholder's first letter. It looked
+   correct in the source and only showed up in a browser.
+
+   Qualifying with the element name makes this (0,1,1) too, and a later rule
+   of equal specificity wins. That is the fix, rather than !important, which
+   would just move the problem to whoever needs to override this next. */
+input.gl-search-input {
+  width: 100%;
+  /* left gutter + icon + gap, so the caret clears the magnifier */
+  padding-left: calc(var(--sp-3) + 16px + var(--sp-2));
+  /* room for the clear button */
+  padding-right: var(--sp-7);
+}
+
+.gl-search-clear {
+  position: absolute;
+  right: var(--sp-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 28px, comfortably inside the 36px field and still an easy target. */
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.gl-search-clear:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.gl-search-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The result count. A fact about the list, so it stays quiet. */
+.gl-count {
+  margin: var(--sp-2) 0 0;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-label);
+  letter-spacing: var(--tr-num);
+  color: var(--text-faint);
+}
+
+/* --------------------------------------------------------------------------
+   List — the only scroll container in the sheet.
+   -------------------------------------------------------------------------- */
+
+.gl-list {
+  flex: 1 1 auto;
+  padding: var(--sp-3) 0 var(--sp-7);
+  overflow-x: hidden;
+  /* A wheel gesture that reaches the end of this list must not start
+     scrolling anything behind the sheet. */
+  overscroll-behavior: contain;
+}
+
+/* --------------------------------------------------------------------------
+   Category section
+
+   Separated by whitespace and a caption. No box, no card, no border — the
+   heading alone is enough to group six entries.
+   -------------------------------------------------------------------------- */
+
+.gl-section + .gl-section {
+  margin-top: var(--sp-5);
+}
+
+/* Inherits .label. Sticky so a student who has scrolled into the middle of
+   the Components run still knows which group they are reading. */
+.gl-section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--sp-2) var(--sp-5);
+  /* Opaque: the entries scroll underneath it. */
+  background: var(--surface);
+}
+
+.gl-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Entry
+
+   Full-bleed and square-cornered, exactly like a palette row: a full-bleed
+   row that is also rounded leaves slivers of the panel showing at its
+   corners, and the active marker would then sit in the gutter.
+   -------------------------------------------------------------------------- */
+
+.gl-entry {
+  /* The 3px marker is subtracted from the left padding, so the text of a
+     marked row sits on exactly the same axis as an unmarked one. */
+  padding: var(--sp-3) var(--sp-5) var(--sp-3) calc(var(--sp-5) - 3px);
+  /* Always present, transparent at rest, so gaining the marker never shifts
+     the text sideways. */
+  border-left: 3px solid transparent;
+  cursor: default;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-left-color var(--dur-fast) var(--ease);
+}
+
+.gl-entry:hover {
+  background: var(--surface-2);
+}
+
+/* Where the arrow keys are. This is a selection, so it uses the accent tint
+   the rest of the system reserves for "you did this". */
+.gl-entry.is-active {
+  background: var(--accent-soft);
+}
+
+/*
+   Where a cross-reference just landed. It has to be findable in one glance
+   after the list has jumped, so it is stronger than the plain selection: the
+   tint plus a solid accent rule down the leading edge.
+
+   The rule is allowed here because this row has NO radius. The design rules
+   forbid a left border combined with a rounded corner, and a full-bleed
+   square row is exactly the case that ban was written to permit.
+*/
+.gl-entry.is-landed {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+.gl-term {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-num);
+  line-height: var(--lh-label);
+  letter-spacing: var(--tr-base);
+  color: var(--text);
+}
+
+.gl-short {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
+/* The part that teaches, so it gets full-contrast ink and open leading
+   rather than being demoted to a caption. */
+.gl-why {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-prose);
+  color: var(--text);
+  text-wrap: pretty;
+}
+
+/* --------------------------------------------------------------------------
+   Cross references
+   -------------------------------------------------------------------------- */
+
+.gl-see {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-2);
+  margin: var(--sp-2) 0 0;
+}
+
+.gl-see-label {
+  font-size: var(--fs-label);
+  font-weight: var(--fw-med);
+  line-height: var(--lh-label);
+  letter-spacing: var(--tr-label);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.gl-see-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  /* 6.90:1 on --surface, 6.36:1 on --accent-soft. Underlined as well, so the
+     link is never identified by colour alone. */
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.gl-see-link:hover {
+  color: var(--accent);
+}
+
+.gl-see-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   Narrow windows
+
+   Below this the sheet would leave a useless sliver of canvas, so it takes
+   the full width instead. It is still fixed, and the list is still the only
+   thing that scrolls.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 480px) {
+  .gl-sheet {
+    width: 100vw;
+    border-left: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gl-entry,
+  .gl-search-clear,
+  .gl-see-link {
+    transition: none;
+  }
+}

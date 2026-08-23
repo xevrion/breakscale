@@ -12,6 +12,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import type {
   EdgeState,
   FailureKind,
+  NodeConfig,
   NodeKind,
   NodeStats,
   SimEdge,
@@ -39,6 +40,8 @@ import {
   healthOfLoad,
 } from './format';
 import type { Health } from './format';
+import type { TextStyle } from './textMetrics';
+import { measureText, resetTextMetrics, truncateToWidth } from './textMetrics';
 import './Canvas.css';
 
 /* ------------------------------------------------------------------ *
@@ -107,66 +110,58 @@ const PAD_X = 12;
 const SEC_HALF = (NODE_W - PAD_X * 2 - 14) / 2;
 
 /**
- * Advance widths per character for the two text styles a readout cell mixes.
+ * The three text styles a node draws, as measurable descriptions.
  *
- * MEASURED, not guessed, and measured PER STYLE. A cell renders a mono value
- * tspan (`.cv-val`, 12px, tabular digits) followed by an uppercase sans label
- * tspan (`.cv-cap`, 11px, letter-spaced), and the two run at very different
- * widths: getBBox() gave value glyphs up to 6.6px/char ("1,234" at 33/5) and
- * uppercase labels 7.5 to 9.0px/char ("QUEUE" 37.5/5, "COOLDOWN" 71.9/8 with
- * tracking). The previous single 7.3/char figure split the difference and
- * under-measured every label-heavy string: "12.4k conns" is really 81.2px
- * against an estimate of 67.1, so it cleared the 73px half-budget unguarded
- * and overran into the opposite cell. The constants are the measured maxima:
- * under-measuring silently corrupts the layout, while over-measuring only
- * condenses a string slightly sooner than strictly necessary.
+ * These mirror .cv-val / .cv-cap / .cv-node-name in Canvas.css. They exist
+ * so that layout code can ask what a string will ACTUALLY measure instead of
+ * multiplying its length by a constant — see textMetrics.ts for the sizes
+ * that guesswork produced and why it could not be made to work.
  */
-const VAL_CHAR_W = 6.7;
-const CAP_CHAR_W = 9.0;
-/** The dx between the tspans, plus slack for the estimate's rounding. */
+const VAL_STYLE: TextStyle = { size: 12, weight: 650, family: 'mono' };
+const VAL_PRIMARY_STYLE: TextStyle = { size: 16, weight: 650, family: 'mono' };
+const VAL_SELECTED_STYLE: TextStyle = { size: 22, weight: 650, family: 'mono' };
+/** 11px uppercase, letter-spaced 0.06em = 0.66px per character. */
+const CAP_STYLE: TextStyle = {
+  size: 11,
+  weight: 650,
+  family: 'sans',
+  tracking: 0.66,
+  uppercase: true,
+};
+const NAME_STYLE: TextStyle = { size: 14, weight: 450, family: 'sans' };
+
+/** The dx between a cell's value and label tspans. */
 const CELL_GAP_W = 3;
 
-/** Estimated rendered width of one value+label cell at secondary size. */
-function cellEstimate(value: string, label: string): number {
+/** Rendered width of one value+label cell at secondary size. */
+function cellWidth(value: string, label: string): number {
   const gap = value && label ? CELL_GAP_W : 0;
-  return value.length * VAL_CHAR_W + label.length * CAP_CHAR_W + gap;
+  return measureText(value, VAL_STYLE) + measureText(label, CAP_STYLE) + gap;
 }
 
 /**
  * Constrain a secondary cell to a width budget.
  *
- * Returns `textLength` only when the estimate says the cell would overflow,
- * because applying it unconditionally makes short strings render subtly wrong
- * (the browser redistributes spacing to hit the exact length even when it did
- * not need to). `lengthAdjust` condenses the glyphs themselves rather than
- * only the gaps, which stays readable far longer.
+ * Returns `textLength` only when the cell would genuinely overflow, because
+ * applying it unconditionally makes short strings render subtly wrong (the
+ * browser redistributes spacing to hit the exact length even when it did not
+ * need to). `lengthAdjust` condenses the glyphs themselves rather than only
+ * the gaps, which stays readable far longer.
  */
 function fitCell(
   value: string,
   label: string,
   budget: number,
 ): { textLength?: number; lengthAdjust?: 'spacingAndGlyphs' } {
-  if (cellEstimate(value, label) <= budget) return {};
+  if (cellWidth(value, label) <= budget) return {};
   return { textLength: budget, lengthAdjust: 'spacingAndGlyphs' };
 }
-
-/**
- * The primary row's value renders at 16px (22px when the node is selected)
- * while its label stays at the 11px cap size, so the same per-style widths
- * scale by font size for the value alone.
- */
-const PRIMARY_VAL_CHAR_W = VAL_CHAR_W * (16 / 12);
-const PRIMARY_VAL_SELECTED_CHAR_W = VAL_CHAR_W * (22 / 12);
 
 /**
  * Constrain the primary readout, accounting for the selected font bump.
  *
  * Its budget stops short of the sparkline and vessel slot at SPARK_X.
- * Previously unguarded, and reachable today: "999,999 depth" measures
- * 109.2px from x=12, 13px INTO the sparkline, and the selected 22px variant
- * of "99.9% util" ended 0.1px from the spark at the single most common
- * danger reading. (Budget computed at call time because SPARK_X is declared
- * further down this file.)
+ * (Budget computed at call time because SPARK_X is declared further down.)
  */
 function fitPrimary(
   value: string,
@@ -174,10 +169,10 @@ function fitPrimary(
   selected: boolean,
 ): { textLength?: number; lengthAdjust?: 'spacingAndGlyphs' } {
   const budget = SPARK_X - PAD_X - 6;
-  const vw = selected ? PRIMARY_VAL_SELECTED_CHAR_W : PRIMARY_VAL_CHAR_W;
+  const vs = selected ? VAL_SELECTED_STYLE : VAL_PRIMARY_STYLE;
   const gap = value && label ? CELL_GAP_W + 1 : 0;
-  const estimate = value.length * vw + label.length * CAP_CHAR_W + gap;
-  if (estimate <= budget) return {};
+  const w = measureText(value, vs) + measureText(label, CAP_STYLE) + gap;
+  if (w <= budget) return {};
   return { textLength: budget, lengthAdjust: 'spacingAndGlyphs' };
 }
 
@@ -1076,6 +1071,55 @@ export function readoutFor(
   })(kind);
 }
 
+/**
+ * Summed buffer depth feeding each pull-based consumer, keyed by node id.
+ *
+ * A worker's own `queued` is structurally ALWAYS zero: it pulls, so its
+ * backlog lives in the queue nodes wired to it. The engine knows this
+ * (its pump walks `sources`) but does not publish the sum, so it is derived
+ * here from the same wiring rule buildNodes() uses: a neighbour in EITHER
+ * direction whose kind buffers for consumers. Pure snapshot reads only, so
+ * the readout can never perturb the simulation.
+ *
+ * Exported for App.tsx, whose sparkline recorder plots the same series the
+ * readout headlines.
+ */
+export function sourceBacklogs(
+  topology: Topology,
+  nodes: Record<string, NodeStats>,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const kindById = new Map<string, NodeKind>();
+  for (const n of topology.nodes) kindById.set(n.id, n.kind);
+
+  const add = (consumerId: string, bufferId: string) => {
+    const s = nodes[bufferId];
+    if (!s) return;
+    out.set(consumerId, (out.get(consumerId) ?? 0) + Math.max(0, s.queued));
+  };
+
+  for (const e of topology.edges) {
+    if (e.control) continue;
+    const fromKind = kindById.get(e.from);
+    const toKind = kindById.get(e.to);
+    if (!fromKind || !toKind) continue;
+    // buffer -> consumer, and consumer -> buffer: the engine accepts both
+    // drawings, so the readout must too.
+    if (
+      behaviourFor(toKind).pullsFromQueues &&
+      behaviourFor(fromKind).buffersForConsumers
+    ) {
+      add(e.to, e.from);
+    } else if (
+      behaviourFor(fromKind).pullsFromQueues &&
+      behaviourFor(toKind).buffersForConsumers
+    ) {
+      add(e.from, e.to);
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ *
  * Sparkline
  * ------------------------------------------------------------------ */
@@ -1176,23 +1220,28 @@ const GLYPH_SCALE = GLYPH_PX / ICON_BOX;
  * is slightly conservative costs at most one character of a label; a layout
  * thrash costs frames.
  *
- * 0.55em per character is the average advance width of the UI sans stack at
- * 14px across mixed-case text. Capitals run wider, so the result errs toward
- * trimming one character early on a SHOUTY LABEL, which is the harmless
- * direction to be wrong in.
+ * The badge is mono at 12px, the same style the badge itself renders in.
  */
-const NAME_CHAR_W = 0.55 * 14;
+const BADGE_STYLE: TextStyle = { size: 12, weight: 650, family: 'mono' };
 
-function truncateLabel(label: string, showHeader: boolean): string {
-  const startX = showHeader ? PAD_X + GLYPH_PX + 8 : PAD_X;
-  // Reserve room for the status mark in the top-right corner when it can
-  // appear, so a long name never collides with the warn/danger/fault mark.
-  const avail = NODE_W - PAD_X - startX - (showHeader ? 12 : 0);
-  const max = Math.floor(avail / NAME_CHAR_W);
-  if (max <= 1 || label.length <= max) return label;
-  // U+2026, one glyph, so the ellipsis costs a single character of budget
-  // rather than the three that "..." would.
-  return `${label.slice(0, max - 1).trimEnd()}…`;
+/**
+ * `badgeText` is the instance-count badge as actually rendered ("17x+1"),
+ * whose width the name budget must reserve, and `hasMark` whether a status
+ * mark occupies the corner.
+ */
+function truncateLabel(
+  label: string,
+  showHeader: boolean,
+  badgeText: string,
+  hasMark: boolean,
+): string {
+  const startX = showHeader ? PAD_X + GLYPH_PX + NAME_GAP : PAD_X;
+  const reserve = showHeader
+    ? (hasMark ? MARK_RESERVE : 0) +
+      (badgeText ? measureText(badgeText, BADGE_STYLE) + NAME_GAP : 0)
+    : 0;
+  const avail = NODE_W - PAD_X - startX - reserve;
+  return truncateToWidth(label, avail, NAME_STYLE);
 }
 
 /**
@@ -1344,6 +1393,14 @@ interface EdgeViewProps {
   /** Health of the TARGET node — a failing sink colors its inbound wire. */
   targetHealth: Health;
   showLabel: boolean;
+  /**
+   * Vertical offset for this edge's rate label, in world px. Two edges whose
+   * midpoints coincide (a fan-out to two targets symmetric around the source
+   * row anchors BOTH labels at the identical point; measured, three such
+   * pairs in one topology rendered "3k/3k/s" garble) are de-conflicted by
+   * the parent, which buckets anchors and staggers the collisions.
+   */
+  labelDy: number;
 }
 
 const EdgeView = memo(function EdgeView({
@@ -1358,6 +1415,7 @@ const EdgeView = memo(function EdgeView({
   selected,
   targetHealth,
   showLabel,
+  labelDy,
 }: EdgeViewProps) {
   // Every edge now ARRIVES horizontally (see edgePath), so the arrowhead is
   // always axis-aligned and needs no trigonometry. That is a direct benefit of
@@ -1490,14 +1548,14 @@ const EdgeView = memo(function EdgeView({
         rate labels appear at, so it obeys the existing detail budget.
       */}
       {showLabel && control && (
-        <text className="cv-edge-label is-control" x={midX} y={midY - 6}>
+        <text className="cv-edge-label is-control" x={midX} y={midY - 6 + labelDy}>
           scales
         </text>
       )}
 
       {/* How traffic splits at a fan-out. Invisible before this change. */}
       {showLabel && active && (
-        <text className="cv-edge-label" x={midX} y={midY - 6}>
+        <text className="cv-edge-label" x={midX} y={midY - 6 + labelDy}>
           {formatRate(flow)}
         </text>
       )}
@@ -1649,6 +1707,21 @@ const UnitStrip = memo(function UnitStrip({
           </g>
         );
       })}
+      {/* The lead marker must survive fill saturation. The outline on the
+          lead CELL disappears exactly when the strip is interesting: nine
+          members all pinned at 99.9% render nine identical full-red cells
+          and the primary-vs-read-set distinction (the kind's whole lesson)
+          vanished. A notch UNDER the cell is outside the fill's channel
+          entirely, so it reads at any load. */}
+      {leadIndex >= 0 && leadIndex < n && (
+        <rect
+          className="cv-cell-lead-notch"
+          x={strip.x(leadIndex)}
+          y={height + 1.5}
+          width={strip.w}
+          height={2}
+        />
+      )}
     </g>
   );
 });
@@ -1752,6 +1825,12 @@ interface NodeViewProps {
    * healthy. This is the one state the metrics alone cannot express.
    */
   fault: FailureKind | null;
+  /**
+   * Summed backlog of the buffer nodes feeding this node, for pull-based
+   * kinds (worker, transcoder) whose own queue is structurally always 0.
+   * Computed by the parent from the topology; 0 for every other kind.
+   */
+  backlog: number;
   onActivate: (id: string, additive: boolean) => void;
   onNudge: (id: string, dx: number, dy: number) => void;
 }
@@ -1766,10 +1845,11 @@ const NodeView = memo(function NodeView({
   linking,
   linkTarget,
   fault,
+  backlog,
   onActivate,
   onNudge,
 }: NodeViewProps) {
-  const readout = stats ? readoutFor(node.kind, stats, node.config) : null;
+  const readout = stats ? readoutFor(node.kind, stats, node.config, backlog) : null;
   // A faulted node is never reported as healthy, whatever its metrics say.
   const health: Health = fault ? 'danger' : readout ? readout.health : 'ok';
 
@@ -1788,14 +1868,21 @@ const NodeView = memo(function NodeView({
    * pictures of itself.
    *
    *   strip   the units are INDEPENDENT and their individual values carry
-   *           the lesson (shard partitions, replica set members).
+   *           the lesson (shard partitions, replica set members, a stream
+   *           broker's partitions filled by worst-group lag).
    *   vessel  the node is a buffer, and depth-against-limit is the reading
    *           (queue).
    *   stack   the units are INTERCHANGEABLE machines and the count is the
    *           lesson (service, worker, db, cache, lb, cdn).
+   *
+   * The broker moved from stack to strip deliberately: its partitions are
+   * independent (per-partition lag exists and the behaviour reports it),
+   * and drawing 8 broker partitions as a stack of interchangeable machines
+   * while 64 shard partitions drew a strip used two pictures for one
+   * concept. The "Nx" badge now means partitions on both kinds.
    */
   const structure: 'strip' | 'vessel' | 'stack' | 'none' =
-    node.kind === 'shard' || node.kind === 'replica'
+    node.kind === 'shard' || node.kind === 'replica' || node.kind === 'streambroker'
       ? 'strip'
       : node.kind === 'queue'
         ? 'vessel'
@@ -1835,11 +1922,22 @@ const NodeView = memo(function NodeView({
   const meterW = load > 0 ? Math.max(2, load * METER_W) : 0;
 
   // Fractional metrics pin the sparkline domain to 0..1 so a utilization
-  // trace does not rescale itself into looking permanently full.
-  const sparkUnit = node.kind !== 'queue' && node.kind !== 'client';
+  // trace does not rescale itself into looking permanently full. The flag
+  // comes from the readout, which knows what its own spark series is, so a
+  // count series (a cron's emitted total, a broker's lag) autoscales.
+  const sparkUnit = readout ? readout.sparkUnit : true;
 
   const full = detail === 2;
   const showHeader = detail >= 1;
+
+  /** The badge string as actually rendered; the name budget reserves it. */
+  const badgeText = badge ? `${badge}${pending > 0 ? `+${pending}` : ''}` : '';
+  const shownName = truncateLabel(
+    node.label,
+    showHeader,
+    badgeText,
+    Boolean(fault) || health !== 'ok',
+  );
 
   const linkClass =
     linkRole === 'none'
@@ -1850,7 +1948,12 @@ const NodeView = memo(function NodeView({
     <g
       className={`cv-node is-${health}${selected ? ' is-selected' : ''}${
         readout?.losing ? ' is-losing' : ''
-      }${fault ? ' is-faulted' : ''}${linking ? ' is-linking' : ''}${linkClass}`}
+      }${fault ? ' is-faulted' : ''}${linking ? ' is-linking' : ''}${
+        // The strip's top edge at y=56 cannot clear a 22px descender from the
+        // primary's baseline at 52, so strip kinds suppress the selected-state
+        // font bump via this class (measured overlap: 124x3px on a shard).
+        structure === 'strip' ? ' has-strip' : ''
+      }${linkClass}`}
       transform={`translate(${node.x},${node.y})`}
       tabIndex={0}
       role="button"
@@ -1870,7 +1973,7 @@ const NodeView = memo(function NodeView({
              the whole point of this pass. Said in words rather than as a
              count alone: "4 partitions" beats "4x". */
         badge
-          ? node.kind === 'shard'
+          ? node.kind === 'shard' || node.kind === 'streambroker'
             ? `${stats?.instances} partitions`
             : node.kind === 'replica'
               ? `primary plus ${(stats?.instances ?? 1) - 1} read replicas`
@@ -1985,10 +2088,8 @@ const NodeView = memo(function NodeView({
         x={showHeader ? PAD_X + GLYPH_PX + 8 : PAD_X}
         y={showHeader ? 21 : 24}
       >
-        {truncateLabel(node.label, showHeader)}
-        {truncateLabel(node.label, showHeader) !== node.label && (
-          <title>{node.label}</title>
-        )}
+        {shownName}
+        {shownName !== node.label && <title>{node.label}</title>}
       </text>
 
       {/*
@@ -2042,26 +2143,65 @@ const NodeView = memo(function NodeView({
         one label rather than two stops a scaling node from gaining and losing
         a whole separate element every few seconds.
       */}
-      {showHeader && badge && (
+      {showHeader && badgeText && (
         <text
           className={pending > 0 ? 'cv-node-badge is-warming' : 'cv-node-badge'}
           x={NODE_W - PAD_X - (fault || health !== 'ok' ? 12 : 0)}
           y={16}
           textAnchor="end"
         >
-          {badge}
-          {pending > 0 ? `+${pending}` : ''}
+          {badgeText}
         </text>
       )}
 
       {full && readout && (
         <>
-          <text className="cv-node-primary" x={PAD_X} y={52}>
+          {/* The primary is width-guarded like every other cell: it shares
+              its row with the sparkline / vessel (or, on strip kinds, the
+              side cell), and an unguarded value was measured 13px inside the
+              sparkline at a six-figure queue depth. Strip kinds never take
+              the selected font bump (see has-strip above), so their fit is
+              computed at the base size. */}
+          <text
+            className="cv-node-primary"
+            x={PAD_X}
+            y={52}
+            {...fitPrimary(
+              readout.primary.value,
+              readout.primary.label,
+              selected && structure !== 'strip',
+            )}
+          >
             <tspan className="cv-val">{readout.primary.value}</tspan>
             <tspan className="cv-cap" dx={4}>
               {readout.primary.label}
             </tspan>
           </text>
+
+          {/* Strip kinds drop the two-cell secondary row (the strip occupies
+              that band), which previously cost them EVERY number beyond the
+              primary. The right half of the primary row is empty on these
+              kinds, so the single most useful companion figure rides there:
+              coldest partition beside hottest, stale rate beside a replica's
+              utilisation, delivery (or loss) rate beside a broker's lag. */}
+          {structure === 'strip' && (readout.a.value || readout.a.label) && (
+            <text
+              className="cv-node-sec"
+              x={NODE_W - PAD_X}
+              y={52}
+              textAnchor="end"
+              {...fitCell(readout.a.value, readout.a.label, 60)}
+            >
+              <tspan className="cv-val">{readout.a.value}</tspan>
+              {readout.a.value && readout.a.label ? (
+                <tspan className="cv-cap" dx={3}>
+                  {readout.a.label}
+                </tspan>
+              ) : (
+                <tspan className="cv-cap">{readout.a.label}</tspan>
+              )}
+            </text>
+          )}
 
           {/*
             The sparkline slot carries the STRUCTURE when the node has one,
@@ -3182,6 +3322,15 @@ export default function Canvas({
    * a crashed node (which serves nothing, so reports 0% utilisation) would sit
    * at the end of a set of perfectly healthy-looking edges.
    */
+  /**
+   * Backlog feeding each pull-based consumer (worker, transcoder), whose own
+   * queue cell is structurally always zero. See sourceBacklogs().
+   */
+  const backlogById = useMemo(
+    () => (snapshot ? sourceBacklogs(topology, snapshot.nodes) : null),
+    [snapshot, topology],
+  );
+
   const healthById = useMemo(() => {
     const m = new Map<string, Health>();
     if (!snapshot) return m;
@@ -3191,10 +3340,54 @@ export default function Canvas({
         continue;
       }
       const s = snapshot.nodes[n.id];
-      if (s) m.set(n.id, readoutFor(n.kind, s, n.config).health);
+      if (s) {
+        m.set(
+          n.id,
+          readoutFor(n.kind, s, n.config, backlogById?.get(n.id) ?? 0).health,
+        );
+      }
     }
     return m;
-  }, [snapshot, topology.nodes, faultById]);
+  }, [snapshot, topology.nodes, faultById, backlogById]);
+
+  /**
+   * De-conflicted vertical offsets for edge rate labels, keyed by edge id.
+   *
+   * Every label anchors at its edge's own midpoint, and two edges can share
+   * one: a fan-out to two targets vertically symmetric around the source row
+   * puts both midpoints at the identical pixel (measured: three coincident
+   * pairs in one 34-node topology, rendering as "3k/3k/s" garble). Anchors
+   * are bucketed to a 16px grid and the nth label landing in an occupied
+   * bucket is pushed 10px further down. Only edges that will actually render
+   * a label participate, so an idle edge never displaces a live one.
+   */
+  const labelDyById = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!showEdgeLabels) return m;
+    const buckets = new Map<string, number>();
+    for (const ed of topology.edges) {
+      const a = nodeById.get(ed.from);
+      const b = nodeById.get(ed.to);
+      if (!a || !b) continue;
+      const control = controlEdges.has(ed.id);
+      const flow = snapshot?.edgeFlow[ed.id] ?? 0;
+      const state = snapshot?.edgeState[ed.id] ?? 'idle';
+      const severed = state === 'cut' || state === 'blocked';
+      // Mirror of EdgeView's own "does a label render" condition.
+      const hasLabel = control || (!severed && flow > 0.05);
+      if (!hasLabel) continue;
+      const p = outPort(a);
+      const q = inPort(b);
+      const gap = q.x - ARROW_INSET - p.x;
+      const midX = gap > EDGE_STUB ? p.x + gap / 2 : p.x + EDGE_STUB;
+      const midY = (p.y + q.y) / 2;
+      const key = `${Math.round(midX / 16)}:${Math.round(midY / 16)}`;
+      const n = buckets.get(key) ?? 0;
+      buckets.set(key, n + 1);
+      if (n > 0) m.set(ed.id, n * 10);
+    }
+    return m;
+  }, [showEdgeLabels, topology.edges, nodeById, controlEdges, snapshot]);
 
   /**
    * The link gesture currently in flight, from either mechanism. Drag and
@@ -3327,6 +3520,7 @@ export default function Canvas({
                     selected={selectedIds.has(ed.id)}
                     targetHealth={healthById.get(ed.to) ?? 'ok'}
                     showLabel={showEdgeLabels}
+                    labelDy={labelDyById.get(ed.id) ?? 0}
                   />
                 );
               })}
@@ -3352,6 +3546,7 @@ export default function Canvas({
                   linking={linkFrom !== null}
                   linkTarget={snapTarget === n.id}
                   fault={faultById.get(n.id) ?? null}
+                  backlog={backlogById?.get(n.id) ?? 0}
                   onActivate={onActivate}
                   onNudge={onNudge}
                 />

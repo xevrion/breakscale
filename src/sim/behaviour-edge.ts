@@ -490,6 +490,9 @@ const breaker: ComponentBehaviour = {
     stats.breakerErrorRate = windowStats(b, ctx.now, cfgWindowMs(state)).rate;
     stats.rejectedRate = ctx.counterRate(state, 'rejected');
     stats.breakerTrips = b.trips;
+    // Countdown to the half-open probe, on exactly the phase that has one.
+    stats.openRemainingMs =
+      phase === 'open' ? Math.max(0, cfgOpenMs(state) - (ctx.now - b.openedAtMs)) : 0;
   },
 };
 

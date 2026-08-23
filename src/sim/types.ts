@@ -752,6 +752,16 @@ export interface NodeStats {
   /** Region only: true while mid-failover, when traffic is being dropped. */
   failingOver?: boolean;
   /**
+   * Region only: ms of dark window left before the failover lands and the
+   * next region starts serving. 0 whenever no failover is in progress, so a
+   * UI can draw a countdown exactly while `failingOver` is true.
+   */
+  failoverRemainingMs?: number;
+  /** Region only: how many of the declared regions are reachable right now. */
+  regionsHealthy?: number;
+  /** Region only: how many regions the node is switching between. */
+  regionsTotal?: number;
+  /**
    * Region only: the id of the outgoing edge traffic is actually taking right
    * now, or undefined when none is -- every region down, or mid-failover.
    * The standby edges are the node's other outgoing edges; they are also
@@ -811,6 +821,12 @@ export interface NodeStats {
   rejectedRate?: number;
   /** Breaker only: times the circuit has tripped OPEN since sim start. */
   breakerTrips?: number;
+  /**
+   * Breaker only: ms left before an OPEN circuit moves to half-open and
+   * starts probing. 0 whenever the circuit is not open, so a UI can draw a
+   * countdown on exactly the phase that has one.
+   */
+  openRemainingMs?: number;
 
   /* ---- searchindex readouts ----------------------------------------- */
 
@@ -941,6 +957,12 @@ export interface NodeStats {
   nextFireInMs?: number;
   /** Cron only: total requests emitted since sim start, all firings. */
   batchEmitted?: number;
+  /**
+   * Cron only: requests the next firing will emit, summed across every
+   * outgoing edge. `batchSize x edges`, mirrored so a readout can state the
+   * size of the burst without re-deriving it from config and wiring.
+   */
+  burstSize?: number;
 
   /* ---- bulkhead readouts ---------------------------------------------- */
 
@@ -979,6 +1001,12 @@ export interface NodeStats {
   dirtyWrites?: number;
   /** Write-behind cache only: writes per second landing on the backing store. */
   flushedRate?: number;
+  /**
+   * Write-behind cache only: flushes per second that FAILED at the backing
+   * store. The caller was told "saved" long ago, so every one of these is a
+   * silently lost write, which is the risk the component trades for latency.
+   */
+  flushFailRate?: number;
 
   /* ---- edgecompute readouts -------------------------------------------- */
 

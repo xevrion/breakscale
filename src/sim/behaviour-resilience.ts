@@ -367,6 +367,9 @@ const writebehind: ComponentBehaviour = {
     // (queued) plus mid-residence (inFlight); both die with the node.
     stats.dirtyWrites = stats.inFlight + stats.queued;
     stats.flushedRate = ctx.counterRate(state, 'flushed');
+    // The 'flushFailed' counter was already booked in onDownstreamResult;
+    // publish it. Every one of these is a write the caller believes is safe.
+    stats.flushFailRate = ctx.counterRate(state, 'flushFailed');
   },
 };
 

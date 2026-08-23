@@ -260,9 +260,23 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   bulkhead: ['bulkheadMax'],
   // Delivery concurrency, dispatch cost, buffer depth, and the redrive
   // policy: attempts and the per-attempt deadline.
-  retryqueue: ['retries', 'timeoutMs', 'capacity', 'serviceMs', 'queueLimit'],
+  retryqueue: [
+    'retries',
+    'timeoutMs',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'queueLimit',
+  ],
   // The batch-regime worker: boxes, jobs per box, and seconds per job.
-  transcoder: ['instances', 'capacity', 'serviceMs', 'serviceCv', 'errorRate'],
+  transcoder: [
+    'instances',
+    'capacity',
+    'serviceMs',
+    'serviceCv',
+    'errorRate',
+    'queueLimit',
+  ],
   // The share it can answer locally is the lesson; the rest is a fast,
   // wide pool like any edge tier.
   edgecompute: ['edgeShare', 'instances', 'capacity', 'serviceMs', 'queueLimit'],
@@ -273,6 +287,18 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   // fair refusal into deliberate triage.
   loadshedder: ['rateLimitRps', 'burst', 'lowPriorityShare', 'priorityReserve'],
 };
+
+/**
+ * Kinds that hold no work of their own: they admit or refuse and pass
+ * through, so their in-flight and queued counts are structurally zero and
+ * must not be printed as if they were live readings.
+ */
+const GATE_KINDS: ReadonlySet<NodeKind> = new Set<NodeKind>([
+  'ratelimiter',
+  'breaker',
+  'loadshedder',
+  'bulkhead',
+]);
 
 /** Kinds whose throughput ceiling is capacity x (1000 / serviceMs). */
 const HAS_THROUGHPUT_CEILING: ReadonlySet<NodeKind> = new Set<NodeKind>([
@@ -290,6 +316,9 @@ const HAS_THROUGHPUT_CEILING: ReadonlySet<NodeKind> = new Set<NodeKind>([
   'retryqueue',
   'transcoder',
   'edgecompute',
+  // Both run the standard slot discipline too; they were simply missing.
+  'apigateway',
+  'sidecar',
 ]);
 
 /**
@@ -504,7 +533,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     control: 'number',
     label: 'Read replicas',
     unit: 'copies, besides the primary',
-    hint: 'Read-only copies behind the primary. They add READ capacity only \u2014 every write still goes through the one primary.',
+    hint: 'Read-only copies behind the primary. They add READ capacity only; every write still goes through the one primary.',
     min: 1,
     max: 64,
     step: 1,
@@ -885,6 +914,58 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
 };
 
+/* ------------------------------------------------------------------ *
+ * Per-kind overrides of a shared field's wording.
+ *
+ * A field id is shared machinery; what it MEANS can differ by kind, and the
+ * label must say what the engine will actually do with the number. The
+ * shared `capacity` spec reads "How many requests ONE machine handles at a
+ * time", which is flatly wrong on a websocket gateway (a slot there is a
+ * HELD CONNECTION) and on a write-behind cache (the buffer is memory, not
+ * threads). Same for the autoscaler's bounds, whose unit is INSTANCES since
+ * the instance-model revision, and the broker's queueLimit, which is the
+ * log's RETENTION. Only wording is overridden here, never bounds or control
+ * shape, so the engine-facing semantics of the field cannot fork.
+ * ------------------------------------------------------------------ */
+
+const KIND_FIELD_OVERRIDES: Partial<
+  Record<NodeKind, Partial<Record<Field, Partial<FieldSpec>>>>
+> = {
+  websocket: {
+    capacity: {
+      label: 'Connections per instance',
+      unit: 'held at once, on one machine',
+      hint: 'A slot here is a held connection, not a request in service. Held connections settle at connect rate x lifetime, which is the number that saturates.',
+    },
+  },
+  writebehind: {
+    capacity: {
+      label: 'Dirty writes held',
+      unit: 'buffered at once',
+      hint: 'The buffer is memory: how many acknowledged writes may sit dirty at once. It is not a thread count.',
+    },
+  },
+  streambroker: {
+    queueLimit: {
+      label: 'Retention',
+      unit: 'messages kept, per partition',
+      hint: 'How far back the log keeps messages. A consumer group that falls further behind than this skips ahead, and the skipped messages are lost to it.',
+    },
+  },
+  autoscaler: {
+    minCapacity: { unit: 'instances' },
+    maxCapacity: { unit: 'instances' },
+    scaleStepPct: { label: 'Change the fleet by', unit: 'percent of instances' },
+  },
+};
+
+/** The spec actually rendered for `field` on a node of `kind`. */
+function specFor(kind: NodeKind, field: Field): FieldSpec {
+  const base = FIELD_SPECS[field];
+  const patch = KIND_FIELD_OVERRIDES[kind]?.[field];
+  return patch ? ({ ...base, ...patch } as FieldSpec) : base;
+}
+
 /**
  * Grouping WITHIN a kind's field list.
  *
@@ -1058,7 +1139,7 @@ function NumberRow({
           max={spec.max}
           step={spec.step}
           value={value}
-          placeholder={mixed ? '—' : undefined}
+          placeholder={mixed ? 'mixed' : undefined}
           data-mixed={mixed || undefined}
           onChange={(e) => {
             const raw = Number(e.currentTarget.value);
@@ -1128,18 +1209,526 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  * so an oversubscribed node pins the bar at full rather than overflowing
  * its track.
  */
-function Meter({ value, tone }: { value: number; tone?: string }) {
+function Meter({
+  value,
+  tone,
+  label = 'Utilisation',
+}: {
+  value: number;
+  tone?: string;
+  /** What the bar measures, for the accessible name. */
+  label?: string;
+}) {
   const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
   const pct = Math.min(1, safe) * 100;
   return (
     <div
       className={tone ? `ins-meter ${tone}` : 'ins-meter'}
       role="img"
-      aria-label={`Utilisation ${formatPct(value)}`}
+      aria-label={`${label} ${formatPct(value)}`}
     >
       <div className="ins-meter-fill" style={{ width: `${pct}%` }} />
     </div>
   );
+}
+
+/**
+ * The headline meter, per kind.
+ *
+ * "How busy it is" driven by `utilization` rendered a permanent 0% on every
+ * kind that serves no requests (rate limiter, breaker, load shedder,
+ * bulkhead, pub/sub, stream broker, cron, region, autoscaler, queue): the
+ * engine hardwires their utilisation to zero, so the one meter at the top of
+ * the panel was a dead gauge on ten kinds, including several mid-catastrophe.
+ * Each kind now meters the quantity that genuinely fills up for it, or shows
+ * nothing when its own panel below carries the reading.
+ */
+function VitalsMeter({
+  kind,
+  stats,
+  cfg,
+}: {
+  kind: NodeKind;
+  stats: NodeStats;
+  cfg: NodeConfig;
+}) {
+  switch (kind) {
+    // Their own panels below carry the honest reading; a utilisation bar
+    // here would be a second gauge pinned at zero.
+    case 'client':
+    case 'queue':
+    case 'cron':
+    case 'autoscaler':
+    case 'region':
+    case 'pubsub':
+    case 'breaker':
+      return null;
+
+    // Token-bucket kinds: the bucket is the thing that drains.
+    case 'ratelimiter':
+    case 'loadshedder':
+    case 'apigateway': {
+      const burst = cfg.burst ?? cfg.rateLimitRps ?? 1;
+      const tokens = Math.max(0, stats.tokens ?? 0);
+      const fill = burst > 0 ? Math.min(1, tokens / burst) : 0;
+      const tone = toneClass(healthOfLoad(1 - fill));
+      return (
+        <div className="ins-util">
+          <div className="ins-util-head">
+            <span className="label">Tokens left</span>
+            <span className={tone ? `num num-md ${tone}` : 'num num-md'}>
+              {formatCount(tokens)} / {formatCount(burst)}
+            </span>
+          </div>
+          <Meter value={fill} tone={tone} label="Tokens left" />
+        </div>
+      );
+    }
+
+    case 'bulkhead': {
+      const limit = stats.bulkheadLimit ?? 0;
+      const used = stats.bulkheadInFlight ?? 0;
+      const fill = limit > 0 ? Math.min(1, used / limit) : 0;
+      const rejecting = (stats.bulkheadRejectedRate ?? 0) > 0;
+      const tone = rejecting ? 'is-danger' : toneClass(healthOfLoad(fill));
+      return (
+        <div className="ins-util">
+          <div className="ins-util-head">
+            <span className="label">Pool in use</span>
+            <span className={tone ? `num num-md ${tone}` : 'num num-md'}>
+              {formatCount(used)} / {formatCount(limit)}
+            </span>
+          </div>
+          <Meter value={fill} tone={tone} label="Pool in use" />
+        </div>
+      );
+    }
+
+    case 'streambroker': {
+      const lag = stats.consumerLag ?? 0;
+      const retention = stats.queueLimit > 0 ? stats.queueLimit : 1;
+      const fill = Math.min(1, lag / retention);
+      const losing = (stats.retentionDropRate ?? 0) > 0;
+      const tone = losing ? 'is-danger' : toneClass(healthOfLoad(fill));
+      return (
+        <div className="ins-util">
+          <div className="ins-util-head">
+            <span className="label">Worst lag vs retention</span>
+            <span className={tone ? `num num-md ${tone}` : 'num num-md'}>
+              {formatCount(lag)} / {formatCount(retention)}
+            </span>
+          </div>
+          <Meter value={fill} tone={tone} label="Consumer lag" />
+        </div>
+      );
+    }
+
+    case 'websocket': {
+      const max = stats.maxConnections ?? 0;
+      const open = stats.connectionsOpen ?? 0;
+      const fill = max > 0 ? Math.min(1, open / max) : 0;
+      const refusing = (stats.connectionRejectRate ?? 0) > 0;
+      const tone = refusing ? 'is-danger' : toneClass(healthOfLoad(fill));
+      return (
+        <div className="ins-util">
+          <div className="ins-util-head">
+            <span className="label">Connections held</span>
+            <span className={tone ? `num num-md ${tone}` : 'num num-md'}>
+              {formatCount(open)} / {formatCount(max)}
+            </span>
+          </div>
+          <Meter value={fill} tone={tone} label="Connections held" />
+        </div>
+      );
+    }
+
+    default: {
+      const util = stats.utilization;
+      const tone = toneClass(healthOfLoad(util));
+      return (
+        <div className="ins-util">
+          <div className="ins-util-head">
+            <span className="label">How busy it is</span>
+            <span className={tone ? `num num-md ${tone}` : 'num num-md'}>
+              {formatPct(util)}
+            </span>
+          </div>
+          <Meter value={Math.max(0, Math.min(1, util))} tone={tone} />
+        </div>
+      );
+    }
+  }
+}
+
+/**
+ * The cron, narrated. Its generic stats are hardwired zeros (it serves
+ * nothing, ever), so the panel states the schedule instead: when it fires
+ * next, how big the burst will be, and what it has emitted so far.
+ */
+function CronPanel({ stats }: { stats: NodeStats }) {
+  return (
+    <Section title="What it is doing">
+      <div className="ins-stats">
+        <StatRow label="Next firing in" value={formatMs(stats.nextFireInMs)} />
+        <StatRow label="Requests per firing" value={formatCount(stats.burstSize)} />
+        <StatRow label="Sent since start" value={formatCount(stats.batchEmitted)} />
+      </div>
+      <p className="ins-hint">
+        Between firings it does nothing at all. The whole batch lands downstream in the
+        same instant, which is exactly what makes it dangerous.
+      </p>
+    </Section>
+  );
+}
+
+/**
+ * The failover switch, narrated: which region serves, how many are healthy,
+ * and, mid-failover, how long the dark window has left. Previously the panel
+ * showed a permanent 0% meter through a total outage.
+ */
+function RegionPanel({ stats }: { stats: NodeStats }) {
+  const total = stats.regionsTotal ?? 1;
+  const healthy = stats.regionsHealthy ?? total;
+  const dark = stats.failingOver === true;
+  return (
+    <Section title="What it is doing">
+      <div className="ins-stats">
+        <StatRow
+          label="Serving from"
+          value={dark ? 'nowhere' : `region ${stats.activeRegion ?? 0}`}
+          tone={dark ? 'is-danger' : undefined}
+        />
+        <StatRow
+          label="Regions healthy"
+          value={`${formatCount(healthy)} of ${formatCount(total)}`}
+          tone={healthy === 0 ? 'is-danger' : healthy < total ? 'is-warn' : undefined}
+        />
+        {dark && (
+          <StatRow
+            label="Traffic resumes in"
+            value={formatMs(stats.failoverRemainingMs)}
+            tone="is-danger"
+          />
+        )}
+      </div>
+      {dark && (
+        <p className="ins-hint is-danger">
+          Mid-failover: every request arriving right now fails. This window is what
+          failover costs, and it is never free.
+        </p>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * Kind-specific live rows for the "Right now" section.
+ *
+ * Every one of these fields already existed in NodeStats; the panel simply
+ * never showed them. The breaker was the worst case: its panel contained
+ * NOTHING breaker-specific while the node was failing fast at 93 rps.
+ * A row appears only for the kinds it applies to.
+ */
+function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
+  switch (kind) {
+    case 'cache':
+      return <StatRow label="Hit rate, measured" value={formatPct(stats.hitRate)} />;
+
+    case 'cdn':
+      return (
+        <>
+          <StatRow label="Hit rate, measured" value={formatPct(stats.hitRate)} />
+          <StatRow
+            label="Fetched from origin"
+            value={formatRate(stats.originFetchRate)}
+          />
+        </>
+      );
+
+    case 'ratelimiter':
+      return (
+        <>
+          <StatRow label="Admitted" value={formatRate(stats.admittedRate)} />
+          <StatRow
+            label="Refused (throttled)"
+            value={formatRate(stats.throttledRate)}
+            tone={(stats.throttledRate ?? 0) > 0 ? 'is-warn' : undefined}
+          />
+        </>
+      );
+
+    case 'breaker': {
+      const state = stats.breakerState ?? 'closed';
+      return (
+        <>
+          <StatRow
+            label="Circuit"
+            value={
+              state === 'open'
+                ? 'OPEN, failing fast'
+                : state === 'half-open'
+                  ? 'probing'
+                  : 'closed'
+            }
+            tone={
+              state === 'open'
+                ? 'is-danger'
+                : state === 'half-open'
+                  ? 'is-warn'
+                  : undefined
+            }
+          />
+          <StatRow
+            label="Downstream errors, windowed"
+            value={formatPct(stats.breakerErrorRate)}
+            tone={toneClass(healthOfErr(stats.breakerErrorRate))}
+          />
+          {state === 'open' && (
+            <StatRow label="Probes again in" value={formatMs(stats.openRemainingMs)} />
+          )}
+          <StatRow
+            label="Failing fast"
+            value={formatRate(stats.rejectedRate)}
+            tone={(stats.rejectedRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+          <StatRow label="Times tripped" value={formatCount(stats.breakerTrips)} />
+        </>
+      );
+    }
+
+    case 'sidecar': {
+      const state = stats.breakerState ?? 'closed';
+      return (
+        <>
+          <StatRow
+            label="Upstream"
+            value={
+              state === 'open'
+                ? 'EJECTED'
+                : state === 'half-open'
+                  ? 'probing'
+                  : 'proxying'
+            }
+            tone={
+              state === 'open'
+                ? 'is-danger'
+                : state === 'half-open'
+                  ? 'is-warn'
+                  : undefined
+            }
+          />
+          <StatRow
+            label="Upstream failures"
+            value={formatRate(stats.upstreamFailRate)}
+          />
+          <StatRow
+            label="Consecutive failures"
+            value={formatCount(stats.consecutiveFails)}
+            tone={(stats.consecutiveFails ?? 0) > 0 ? 'is-warn' : undefined}
+          />
+          <StatRow
+            label="Failing fast"
+            value={formatRate(stats.rejectedRate)}
+            tone={(stats.rejectedRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+          <StatRow label="Times ejected" value={formatCount(stats.breakerTrips)} />
+        </>
+      );
+    }
+
+    case 'websocket':
+      return (
+        <>
+          <StatRow label="New connections" value={formatRate(stats.connectRate)} />
+          <StatRow
+            label="Connections refused"
+            value={formatRate(stats.connectionRejectRate)}
+            tone={(stats.connectionRejectRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+        </>
+      );
+
+    case 'lambda':
+      return (
+        <>
+          <StatRow
+            label="Cold starts"
+            value={formatPct(stats.coldStartRate)}
+            tone={(stats.coldStartRate ?? 0) > 0.5 ? 'is-warn' : undefined}
+          />
+          <StatRow label="Running now" value={formatCount(stats.runningNow)} />
+          <StatRow label="Warm and idle" value={formatCount(stats.warmIdle)} />
+          <StatRow
+            label="Throttled"
+            value={formatRate(stats.throttledRate)}
+            tone={(stats.throttledRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+        </>
+      );
+
+    case 'streambroker':
+      return (
+        <>
+          <StatRow label="Worst group lag" value={formatCount(stats.consumerLag)} />
+          <StatRow label="Delivering" value={formatRate(stats.deliveryRate)} />
+          <StatRow
+            label="Lost to retention"
+            value={formatRate(stats.retentionDropRate)}
+            tone={(stats.retentionDropRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+        </>
+      );
+
+    case 'pubsub':
+      return (
+        <>
+          <StatRow label="Subscribers" value={formatCount(stats.fanout)} />
+          <StatRow label="Delivering" value={formatRate(stats.deliveryRate)} />
+        </>
+      );
+
+    case 'apigateway':
+      return (
+        <>
+          <StatRow label="Admitted" value={formatRate(stats.admittedRate)} />
+          <StatRow
+            label="Refused (throttled)"
+            value={formatRate(stats.throttledRate)}
+            tone={(stats.throttledRate ?? 0) > 0 ? 'is-warn' : undefined}
+          />
+          <StatRow
+            label="Refused (bad auth)"
+            value={formatRate(stats.authRejectRate)}
+            tone={(stats.authRejectRate ?? 0) > 0 ? 'is-warn' : undefined}
+          />
+        </>
+      );
+
+    case 'searchindex':
+      return (
+        <>
+          <StatRow
+            label="Stale searches"
+            value={formatPct(stats.staleSearchRate)}
+            tone={(stats.staleSearchRate ?? 0) > 0.2 ? 'is-warn' : undefined}
+          />
+          <StatRow label="Searches" value={formatRate(stats.searchRate)} />
+          <StatRow label="Index writes" value={formatRate(stats.indexWriteRate)} />
+        </>
+      );
+
+    case 'timeseriesdb':
+      return (
+        <>
+          <StatRow label="Appends" value={formatRate(stats.appendRate)} />
+          <StatRow label="Range queries" value={formatRate(stats.rangeQueryRate)} />
+        </>
+      );
+
+    case 'graphdb':
+      return (
+        <StatRow
+          label="Cost per traversal, measured"
+          value={formatMs(stats.traversalCostMs)}
+        />
+      );
+
+    case 'vectordb':
+      return (
+        <StatRow label="Cost per query, measured" value={formatMs(stats.queryCostMs)} />
+      );
+
+    case 'bulkhead':
+      return (
+        <>
+          <StatRow
+            label="Pool in use"
+            value={`${formatCount(stats.bulkheadInFlight ?? 0)} of ${formatCount(stats.bulkheadLimit ?? 0)}`}
+          />
+          <StatRow
+            label="Refused, pool full"
+            value={formatRate(stats.bulkheadRejectedRate)}
+            tone={(stats.bulkheadRejectedRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+        </>
+      );
+
+    case 'retryqueue':
+      return (
+        <>
+          <StatRow label="Delivered" value={formatRate(stats.deliveredRate)} />
+          <StatRow
+            label="Redelivering"
+            value={formatRate(stats.redeliveryRate)}
+            tone={(stats.redeliveryRate ?? 0) > 0 ? 'is-warn' : undefined}
+          />
+          <StatRow
+            label="Dead-lettering"
+            value={formatRate(stats.deadLetterRate)}
+            tone={(stats.deadLetterRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+          <StatRow
+            label="Dead letters, total"
+            value={formatCount(stats.deadLetters)}
+            tone={(stats.deadLetters ?? 0) > 0 ? 'is-warn' : undefined}
+          />
+        </>
+      );
+
+    case 'writebehind':
+      return (
+        <>
+          <StatRow label="Dirty writes held" value={formatCount(stats.dirtyWrites)} />
+          <StatRow label="Flushing" value={formatRate(stats.flushedRate)} />
+          <StatRow
+            label="Flushes failing"
+            value={formatRate(stats.flushFailRate)}
+            tone={(stats.flushFailRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+        </>
+      );
+
+    case 'edgecompute':
+      return (
+        <>
+          <StatRow
+            label="Answered at the edge"
+            value={formatRate(stats.edgeHandledRate)}
+          />
+          <StatRow
+            label="Passed to origin"
+            value={formatRate(stats.passedThroughRate)}
+          />
+        </>
+      );
+
+    case 'loadshedder':
+      return (
+        <>
+          <StatRow
+            label="High priority admitted"
+            value={formatRate(stats.highAdmittedRate)}
+          />
+          <StatRow
+            label="Low priority admitted"
+            value={formatRate(stats.lowAdmittedRate)}
+          />
+          <StatRow
+            label="Low priority dropped"
+            value={formatRate(stats.lowSheddedRate)}
+            tone={(stats.lowSheddedRate ?? 0) > 0 ? 'is-warn' : undefined}
+          />
+          <StatRow
+            label="High priority dropped"
+            value={formatRate(stats.highSheddedRate)}
+            tone={(stats.highSheddedRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+        </>
+      );
+
+    default:
+      return null;
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -1402,7 +1991,7 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
         {skewed && (
           <p className="ins-hint is-warn">
             Badly uneven. One partition is doing most of the work while the others sit
-            idle — adding shards will not help until the keys spread out.
+            idle. Adding shards will not help until the keys spread out.
           </p>
         )}
       </Section>
@@ -1441,7 +2030,7 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
         {writeBound && (
           <p className="ins-hint is-warn">
             The primary is the bottleneck, not the replicas. Adding more read replicas
-            will not help — every write still goes through the one primary.
+            will not help; every write still goes through the one primary.
           </p>
         )}
         {stats.staleReadRate > 0 && (
@@ -1467,7 +2056,7 @@ function UnitsPanel({ node, stats }: { node: SimNode; stats: NodeStats }) {
       </div>
       {booting > 0 && (
         <p className="ins-hint is-warn">
-          These are not serving traffic yet. Requests can still fail while they boot —
+          These are not serving traffic yet. Requests can still fail while they boot;
           that gap is why capacity always lags a spike.
         </p>
       )}
@@ -1502,7 +2091,7 @@ function QueuePanel({ stats }: { stats: NodeStats }) {
       </div>
       {shedding ? (
         <p className="ins-hint is-danger">
-          Full. It is turning away {formatRate(stats.shedRate)} — work arriving now is
+          Full. It is turning away {formatRate(stats.shedRate)}. Work arriving now is
           being destroyed, not delayed. The consumers cannot keep up.
         </p>
       ) : depth > 0 ? (
@@ -1571,9 +2160,6 @@ function SingleInspector({
     fields: fields.filter((f) => g.fields.has(f)),
   })).filter((g) => g.fields.length > 0);
 
-  const util = stats?.utilization ?? 0;
-  const utilTone = toneClass(healthOfLoad(util));
-
   return (
     <aside className="ins" aria-label="Inspector">
       <div className="ins-scroll scroll">
@@ -1591,20 +2177,12 @@ function SingleInspector({
 
         <p className="ins-blurb">{KIND_BLURB[node.kind]}</p>
 
-        {/* Utilisation gets a meter rather than another number in a list:
-            it is the one value that answers "is this the problem". Clients
-            serve nothing, so they have no utilisation to show. */}
-        {stats && node.kind !== 'client' ? (
-          <div className="ins-util">
-            <div className="ins-util-head">
-              <span className="label">How busy it is</span>
-              <span className={utilTone ? `num num-md ${utilTone}` : 'num num-md'}>
-                {formatPct(util)}
-              </span>
-            </div>
-            <Meter value={util} tone={utilTone} />
-          </div>
-        ) : null}
+        {/* The headline meter, chosen per kind: utilisation where slots are
+            real, tokens for a bucket, pool fill for a bulkhead, lag against
+            retention for a broker, held connections for a websocket gateway,
+            and nothing at all for the kinds whose own panel below carries
+            the reading. See VitalsMeter. */}
+        {stats ? <VitalsMeter kind={node.kind} stats={stats} cfg={cfg} /> : null}
 
         {/* WHAT THIS COMPONENT IS MADE OF.
 
@@ -1614,6 +2192,8 @@ function SingleInspector({
             partition pinned at 100% underneath it. */}
         {stats && node.kind === 'autoscaler' && <AutoscalerPanel stats={stats} />}
         {stats && node.kind === 'queue' && <QueuePanel stats={stats} />}
+        {stats && node.kind === 'cron' && <CronPanel stats={stats} />}
+        {stats && node.kind === 'region' && <RegionPanel stats={stats} />}
         {stats && node.kind !== 'queue' && node.kind !== 'autoscaler' && (
           <UnitsPanel node={node} stats={stats} />
         )}
@@ -1622,7 +2202,7 @@ function SingleInspector({
           <Section key={group.title} title={group.title}>
             <div className="ins-fields">
               {group.fields.map((field) => {
-                const spec = FIELD_SPECS[field];
+                const spec = specFor(node.kind, field);
                 // Fields that only some kinds read are optional on NodeConfig,
                 // so a node saved by an older build can be missing one. Fall
                 // back to this kind's default rather than to the spec's
@@ -1669,102 +2249,72 @@ function SingleInspector({
           </Section>
         )}
 
-        <Section title="Right now">
-          {stats ? (
-            <div className="ins-stats">
-              <StatRow label="Being handled now" value={formatCount(stats.inFlight)} />
-              <StatRow
-                label={node.kind === 'queue' ? 'Backlog' : 'Waiting in line'}
-                value={formatCount(stats.queued)}
-              />
-              <StatRow label="Finishing" value={formatRate(stats.throughput)} />
-              <StatRow label="Arriving" value={formatRate(stats.arrivalRate)} />
-              {(node.kind === 'cache' || node.kind === 'cdn') && (
-                <StatRow label="Hit rate, measured" value={formatPct(stats.hitRate)} />
-              )}
-              {node.kind === 'bulkhead' && (
+        {/* Controllers (cron, autoscaler) serve nothing, ever: every generic
+            row here is a hardwired zero for them, and ten rows of zeros are
+            what made them read as broken. Their "What it is doing" panels
+            above are their whole live story. */}
+        {node.kind !== 'cron' && node.kind !== 'autoscaler' && (
+          <Section title="Right now">
+            {stats ? (
+              <div className="ins-stats">
+                {/* Gate kinds hold no work of their own: in-flight and queued
+                    are structurally zero there and are dropped rather than
+                    printed as dead rows. */}
+                {!GATE_KINDS.has(node.kind) && (
+                  <>
+                    <StatRow
+                      label="Being handled now"
+                      value={formatCount(stats.inFlight)}
+                    />
+                    <StatRow
+                      label={node.kind === 'queue' ? 'Backlog' : 'Waiting in line'}
+                      value={formatCount(stats.queued)}
+                    />
+                  </>
+                )}
+                <StatRow label="Finishing" value={formatRate(stats.throughput)} />
+                <StatRow label="Arriving" value={formatRate(stats.arrivalRate)} />
+                <KindStatRows kind={node.kind} stats={stats} />
+                <StatRow label="p50" value={formatMs(stats.p50)} />
+                <StatRow label="p95" value={formatMs(stats.p95)} />
                 <StatRow
-                  label="Pool in use"
-                  value={`${formatCount(stats.bulkheadInFlight ?? 0)} of ${formatCount(stats.bulkheadLimit ?? 0)}`}
+                  label="p99"
+                  value={formatMs(stats.p99)}
+                  tone={toneClass(healthOfLatency(stats.p99))}
                 />
-              )}
-              {node.kind === 'retryqueue' && (
-                <>
+                <StatRow
+                  label="Errors"
+                  value={formatPct(stats.errorRate)}
+                  tone={toneClass(healthOfErr(stats.errorRate))}
+                />
+                {stats.shedRate > 0 && (
                   <StatRow
-                    label="Redelivering"
-                    value={formatRate(stats.redeliveryRate ?? 0)}
+                    label="Turned away"
+                    value={formatRate(stats.shedRate)}
+                    tone="is-danger"
                   />
+                )}
+                {stats.timeoutRate > 0 && (
                   <StatRow
-                    label="Dead letters, total"
-                    value={formatCount(stats.deadLetters ?? 0)}
-                    tone={(stats.deadLetters ?? 0) > 0 ? 'is-warn' : undefined}
+                    label="Timed out"
+                    value={formatRate(stats.timeoutRate)}
+                    tone="is-danger"
                   />
-                </>
-              )}
-              {node.kind === 'writebehind' && (
+                )}
                 <StatRow
-                  label="Dirty writes held"
-                  value={formatCount(stats.dirtyWrites ?? 0)}
+                  label="Completed, total"
+                  value={formatCount(stats.totalCompleted)}
                 />
-              )}
-              {node.kind === 'edgecompute' && (
-                <StatRow
-                  label="Answered at the edge"
-                  value={formatRate(stats.edgeHandledRate ?? 0)}
-                />
-              )}
-              {node.kind === 'loadshedder' && (
-                <>
-                  <StatRow
-                    label="Low priority dropped"
-                    value={formatRate(stats.lowSheddedRate ?? 0)}
-                  />
-                  <StatRow
-                    label="High priority dropped"
-                    value={formatRate(stats.highSheddedRate ?? 0)}
-                    tone={(stats.highSheddedRate ?? 0) > 0.5 ? 'is-danger' : undefined}
-                  />
-                </>
-              )}
-              <StatRow label="p50" value={formatMs(stats.p50)} />
-              <StatRow label="p95" value={formatMs(stats.p95)} />
-              <StatRow
-                label="p99"
-                value={formatMs(stats.p99)}
-                tone={toneClass(healthOfLatency(stats.p99))}
-              />
-              <StatRow
-                label="Errors"
-                value={formatPct(stats.errorRate)}
-                tone={toneClass(healthOfErr(stats.errorRate))}
-              />
-              {stats.shedRate > 0 && (
-                <StatRow
-                  label="Turned away"
-                  value={formatRate(stats.shedRate)}
-                  tone="is-danger"
-                />
-              )}
-              {stats.timeoutRate > 0 && (
-                <StatRow
-                  label="Timed out"
-                  value={formatRate(stats.timeoutRate)}
-                  tone="is-danger"
-                />
-              )}
-              <StatRow
-                label="Completed, total"
-                value={formatCount(stats.totalCompleted)}
-              />
-              <StatRow label="Failed, total" value={formatCount(stats.totalFailed)} />
-            </div>
-          ) : (
-            <p className="ins-blurb">
-              Nothing has reached this component yet. Press Play and it will start
-              reporting.
-            </p>
-          )}
-        </Section>
+                <StatRow label="Failed, total" value={formatCount(stats.totalFailed)} />
+              </div>
+            ) : (
+              <p className="ins-blurb">
+                Nothing has reached this component yet. Press Play and it will start
+                reporting.
+              </p>
+            )}
+          </Section>
+        )}
       </div>
 
       <div className="ins-foot">
@@ -1900,7 +2450,7 @@ function MultiInspector({
               <Section key={group.title} title={group.title}>
                 <div className="ins-fields">
                   {group.fields.map((field) => {
-                    const spec = FIELD_SPECS[field];
+                    const spec = specFor(kind!, field);
                     const shared = commonValue(nodes, field);
                     const mixed = shared === null;
                     /* When the nodes disagree, the control still needs a

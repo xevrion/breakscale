@@ -297,119 +297,20 @@
 
    PER-KIND COLOUR PLUMBING.
 
-   Each kind resolves the three role tokens from index.css into three LOCAL
-   custom properties on the node group, exactly once:
-
-     --k-fill    body background
-     --k-stroke  body outline
-     --k-ink     glyph and name
-
-   Everything downstream — hover, selection, meter, ports, link states — is
-   then written against those locals and is completely kind-agnostic. That is
-   the whole point of doing it this way: there are fourteen kinds and roughly
-   a dozen states, and enumerating the cross-product would be 168 rules that
-   drift apart the first time anyone edits one. This is 14 + 12.
-
-   A kind is identified by [data-kind], set by NodeView. The fallback in each
-   var() is the neutral surface, so a kind that somehow arrives unmapped
-   renders as a plain grey node rather than as a transparent hole.
+   The kind -> colour mapping lives in index.css, which sets --k-fill,
+   --k-line, --k-stroke and --k-ink on any element carrying [data-kind].
+   NodeView sets that attribute, so every rule below is written against the
+   locals and is completely kind-agnostic — one rule covers all 33 kinds.
+   Each var() keeps a neutral fallback so an unmapped kind renders as a
+   plain grey node rather than as a transparent hole.
    -------------------------------------------------------------------------- */
 
 .cv-node {
   --k-fill: var(--surface-2);
+  --k-line: var(--border-strong);
   --k-stroke: var(--border-strong);
   --k-ink: var(--text-dim);
   cursor: grab;
-}
-
-/* origin */
-.cv-node[data-kind='client'] {
-  --k-fill: var(--kind-client-fill);
-  --k-stroke: var(--kind-client-stroke);
-  --k-ink: var(--kind-client-ink);
-}
-
-/* compute */
-.cv-node[data-kind='lb'] {
-  --k-fill: var(--kind-lb-fill);
-  --k-stroke: var(--kind-lb-stroke);
-  --k-ink: var(--kind-lb-ink);
-}
-
-.cv-node[data-kind='service'] {
-  --k-fill: var(--kind-service-fill);
-  --k-stroke: var(--kind-service-stroke);
-  --k-ink: var(--kind-service-ink);
-}
-
-.cv-node[data-kind='worker'] {
-  --k-fill: var(--kind-worker-fill);
-  --k-stroke: var(--kind-worker-stroke);
-  --k-ink: var(--kind-worker-ink);
-}
-
-/* storage */
-.cv-node[data-kind='db'] {
-  --k-fill: var(--kind-db-fill);
-  --k-stroke: var(--kind-db-stroke);
-  --k-ink: var(--kind-db-ink);
-}
-
-.cv-node[data-kind='replica'] {
-  --k-fill: var(--kind-replica-fill);
-  --k-stroke: var(--kind-replica-stroke);
-  --k-ink: var(--kind-replica-ink);
-}
-
-.cv-node[data-kind='shard'] {
-  --k-fill: var(--kind-shard-fill);
-  --k-stroke: var(--kind-shard-stroke);
-  --k-ink: var(--kind-shard-ink);
-}
-
-.cv-node[data-kind='cache'] {
-  --k-fill: var(--kind-cache-fill);
-  --k-stroke: var(--kind-cache-stroke);
-  --k-ink: var(--kind-cache-ink);
-}
-
-/* flow */
-.cv-node[data-kind='queue'] {
-  --k-fill: var(--kind-queue-fill);
-  --k-stroke: var(--kind-queue-stroke);
-  --k-ink: var(--kind-queue-ink);
-}
-
-.cv-node[data-kind='region'] {
-  --k-fill: var(--kind-region-fill);
-  --k-stroke: var(--kind-region-stroke);
-  --k-ink: var(--kind-region-ink);
-}
-
-/* edge / protection */
-.cv-node[data-kind='cdn'] {
-  --k-fill: var(--kind-cdn-fill);
-  --k-stroke: var(--kind-cdn-stroke);
-  --k-ink: var(--kind-cdn-ink);
-}
-
-.cv-node[data-kind='ratelimiter'] {
-  --k-fill: var(--kind-ratelimiter-fill);
-  --k-stroke: var(--kind-ratelimiter-stroke);
-  --k-ink: var(--kind-ratelimiter-ink);
-}
-
-.cv-node[data-kind='breaker'] {
-  --k-fill: var(--kind-breaker-fill);
-  --k-stroke: var(--kind-breaker-stroke);
-  --k-ink: var(--kind-breaker-ink);
-}
-
-/* control */
-.cv-node[data-kind='autoscaler'] {
-  --k-fill: var(--kind-autoscaler-fill);
-  --k-stroke: var(--kind-autoscaler-stroke);
-  --k-ink: var(--kind-autoscaler-ink);
 }
 
 .cv-node:active {
@@ -516,6 +417,15 @@
 .cv-node.is-selected .cv-node-primary {
   font-size: var(--fs-lg);
   letter-spacing: var(--tr-lg);
+}
+
+/* Strip kinds (shard, replica, streambroker) never take the selected font
+   bump: their strip's top edge at y=56 sits 4px under the primary's baseline
+   at 52, and a 22px descender crosses it (measured overlap 124x3px on a
+   selected shard). The base size is the only one that clears the strip. */
+.cv-node.has-strip.is-selected .cv-node-primary {
+  font-size: var(--fs-num);
+  letter-spacing: var(--tr-num);
 }
 
 /* T2 — the two secondary metrics. */
@@ -834,6 +744,14 @@
    held in the kind's own ink so it belongs to the component. */
 .cv-node-badge {
   fill: var(--k-ink);
+  /* A plate behind the glyphs, painted first (paint-order), so the count
+     stays legible where the offset instance-stack card edges pass behind
+     the top-right corner. This was the only text in the app sitting on a
+     non-uniform background. */
+  paint-order: stroke;
+  stroke: var(--k-fill);
+  stroke-width: 3;
+  stroke-linejoin: round;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
@@ -889,6 +807,13 @@
   stroke: var(--k-stroke);
   stroke-opacity: 0.5;
   stroke-width: var(--bw);
+}
+
+/* The replica primary's saturation-proof marker: a notch UNDER the lead
+   cell, outside the fill's colour channel, so the write/read distinction
+   survives every member of the set being pinned red. */
+.cv-cell-lead-notch {
+  fill: var(--k-ink);
 }
 
 /* --- queue vessel ------------------------------------------------------- */

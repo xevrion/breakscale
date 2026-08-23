@@ -2574,7 +2574,7 @@ const twitter: Topology = {
       capacity: 8,
       serviceMs: 8,
       indexMs: 60,
-      indexLagMs: 2000,
+      indexLagMs: 800,
       readFraction: 0.6,
       queueLimit: 64,
     }),
@@ -2695,7 +2695,7 @@ const twitter: Topology = {
  * the door (loud, clean, and exactly what the rate-limiter post says
  * to do), the card-network pool runs ~90% hot so p99 stretches, and
  * dashboards are throttled to their 150 rps budget while the ledger
- * never queues. Inject 'error' on Card Networks and the breaker trips:
+ * never queues. Inject an 'errors' fault on Card Networks and the breaker trips:
  * charges fail fast, nothing double-bills, webhooks drain the failures
  * with retries. Crash the Ledger and charges stop entirely while
  * dashboards keep serving off the replicas: availability is the thing

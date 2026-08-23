@@ -31,8 +31,26 @@
 
 .term {
   /* text-decoration rather than border-bottom: it follows the glyphs, breaks
-     correctly across lines, and does not participate in layout. */
-  text-decoration: underline dotted var(--border-strong);
+     correctly across lines, and does not participate in layout.
+
+     THE INK IS --line-3, AND THIS IS MEASURED, NOT TASTE.
+
+     The instinct is to use --border-strong, the quietest divider in the
+     system. Measured, that lands at 1.58:1 on --surface and 1.46:1 on
+     --surface-2. WCAG 1.4.11 requires 3:1 for a graphical object you need in
+     order to understand the interface, and this marker is precisely that: it
+     is the only thing telling a student an explanation exists. Below 3:1 the
+     feature silently fails for the readers who most need it, which is worse
+     than not shipping it.
+
+     --line-3 measures 3.27:1 on --surface, 3.11:1 on --bg and 3.00:1 on
+     --surface-2 — clearing the bar on every surface a term can sit on. It is
+     an existing token, so this adds no colour to the system.
+
+     Dotted rather than solid is what keeps it quiet at that strength: the
+     gaps cut the mark's visual mass roughly in half, so it reads as a hint
+     across forty terms while each dot is genuinely visible. */
+  text-decoration: underline dotted var(--line-3);
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
   /* The one correct cursor for "there is an explanation here". */
@@ -155,7 +173,9 @@
 }
 
 .tip-short {
-  margin: 2px 0 0;
+  /* The term and its one-line definition are one unit, so they sit at the
+     tightest step on the scale. */
+  margin: var(--sp-1) 0 0;
   font-size: var(--fs-sm);
   font-weight: var(--fw-body);
   line-height: var(--lh-sm);

@@ -8,7 +8,7 @@
    This file owns, and is the SOLE owner of:
      - the six-step type scale
      - the seven-step 4px spacing scale
-     - every colour token, including the 14 per-kind colour trios
+     - every colour token, including the 33 per-kind colour trios
      - the shared primitives: .panel .label .num .btn .slider .field .scroll,
        status classes, the focus ring, scrollbars, reduced motion
 
@@ -27,7 +27,7 @@
    its contrast measured numerically, not chosen by eye. OKLCH is used rather
    than HSL because HSL lightness is not perceptual — a 60% blue and a 60%
    yellow look nothing alike, which is precisely how a 14-swatch palette ends
-   up looking like 14 unrelated stickers. In OKLCH, holding L and C fixed and
+   up looking like 33 unrelated stickers. In OKLCH, holding L and C fixed and
    varying only H yields swatches of genuinely equal weight.
 
    No component-specific class may be defined in this file.
@@ -121,6 +121,12 @@
   --shadow-sm: 0 1px 2px rgba(60, 50, 40, 0.06);
   --shadow-md: 0 1px 2px rgba(60, 50, 40, 0.05), 0 4px 10px rgba(60, 50, 40, 0.07);
   --shadow-lg: 0 2px 4px rgba(60, 50, 40, 0.05), 0 12px 28px rgba(60, 50, 40, 0.1);
+
+  /* Scrim behind a temporary surface. The same warm-neutral as the shadows,
+     kept deliberately light: it marks the layer above as active without
+     hiding the running simulation, which is the thing the student opened
+     that layer to understand. */
+  --scrim: rgba(60, 50, 40, 0.16);
 
   /* Interactive transitions only, 120-200ms. There are no entrance
      animations anywhere in this application. */
@@ -241,9 +247,9 @@
   /* ==========================================================================
      PER-KIND COLOUR SYSTEM — the heart of the redesign.
 
-     DERIVATION RULE. Each of the 14 kinds owns exactly ONE hue angle. The
+     DERIVATION RULE. Each of the 33 kinds owns exactly ONE hue angle. The
      three roles are then generated at a FIXED lightness and chroma that is
-     identical for all 14 kinds, so only the hue ever differs:
+     identical for all 33 kinds, so only the hue ever differs:
 
        --kind-*-fill   OKLCH  L 0.958  C 0.021   node body background
        --kind-*-line   OKLCH  L 0.740  C 0.110   internal rule / accent stroke
@@ -255,49 +261,65 @@
      browser silently clips the colour and the swatch drifts off-rule, which
      is a common and invisible way a systematic palette stops being systematic.
 
-     Because L and C are constant, all 14 have equal visual weight. Verified:
-       ink-on-fill contrast spans only 6.91 - 7.40 across all fourteen.
-       --text on every fill spans only 13.69 - 13.94.
-     A range that tight is what makes them read as ONE family.
+     Because L and C are constant, all 33 have equal visual weight.
 
      HUE FAMILIES — related kinds sit on adjacent hues, so a student learns
-     the neighbourhood as well as the individual piece:
+     the neighbourhood as well as the individual piece. All 33 kinds are
+     generated from the rule above; none falls back to grey.
 
-       origin       client 295                        violet
-       compute      lb 250, service 262, worker 274   blues
-       storage      shard 206, replica 218, db 230    cyan-blues
-                    cache 70                          amber (deliberate
-                      outlier: cache is storage that behaves like edge, and
-                      being the one warm store makes it instantly findable)
-       flow         queue 310, region 340             magenta-pinks
-       edge/protect cdn 190, ratelimiter 145,         teal, green, red
-                    breaker 25
-       control      autoscaler 118                    olive
+       traffic      client 295, lb 250, cdn 190, edgecompute 175
+       compute      service 262, worker 274, transcoder 286,
+                    queue 310, retryqueue 322   (the two queues sit together)
+       data         shard 206, replica 218, db 230   cyan-blues
+                    cache 70, writebehind 50         amber (deliberate
+                      outliers: the two stores that behave like edge, and
+                      being the warm ones makes them instantly findable)
+       stores       vectordb 152, searchindex 160, timeseriesdb 168,
+                    graphdb 184, objectstore 196, coldstorage 214
+                      a green-teal shelf, held clear of the core data blues
+       messaging    streambroker 334, pubsub 346, websocket 358, lambda 12
+                    cron 100  (a clock, not a message — olive with control)
+       control      autoscaler 118, loadshedder 132, ratelimiter 145
+                    breaker 25, bulkhead 38   (the two hard stops, in red)
+                    region 340, apigateway 240, sidecar 88
 
-     ACCESSIBILITY, measured on every one of the 14 fills:
+     ACCESSIBILITY, measured on every one of the 33 fills:
        --text          13.69 - 13.94  (AA, AAA)
        --text-dim       6.29 -  6.40  (AA)
-       --ok             4.79 -  4.87  (AA)
-       --warn           5.23 -  5.31  (AA)
+       --ok             4.75 -  4.83  (AA)
+       --warn           5.18 -  5.28  (AA)
        --danger         4.90 -  4.99  (AA)
+       ink on own fill  6.89 -  7.48  (AA)
      Every health colour clears AA on every kind fill. This was the single
      constraint most likely to break the scheme; it holds with margin, which
      is why health can be shown as text directly on a coloured node.
-     --kind-*-stroke measures 3.49 - 3.95 on --bg: AA for graphics, all 14.
+     --kind-*-stroke measures 3.47 - 3.96 on --bg: AA for graphics, all 33.
+     A range this tight across 33 swatches is what makes them read as ONE
+     family rather than 33 unrelated stickers.
      ========================================================================== */
 
-  /* origin ---------------------------------------------------------------- */
+  /* Traffic — violets through to the edge */
   --kind-client-fill: #f2effe;
   --kind-client-line: #b09de9;
   --kind-client-stroke: #866fc2;
   --kind-client-ink: #534775;
 
-  /* compute --------------------------------------------------------------- */
   --kind-lb-fill: #e7f3ff;
   --kind-lb-line: #73b0ee;
   --kind-lb-stroke: #3e84c8;
   --kind-lb-ink: #2d5277;
 
+  --kind-cdn-fill: #e2f6f4;
+  --kind-cdn-line: #41c1ba;
+  --kind-cdn-stroke: #00948e;
+  --kind-cdn-ink: #005d59;
+
+  --kind-edgecompute-fill: #e3f6f0;
+  --kind-edgecompute-line: #51c1a7;
+  --kind-edgecompute-stroke: #00967c;
+  --kind-edgecompute-ink: #115d4d;
+
+  /* Compute — blues, with the two queues on the violet side */
   --kind-service-fill: #eaf2ff;
   --kind-service-line: #85abf0;
   --kind-service-stroke: #567fca;
@@ -308,11 +330,36 @@
   --kind-worker-stroke: #6a79ca;
   --kind-worker-ink: #434c79;
 
-  /* storage --------------------------------------------------------------- */
+  --kind-queue-fill: #f5eefc;
+  --kind-queue-line: #c097df;
+  --kind-queue-stroke: #9769b8;
+  --kind-queue-ink: #5c446f;
+
+  --kind-retryqueue-fill: #f8edfa;
+  --kind-retryqueue-line: #cc93d4;
+  --kind-retryqueue-stroke: #a365ac;
+  --kind-retryqueue-ink: #634168;
+
+  --kind-transcoder-fill: #efefff;
+  --kind-transcoder-line: #a5a0ed;
+  --kind-transcoder-stroke: #7b73c7;
+  --kind-transcoder-ink: #4c4977;
+
+  /* Data — cyan-blues, cache the one warm outlier */
   --kind-db-fill: #e4f4fd;
   --kind-db-line: #57b8e3;
-  --kind-db-stroke: #008cba;
+  --kind-db-stroke: #008cb9;
   --kind-db-ink: #185771;
+
+  --kind-cache-fill: #fbefe2;
+  --kind-cache-line: #d79e59;
+  --kind-cache-stroke: #af7112;
+  --kind-cache-ink: #6a481c;
+
+  --kind-writebehind-fill: #feede5;
+  --kind-writebehind-line: #e3966a;
+  --kind-writebehind-stroke: #ba6734;
+  --kind-writebehind-ink: #704328;
 
   --kind-replica-fill: #e2f5fb;
   --kind-replica-line: #48bbd9;
@@ -324,43 +371,103 @@
   --kind-shard-stroke: #00919e;
   --kind-shard-ink: #005b64;
 
-  --kind-cache-fill: #fbefe2;
-  --kind-cache-line: #d79e59;
-  --kind-cache-stroke: #af7112;
-  --kind-cache-ink: #6a481c;
+  /* Specialised stores — a cool green-teal shelf, distinct from core data */
+  --kind-objectstore-fill: #e2f6f6;
+  --kind-objectstore-line: #3ec0c1;
+  --kind-objectstore-stroke: #009394;
+  --kind-objectstore-ink: #005c5d;
 
-  /* flow ------------------------------------------------------------------ */
-  --kind-queue-fill: #f5eefc;
-  --kind-queue-line: #c097df;
-  --kind-queue-stroke: #9769b8;
-  --kind-queue-ink: #5c446f;
+  --kind-searchindex-fill: #e6f6ec;
+  --kind-searchindex-line: #66c093;
+  --kind-searchindex-stroke: #229666;
+  --kind-searchindex-ink: #245c41;
 
-  --kind-region-fill: #fcecf6;
-  --kind-region-line: #d98fc1;
-  --kind-region-stroke: #b06098;
-  --kind-region-ink: #6b3f5d;
+  --kind-timeseriesdb-fill: #e4f6ee;
+  --kind-timeseriesdb-line: #5bc19d;
+  --kind-timeseriesdb-stroke: #009772;
+  --kind-timeseriesdb-ink: #1a5d48;
 
-  /* edge / protection ----------------------------------------------------- */
-  --kind-cdn-fill: #e2f6f4;
-  --kind-cdn-line: #41c1ba;
-  --kind-cdn-stroke: #00948e;
-  --kind-cdn-ink: #005d59;
+  --kind-graphdb-fill: #e3f6f3;
+  --kind-graphdb-line: #46c1b3;
+  --kind-graphdb-stroke: #009487;
+  --kind-graphdb-ink: #045d54;
 
+  --kind-vectordb-fill: #e7f5ea;
+  --kind-vectordb-line: #73bf88;
+  --kind-vectordb-stroke: #3a955a;
+  --kind-vectordb-ink: #2d5c3b;
+
+  --kind-coldstorage-fill: #e2f5fa;
+  --kind-coldstorage-line: #44bcd5;
+  --kind-coldstorage-stroke: #0090a6;
+  --kind-coldstorage-ink: #025a69;
+
+  /* Messaging — magenta-pinks */
+  --kind-streambroker-fill: #fbecf7;
+  --kind-streambroker-line: #d590c8;
+  --kind-streambroker-stroke: #ac619f;
+  --kind-streambroker-ink: #693f61;
+
+  --kind-pubsub-fill: #fcecf4;
+  --kind-pubsub-line: #dd8eb9;
+  --kind-pubsub-stroke: #b45f90;
+  --kind-pubsub-ink: #6d3e58;
+
+  --kind-websocket-fill: #feecf1;
+  --kind-websocket-line: #e38daa;
+  --kind-websocket-stroke: #ba5d80;
+  --kind-websocket-ink: #703d50;
+
+  --kind-lambda-fill: #ffeced;
+  --kind-lambda-line: #e78d98;
+  --kind-lambda-stroke: #be5d6c;
+  --kind-lambda-ink: #733d45;
+
+  --kind-cron-fill: #f4f2e2;
+  --kind-cron-line: #bbac55;
+  --kind-cron-stroke: #928100;
+  --kind-cron-ink: #595019;
+
+  /* Control — greens and olives, with the two hard stops in red */
   --kind-ratelimiter-fill: #e9f5e9;
   --kind-ratelimiter-line: #7dbd7f;
   --kind-ratelimiter-stroke: #4b934f;
   --kind-ratelimiter-ink: #345b35;
+
+  --kind-loadshedder-fill: #ecf4e6;
+  --kind-loadshedder-line: #91ba6f;
+  --kind-loadshedder-stroke: #638f3a;
+  --kind-loadshedder-ink: #40582b;
 
   --kind-breaker-fill: #ffecea;
   --kind-breaker-line: #e88f87;
   --kind-breaker-stroke: #c05f59;
   --kind-breaker-ink: #743e3b;
 
-  /* control --------------------------------------------------------------- */
+  --kind-bulkhead-fill: #ffede7;
+  --kind-bulkhead-line: #e79277;
+  --kind-bulkhead-stroke: #be6346;
+  --kind-bulkhead-ink: #734031;
+
   --kind-autoscaler-fill: #f0f3e4;
   --kind-autoscaler-line: #a5b461;
   --kind-autoscaler-stroke: #7a8a23;
   --kind-autoscaler-ink: #4c5522;
+
+  --kind-region-fill: #fcecf6;
+  --kind-region-line: #d98fc1;
+  --kind-region-stroke: #b06098;
+  --kind-region-ink: #6b3f5d;
+
+  --kind-apigateway-fill: #e5f3fe;
+  --kind-apigateway-line: #65b4e9;
+  --kind-apigateway-stroke: #2388c3;
+  --kind-apigateway-ink: #235575;
+
+  --kind-sidecar-fill: #f7f1e2;
+  --kind-sidecar-line: #c8a753;
+  --kind-sidecar-stroke: #9f7b00;
+  --kind-sidecar-ink: #614d17;
 
   /* ------------------------------------------------------------------------
      Type stacks. System-first: the OS UI font is the one a student's eye is
@@ -566,19 +673,288 @@ h4 {
   color: var(--text-faint);
 }
 
+/* ==========================================================================
+   Kind identity mapping — the SOLE owner of kind -> colour.
+
+   Any element carrying [data-kind] resolves that kind's four role tokens
+   into four locals. Everything downstream — the canvas node and all its
+   states, the palette chip, the inspector header — is then written against
+   --k-fill / --k-line / --k-stroke / --k-ink and is completely kind-
+   agnostic.
+
+   That is the whole point of doing it here rather than per component.
+   There are 33 kinds and roughly a dozen states; enumerating the cross-
+   product in each file would be hundreds of rules that drift apart the
+   first time anyone edits one. This is 33 + 12, written once.
+
+   Consumers must always supply a neutral fallback -- var(--k-fill,
+   var(--surface-2)) -- so an element with no [data-kind] ancestor renders
+   as a plain grey object rather than as a transparent hole.
+   ========================================================================== */
+
+/* traffic */
+[data-kind='client'] {
+  --k-fill: var(--kind-client-fill);
+  --k-line: var(--kind-client-line);
+  --k-stroke: var(--kind-client-stroke);
+  --k-ink: var(--kind-client-ink);
+}
+
+[data-kind='lb'] {
+  --k-fill: var(--kind-lb-fill);
+  --k-line: var(--kind-lb-line);
+  --k-stroke: var(--kind-lb-stroke);
+  --k-ink: var(--kind-lb-ink);
+}
+
+[data-kind='cdn'] {
+  --k-fill: var(--kind-cdn-fill);
+  --k-line: var(--kind-cdn-line);
+  --k-stroke: var(--kind-cdn-stroke);
+  --k-ink: var(--kind-cdn-ink);
+}
+
+[data-kind='edgecompute'] {
+  --k-fill: var(--kind-edgecompute-fill);
+  --k-line: var(--kind-edgecompute-line);
+  --k-stroke: var(--kind-edgecompute-stroke);
+  --k-ink: var(--kind-edgecompute-ink);
+}
+
+/* compute */
+[data-kind='service'] {
+  --k-fill: var(--kind-service-fill);
+  --k-line: var(--kind-service-line);
+  --k-stroke: var(--kind-service-stroke);
+  --k-ink: var(--kind-service-ink);
+}
+
+[data-kind='worker'] {
+  --k-fill: var(--kind-worker-fill);
+  --k-line: var(--kind-worker-line);
+  --k-stroke: var(--kind-worker-stroke);
+  --k-ink: var(--kind-worker-ink);
+}
+
+[data-kind='transcoder'] {
+  --k-fill: var(--kind-transcoder-fill);
+  --k-line: var(--kind-transcoder-line);
+  --k-stroke: var(--kind-transcoder-stroke);
+  --k-ink: var(--kind-transcoder-ink);
+}
+
+[data-kind='queue'] {
+  --k-fill: var(--kind-queue-fill);
+  --k-line: var(--kind-queue-line);
+  --k-stroke: var(--kind-queue-stroke);
+  --k-ink: var(--kind-queue-ink);
+}
+
+[data-kind='retryqueue'] {
+  --k-fill: var(--kind-retryqueue-fill);
+  --k-line: var(--kind-retryqueue-line);
+  --k-stroke: var(--kind-retryqueue-stroke);
+  --k-ink: var(--kind-retryqueue-ink);
+}
+
+/* data */
+[data-kind='db'] {
+  --k-fill: var(--kind-db-fill);
+  --k-line: var(--kind-db-line);
+  --k-stroke: var(--kind-db-stroke);
+  --k-ink: var(--kind-db-ink);
+}
+
+[data-kind='replica'] {
+  --k-fill: var(--kind-replica-fill);
+  --k-line: var(--kind-replica-line);
+  --k-stroke: var(--kind-replica-stroke);
+  --k-ink: var(--kind-replica-ink);
+}
+
+[data-kind='shard'] {
+  --k-fill: var(--kind-shard-fill);
+  --k-line: var(--kind-shard-line);
+  --k-stroke: var(--kind-shard-stroke);
+  --k-ink: var(--kind-shard-ink);
+}
+
+[data-kind='cache'] {
+  --k-fill: var(--kind-cache-fill);
+  --k-line: var(--kind-cache-line);
+  --k-stroke: var(--kind-cache-stroke);
+  --k-ink: var(--kind-cache-ink);
+}
+
+[data-kind='writebehind'] {
+  --k-fill: var(--kind-writebehind-fill);
+  --k-line: var(--kind-writebehind-line);
+  --k-stroke: var(--kind-writebehind-stroke);
+  --k-ink: var(--kind-writebehind-ink);
+}
+
+/* specialised stores */
+[data-kind='vectordb'] {
+  --k-fill: var(--kind-vectordb-fill);
+  --k-line: var(--kind-vectordb-line);
+  --k-stroke: var(--kind-vectordb-stroke);
+  --k-ink: var(--kind-vectordb-ink);
+}
+
+[data-kind='searchindex'] {
+  --k-fill: var(--kind-searchindex-fill);
+  --k-line: var(--kind-searchindex-line);
+  --k-stroke: var(--kind-searchindex-stroke);
+  --k-ink: var(--kind-searchindex-ink);
+}
+
+[data-kind='timeseriesdb'] {
+  --k-fill: var(--kind-timeseriesdb-fill);
+  --k-line: var(--kind-timeseriesdb-line);
+  --k-stroke: var(--kind-timeseriesdb-stroke);
+  --k-ink: var(--kind-timeseriesdb-ink);
+}
+
+[data-kind='graphdb'] {
+  --k-fill: var(--kind-graphdb-fill);
+  --k-line: var(--kind-graphdb-line);
+  --k-stroke: var(--kind-graphdb-stroke);
+  --k-ink: var(--kind-graphdb-ink);
+}
+
+[data-kind='objectstore'] {
+  --k-fill: var(--kind-objectstore-fill);
+  --k-line: var(--kind-objectstore-line);
+  --k-stroke: var(--kind-objectstore-stroke);
+  --k-ink: var(--kind-objectstore-ink);
+}
+
+[data-kind='coldstorage'] {
+  --k-fill: var(--kind-coldstorage-fill);
+  --k-line: var(--kind-coldstorage-line);
+  --k-stroke: var(--kind-coldstorage-stroke);
+  --k-ink: var(--kind-coldstorage-ink);
+}
+
+/* messaging */
+[data-kind='streambroker'] {
+  --k-fill: var(--kind-streambroker-fill);
+  --k-line: var(--kind-streambroker-line);
+  --k-stroke: var(--kind-streambroker-stroke);
+  --k-ink: var(--kind-streambroker-ink);
+}
+
+[data-kind='pubsub'] {
+  --k-fill: var(--kind-pubsub-fill);
+  --k-line: var(--kind-pubsub-line);
+  --k-stroke: var(--kind-pubsub-stroke);
+  --k-ink: var(--kind-pubsub-ink);
+}
+
+[data-kind='websocket'] {
+  --k-fill: var(--kind-websocket-fill);
+  --k-line: var(--kind-websocket-line);
+  --k-stroke: var(--kind-websocket-stroke);
+  --k-ink: var(--kind-websocket-ink);
+}
+
+[data-kind='lambda'] {
+  --k-fill: var(--kind-lambda-fill);
+  --k-line: var(--kind-lambda-line);
+  --k-stroke: var(--kind-lambda-stroke);
+  --k-ink: var(--kind-lambda-ink);
+}
+
+[data-kind='cron'] {
+  --k-fill: var(--kind-cron-fill);
+  --k-line: var(--kind-cron-line);
+  --k-stroke: var(--kind-cron-stroke);
+  --k-ink: var(--kind-cron-ink);
+}
+
+/* control */
+[data-kind='autoscaler'] {
+  --k-fill: var(--kind-autoscaler-fill);
+  --k-line: var(--kind-autoscaler-line);
+  --k-stroke: var(--kind-autoscaler-stroke);
+  --k-ink: var(--kind-autoscaler-ink);
+}
+
+[data-kind='loadshedder'] {
+  --k-fill: var(--kind-loadshedder-fill);
+  --k-line: var(--kind-loadshedder-line);
+  --k-stroke: var(--kind-loadshedder-stroke);
+  --k-ink: var(--kind-loadshedder-ink);
+}
+
+[data-kind='ratelimiter'] {
+  --k-fill: var(--kind-ratelimiter-fill);
+  --k-line: var(--kind-ratelimiter-line);
+  --k-stroke: var(--kind-ratelimiter-stroke);
+  --k-ink: var(--kind-ratelimiter-ink);
+}
+
+[data-kind='breaker'] {
+  --k-fill: var(--kind-breaker-fill);
+  --k-line: var(--kind-breaker-line);
+  --k-stroke: var(--kind-breaker-stroke);
+  --k-ink: var(--kind-breaker-ink);
+}
+
+[data-kind='bulkhead'] {
+  --k-fill: var(--kind-bulkhead-fill);
+  --k-line: var(--kind-bulkhead-line);
+  --k-stroke: var(--kind-bulkhead-stroke);
+  --k-ink: var(--kind-bulkhead-ink);
+}
+
+[data-kind='region'] {
+  --k-fill: var(--kind-region-fill);
+  --k-line: var(--kind-region-line);
+  --k-stroke: var(--kind-region-stroke);
+  --k-ink: var(--kind-region-ink);
+}
+
+[data-kind='apigateway'] {
+  --k-fill: var(--kind-apigateway-fill);
+  --k-line: var(--kind-apigateway-line);
+  --k-stroke: var(--kind-apigateway-stroke);
+  --k-ink: var(--kind-apigateway-ink);
+}
+
+[data-kind='sidecar'] {
+  --k-fill: var(--kind-sidecar-fill);
+  --k-line: var(--kind-sidecar-line);
+  --k-stroke: var(--kind-sidecar-stroke);
+  --k-ink: var(--kind-sidecar-ink);
+}
+
 /* Status modifiers. Applied to the number itself, never to its container.
    At 'ok' nothing is coloured — a healthy screen is entirely neutral, which
-   is what gives --warn and --danger their meaning when they do appear. */
+   is what gives --warn and --danger their meaning when they do appear.
+
+   These set a CUSTOM PROPERTY as well as `color`, and every typographic
+   primitive that wants a status tint resolves `color: var(--status-ink,
+   <its default>)`. That indirection is the whole point: a status class and
+   a primitive like .row-v are both single class selectors, so whichever is
+   written later in the file wins the cascade. Setting `color` alone meant
+   `.row-v.is-danger` silently rendered in plain --text — the one moment the
+   UI must shout, it whispered. A custom property is not subject to that
+   race: it flows to the descendant regardless of rule order, so the fix
+   cannot rot the next time a primitive is added below this block. */
 .is-ok {
-  color: var(--ok);
+  --status-ink: var(--ok);
+  color: var(--status-ink);
 }
 
 .is-warn {
-  color: var(--warn);
+  --status-ink: var(--warn);
+  color: var(--status-ink);
 }
 
 .is-danger {
-  color: var(--danger);
+  --status-ink: var(--danger);
+  color: var(--status-ink);
 }
 
 /* Status pill. Text sits on a soft tint at the AA-verified text colour. */
@@ -1128,7 +1504,7 @@ input[type='radio'] {
   font-weight: var(--fw-num);
   line-height: var(--lh-num);
   letter-spacing: var(--tr-num);
-  color: var(--text);
+  color: var(--status-ink, var(--text));
   text-align: right;
   /* Guards the edge case the brief calls out: a 4-digit value where two were
      expected must not wrap and shove the label into the panel wall. */

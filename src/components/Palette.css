@@ -12,10 +12,14 @@
    and 2.39:1 — well under the 3:1 a graphical mark needs. A bare dot in
    that colour would be invisible to a good number of students. The chip
    instead pairs the pale --kind-*-fill body with the --kind-*-stroke
-   outline, which measures 3.38 - 4.16:1 on every surface this rail uses
+   outline, which measures 3.15 - 4.17:1 on every surface this rail uses
    (surface, surface-2 on hover, surface-3 on press). The glyph inside is
-   --kind-*-ink at 6.91 - 7.40:1 on its own fill. The identity is carried
+   --kind-*-ink at 6.89 - 7.48:1 on its own fill. The identity is carried
    by a shape that is genuinely visible rather than by a tint that is not.
+
+   The chip takes its colour from index.css, which resolves [data-kind] on
+   the row into the --k-* locals this file consumes. All 33 kinds are
+   mapped there; none falls back to grey.
 
    BOUNDARIES. Rows are separated by whitespace and a hover tint. There is
    no border on a row, no box around a group, and no card inside a card.
@@ -225,98 +229,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* --------------------------------------------------------------------------
-   Per-kind chip colours.
-
-   The only place in the app that maps a kind to its trio. Everything is a
-   token; `data-kind` is set by the component. A kind with no rule here
-   falls back to the neutral chip above rather than rendering colourless.
-   -------------------------------------------------------------------------- */
-
-.pal-row[data-kind='client'] .pal-glyph {
-  --k-fill: var(--kind-client-fill);
-  --k-stroke: var(--kind-client-stroke);
-  --k-ink: var(--kind-client-ink);
-}
-
-.pal-row[data-kind='lb'] .pal-glyph {
-  --k-fill: var(--kind-lb-fill);
-  --k-stroke: var(--kind-lb-stroke);
-  --k-ink: var(--kind-lb-ink);
-}
-
-.pal-row[data-kind='service'] .pal-glyph {
-  --k-fill: var(--kind-service-fill);
-  --k-stroke: var(--kind-service-stroke);
-  --k-ink: var(--kind-service-ink);
-}
-
-.pal-row[data-kind='cache'] .pal-glyph {
-  --k-fill: var(--kind-cache-fill);
-  --k-stroke: var(--kind-cache-stroke);
-  --k-ink: var(--kind-cache-ink);
-}
-
-.pal-row[data-kind='db'] .pal-glyph {
-  --k-fill: var(--kind-db-fill);
-  --k-stroke: var(--kind-db-stroke);
-  --k-ink: var(--kind-db-ink);
-}
-
-.pal-row[data-kind='queue'] .pal-glyph {
-  --k-fill: var(--kind-queue-fill);
-  --k-stroke: var(--kind-queue-stroke);
-  --k-ink: var(--kind-queue-ink);
-}
-
-.pal-row[data-kind='worker'] .pal-glyph {
-  --k-fill: var(--kind-worker-fill);
-  --k-stroke: var(--kind-worker-stroke);
-  --k-ink: var(--kind-worker-ink);
-}
-
-.pal-row[data-kind='replica'] .pal-glyph {
-  --k-fill: var(--kind-replica-fill);
-  --k-stroke: var(--kind-replica-stroke);
-  --k-ink: var(--kind-replica-ink);
-}
-
-.pal-row[data-kind='shard'] .pal-glyph {
-  --k-fill: var(--kind-shard-fill);
-  --k-stroke: var(--kind-shard-stroke);
-  --k-ink: var(--kind-shard-ink);
-}
-
-.pal-row[data-kind='autoscaler'] .pal-glyph {
-  --k-fill: var(--kind-autoscaler-fill);
-  --k-stroke: var(--kind-autoscaler-stroke);
-  --k-ink: var(--kind-autoscaler-ink);
-}
-
-.pal-row[data-kind='region'] .pal-glyph {
-  --k-fill: var(--kind-region-fill);
-  --k-stroke: var(--kind-region-stroke);
-  --k-ink: var(--kind-region-ink);
-}
-
-.pal-row[data-kind='cdn'] .pal-glyph {
-  --k-fill: var(--kind-cdn-fill);
-  --k-stroke: var(--kind-cdn-stroke);
-  --k-ink: var(--kind-cdn-ink);
-}
-
-.pal-row[data-kind='ratelimiter'] .pal-glyph {
-  --k-fill: var(--kind-ratelimiter-fill);
-  --k-stroke: var(--kind-ratelimiter-stroke);
-  --k-ink: var(--kind-ratelimiter-ink);
-}
-
-.pal-row[data-kind='breaker'] .pal-glyph {
-  --k-fill: var(--kind-breaker-fill);
-  --k-stroke: var(--kind-breaker-stroke);
-  --k-ink: var(--kind-breaker-ink);
 }
 
 /* --------------------------------------------------------------------------

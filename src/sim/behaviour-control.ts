@@ -548,6 +548,20 @@ const region: ComponentBehaviour = {
     const failingOver = st.failoverDueMs >= 0 && ctx.now < st.failoverDueMs;
     stats.activeRegion = st.active < 0 ? 0 : st.active;
     stats.failingOver = failingOver;
+    // How much dark window is left. A pure read of the deadline pickEdge
+    // set, so a UI can count the outage down instead of freezing on a flag.
+    stats.failoverRemainingMs = failingOver
+      ? Math.max(0, st.failoverDueMs - ctx.now)
+      : 0;
+    // Healthy-region census, from the same predicate pickEdge routes with,
+    // so the readout and the routing can never disagree about reachability.
+    const count = regionCount(state);
+    let healthy = 0;
+    for (let i = 0; i < count; i++) {
+      if (regionHealthy(ctx, state, i)) healthy += 1;
+    }
+    stats.regionsHealthy = healthy;
+    stats.regionsTotal = count;
     const live = liveRegionIndex(ctx, state, st);
     stats.liveEdgeId = live === -1 ? undefined : state.out[live]?.id;
   },

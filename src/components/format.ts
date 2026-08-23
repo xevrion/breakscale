@@ -17,7 +17,7 @@
  *   4. Latency >=1000ms switches to seconds.
  *   5. Every formatter emits its own unit. No bare number relying on a
  *      neighbouring tspan for meaning.
- *   6. One sentinel for non-finite input: `—` (em dash), everywhere.
+ *   6. One sentinel for non-finite input: `n/a`, everywhere.
  *   7. `formatRate` is never applied to a count, and vice versa.
  *
  * Every formatter accepts `number | null | undefined` and returns the sentinel
@@ -26,10 +26,14 @@
  * here rather than at each of the ~40 call sites.
  */
 
-/** The single non-finite sentinel. An em dash, never `--` and never `0`. */
-export const NA = '—';
+/**
+ * The single non-finite sentinel. Never `--` and never `0`. Plain "n/a"
+ * rather than a dash character: the readouts must not contain an em dash
+ * anywhere, and a lone hyphen reads as a negative sign next to numbers.
+ */
+export const NA = 'n/a';
 
-/** Alias kept so either name resolves; both refer to the same em dash. */
+/** Alias kept so either name resolves; both refer to the same sentinel. */
 export const EMPTY = NA;
 
 /**

@@ -994,6 +994,12 @@ export class Engine implements BehaviourCtx {
     this.lastHistoryMs = 0;
     this.snapNodes = {};
     this.snapEdges = {};
+    // Edge-flow counters are deliberately carried across setTopology so a
+    // live edit does not blank every edge label, but a reset() rewinds the
+    // clock to 0, and a stale bucket whose stamp happens to line up with the
+    // replay would double-count that edge. Sparse edges (a 2 rps batch
+    // client) are exactly the ones that keep such buckets alive.
+    for (const counter of this.edgeFlow.values()) counter.reset();
     // Chaos is part of the run, not of the topology: reset() must reproduce
     // the original trajectory from t=0, which it cannot do while a fault
     // injected mid-run is still in force.

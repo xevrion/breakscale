@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  NodeConfig,
-  NodeKind,
-  NodeStats,
-  SimNode,
-  SimSnapshot,
-  Topology,
-} from './sim/types';
+import type { NodeConfig, NodeKind, SimNode, SimSnapshot, Topology } from './sim/types';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
 import type { Preset } from './sim/presets';
-import Canvas, { SPARK_LEN } from './components/Canvas';
+import Canvas, { SPARK_LEN, readoutFor, sourceBacklogs } from './components/Canvas';
 import { Inspector, TrafficControl } from './components/Inspector';
 import { Metrics } from './components/Metrics';
 import { Palette } from './components/Palette';
@@ -47,28 +40,14 @@ const STEP_MS = 100;
  */
 const SPARK_INTERVAL_MS = 1000;
 
-/**
- * The series each node kind's sparkline plots. Mirrors the primary metric
- * chosen in Canvas's `readoutFor`, so the trend line under a number is a
- * trend line OF that number rather than of some unrelated quantity.
+/*
+ * The series each node kind's sparkline plots is `readoutFor(...).spark`:
+ * the SAME per-kind primary metric the canvas headlines, taken from the same
+ * function, so the trend line under a number is a trend line OF that number.
+ * A local per-kind switch lived here before and had already drifted from the
+ * canvas's choices for most kinds (everything defaulted to utilisation,
+ * which is hardwired 0 for every gate and controller kind).
  */
-function sparkValue(kind: NodeKind, s: NodeStats, queueLimit: number): number {
-  switch (kind) {
-    case 'client':
-      return s.throughput;
-    case 'cache':
-      return s.hitRate;
-    case 'queue': {
-      const depth = s.queued + s.inFlight;
-      const limit = queueLimit > 0 ? queueLimit : 1;
-      // Stored as a fraction of the node's own limit so the trace is
-      // comparable against the meter beneath it.
-      return Math.min(depth / limit, 1) * limit;
-    }
-    default:
-      return s.utilization;
-  }
-}
 
 interface Session {
   topology: Topology;
@@ -304,6 +283,8 @@ export default function App() {
 
     const prev = sparkRef.current;
     const next = new Map<string, Float32Array>();
+    // Pull-based consumers headline the backlog of the buffers feeding them.
+    const backlogs = sourceBacklogs(topology, snapshot.nodes);
 
     for (const n of topology.nodes) {
       const s = snapshot.nodes[n.id];
@@ -314,7 +295,9 @@ export default function App() {
       // axis rather than as data. Spark skips non-finite slots entirely.
       const buf = new Float32Array(SPARK_LEN).fill(Number.NaN);
       if (old) buf.set(old.subarray(1));
-      buf[SPARK_LEN - 1] = s ? sparkValue(n.kind, s, n.config.queueLimit) : 0;
+      buf[SPARK_LEN - 1] = s
+        ? readoutFor(n.kind, s, n.config, backlogs.get(n.id) ?? 0).spark
+        : 0;
       next.set(n.id, buf);
     }
 
