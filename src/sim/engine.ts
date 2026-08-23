@@ -465,11 +465,34 @@ export class Engine implements BehaviourCtx {
   private snapNodes: Record<string, NodeStats> = {};
   private snapEdges: Record<string, number> = {};
 
+  /**
+   * Capacity each node was authored with, by node id.
+   *
+   * A controller (the autoscaler) writes the capacity it has decided on back
+   * into `this.topology`, so the Inspector shows the size the node actually
+   * has rather than the one it started at. That write is correct for the live
+   * run and wrong for reset(): rebuilding from the mutated topology would
+   * restart the simulation at whatever capacity the controller happened to
+   * have reached, so the same seed would not replay. Recording the authored
+   * value at construction -- and at every setTopology, which is the only other
+   * time the student states an intent -- lets reset() put it back.
+   */
+  private authoredCapacity = new Map<string, number>();
+
   constructor(topology: Topology, seed = 1) {
     this.seed = seed >>> 0;
     this.rng = new Rng(this.seed);
     this.topology = cloneTopology(topology);
+    this.recordAuthoredCapacity();
     this.buildNodes(null);
+  }
+
+  /** Snapshot the authored capacity of every node, for reset() to restore. */
+  private recordAuthoredCapacity(): void {
+    this.authoredCapacity.clear();
+    for (const n of this.topology.nodes) {
+      this.authoredCapacity.set(n.id, n.config.capacity);
+    }
   }
 
   /* ---------------- public API ---------------- */
@@ -477,6 +500,7 @@ export class Engine implements BehaviourCtx {
   setTopology(t: Topology): void {
     const previous = this.nodes;
     this.topology = cloneTopology(t);
+    this.recordAuthoredCapacity();
     this.buildNodes(previous);
     // Faults survive a topology edit, but a whole-node partition names its
     // edges implicitly, so the flattened set has to be recomputed against the
@@ -490,6 +514,13 @@ export class Engine implements BehaviourCtx {
   updateNodeConfig(id: string, patch: Partial<NodeConfig>): void {
     const node = this.topology.nodes.find((n) => n.id === id);
     if (node) Object.assign(node.config, patch);
+    // A capacity the student typed is a new authored value, so reset() should
+    // return to it rather than to the one the preset shipped with. A capacity
+    // written by a controller goes through setCapacity() and deliberately does
+    // NOT land here.
+    if (patch.capacity !== undefined) {
+      this.authoredCapacity.set(id, Math.max(1, Math.floor(patch.capacity)));
+    }
     const state = this.nodes.get(id);
     if (!state) return;
     Object.assign(state.config, patch);
@@ -780,6 +811,12 @@ export class Engine implements BehaviourCtx {
     this.faults.clear();
     this.cutEdges.clear();
     this.snapFailures.length = 0;
+    // Undo anything a controller wrote back into the topology during the run,
+    // so the rebuild below starts from the capacities the run started with.
+    for (const n of this.topology.nodes) {
+      const authored = this.authoredCapacity.get(n.id);
+      if (authored !== undefined) n.config.capacity = authored;
+    }
     this.buildNodes(null);
   }
 

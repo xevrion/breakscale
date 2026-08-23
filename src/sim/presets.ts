@@ -487,6 +487,410 @@ const retryStorm: Topology = {
   edges: [edge('client', 'api'), edge('api', 'db')],
 };
 
+/* ================================================================== *
+ * Grid geometry for the presets below.
+ *
+ * Canvas draws a node as NODE_W=184 x NODE_H=88 anchored at (x, y). A column
+ * pitch of 260 leaves 76px of horizontal gutter for the edge to be visible,
+ * and a row pitch of 130 leaves 42px vertically. Every preset places nodes on
+ * COL(i) / ROW(j) so no two boxes can overlap by construction, and the
+ * verifier asserts it rather than trusting the arithmetic.
+ * ================================================================== */
+
+const COL0 = 40;
+const COL_PITCH = 260;
+const ROW0 = 60;
+const ROW_PITCH = 130;
+
+/** x of grid column i (0-based), left-to-right. */
+const COL = (i: number) => COL0 + i * COL_PITCH;
+/** y of grid row j (0-based), top-to-bottom. */
+const ROW = (j: number) => ROW0 + j * ROW_PITCH;
+
+/* ------------------------------------------------------------------ *
+ * 6. CDN + Origin
+ *    cdn:    256 slots / 2ms  -> effectively unbounded
+ *    origin:   3 slots / 25ms -> 120 rps ceiling
+ *    At hitRate 0.90 and 400 rps offered the origin sees ~40 rps: a third of
+ *    its ceiling. At 4x it sees ~160 rps and is over the ceiling, which is
+ *    the same collapse a student can trigger at 1x just by dragging the hit
+ *    rate down -- the point being that the origin was never sized for the
+ *    traffic the CDN was absorbing.
+ * ------------------------------------------------------------------ */
+
+const cdnOrigin: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 400, timeoutMs: 2000 }),
+    node('cdn', 'cdn', 'CDN Edge', COL(1), ROW(1), {
+      capacity: 256,
+      serviceMs: 2,
+      serviceCv: 0.3,
+      hitRate: 0.9,
+      queueLimit: 2048,
+    }),
+    node('origin', 'service', 'Origin Server', COL(2), ROW(1), {
+      capacity: 3,
+      serviceMs: 25,
+      serviceCv: 0.6,
+      queueLimit: 64,
+    }),
+    node('db', 'db', 'Database', COL(3), ROW(1), {
+      capacity: 8,
+      serviceMs: 10,
+      serviceCv: 0.6,
+      queueLimit: 64,
+    }),
+  ],
+  edges: [edge('client', 'cdn'), edge('cdn', 'origin'), edge('origin', 'db')],
+};
+
+/* ------------------------------------------------------------------ *
+ * 7. Rate Limited API
+ *    limiter: 200 rps sustained, 200-token burst
+ *    api:       6 slots / 25ms -> 240 rps ceiling
+ *    The limiter is set just under what the api can actually serve, so at 1x
+ *    (150 rps) every request is admitted and nothing is refused: the limiter
+ *    is invisible until it is needed.
+ *
+ *    What it buys is NOT extra goodput -- measured at 600 rps offered, the
+ *    limiter serves 200 rps where removing it serves 234. It buys LATENCY for
+ *    the requests that do get through:
+ *
+ *      600 rps    goodput   p50     p99    api queue
+ *      limiter     200.0    36ms    80ms      0
+ *      no limiter  234.4   235ms   292ms     46
+ *
+ *    Without the limiter every caller waits behind a 46-deep queue for an
+ *    answer that mostly arrives too late to be useful. With it, the system
+ *    says no quickly to some so it can say yes quickly to the rest. That
+ *    trade -- a lower ceiling in exchange for a flat, predictable latency --
+ *    is the whole argument for admission control, and it is why the honest
+ *    comparison is p50, not throughput.
+ * ------------------------------------------------------------------ */
+
+const rateLimitedApi: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 150, timeoutMs: 2000 }),
+    node('limiter', 'ratelimiter', 'Rate Limiter', COL(1), ROW(1), {
+      rateLimitRps: 200,
+      burst: 200,
+    }),
+    node('api', 'service', 'API Server', COL(2), ROW(1), {
+      capacity: 6,
+      serviceMs: 25,
+      serviceCv: 0.5,
+      queueLimit: 48,
+    }),
+    node('db', 'db', 'Database', COL(3), ROW(1), {
+      capacity: 12,
+      serviceMs: 12,
+      serviceCv: 0.6,
+      queueLimit: 96,
+    }),
+  ],
+  edges: [edge('client', 'limiter'), edge('limiter', 'api'), edge('api', 'db')],
+};
+
+/* ------------------------------------------------------------------ *
+ * 8. Circuit Breaker
+ *    payments: 4 slots / 30ms -> 133 rps ceiling, and it is the dependency
+ *    that goes bad. The breaker trips once half the calls in a 4s window
+ *    fail, stays open 3s, then probes.
+ *    At 1x (100 rps) the dependency is inside its ceiling and the circuit
+ *    stays closed all run. At 4x it is 3x oversubscribed, its queue fills,
+ *    the shed rate crosses the error threshold and the breaker trips -- after
+ *    which requests fail in microseconds instead of waiting out a timeout.
+ *    Injecting a `crash` or raising errorRate on payments trips it on demand.
+ * ------------------------------------------------------------------ */
+
+const circuitBreaker: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 100, timeoutMs: 2000 }),
+    node('api', 'service', 'API Server', COL(1), ROW(1), {
+      capacity: 24,
+      serviceMs: 6,
+      serviceCv: 0.4,
+      queueLimit: 128,
+      timeoutMs: 600,
+    }),
+    node('breaker', 'breaker', 'Circuit Breaker', COL(2), ROW(1), {
+      errorThreshold: 0.5,
+      windowMs: 4000,
+      openMs: 3000,
+      halfOpenProbes: 3,
+    }),
+    node('payments', 'service', 'Payments API', COL(3), ROW(1), {
+      capacity: 4,
+      serviceMs: 30,
+      serviceCv: 0.6,
+      queueLimit: 32,
+    }),
+  ],
+  edges: [edge('client', 'api'), edge('api', 'breaker'), edge('breaker', 'payments')],
+};
+
+/* ------------------------------------------------------------------ *
+ * 9. Read Replicas
+ *    replicas: 3 x 4 slots / 20ms -> 600 rps of READ capacity
+ *    primary:      4 slots / 20ms -> 200 rps of WRITE capacity
+ *    At 85% reads and 300 rps offered that is 255 reads against 600 and 45
+ *    writes against 200: comfortable. At 4x the reads blow past 600 while the
+ *    writes are still inside their own ceiling, so adding replicas is the fix
+ *    for one and does nothing at all for the other.
+ *    The 60ms replication lag is what makes stale reads visible without
+ *    needing an unrealistic write rate.
+ * ------------------------------------------------------------------ */
+
+const readReplicas: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 300, timeoutMs: 2000 }),
+    node('api', 'service', 'API Server', COL(1), ROW(1), {
+      capacity: 32,
+      serviceMs: 5,
+      serviceCv: 0.4,
+      queueLimit: 256,
+    }),
+    node('replicas', 'replica', 'Replica Set', COL(2), ROW(1), {
+      capacity: 4,
+      serviceMs: 20,
+      serviceCv: 0.5,
+      queueLimit: 128,
+      replicaCount: 3,
+      replicationLagMs: 60,
+      readFraction: 0.85,
+    }),
+  ],
+  edges: [edge('client', 'api'), edge('api', 'replicas')],
+};
+
+/* ------------------------------------------------------------------ *
+ * 10. Sharded Database
+ *     4 shards x 4 slots / 25ms -> 160 rps PER SHARD, 640 rps total.
+ *     At 400 rps spread evenly by key each shard carries ~100 of its 160 and
+ *     the store is fine. The whole lesson is in hotKeyFraction: push it to
+ *     0.8 and shard 0 alone is offered 320 rps against its own 160, so it
+ *     pins at 100% and sheds while the node-level utilisation meter -- the
+ *     mean across shards -- still reads comfortable.
+ * ------------------------------------------------------------------ */
+
+const shardedDatabase: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 400, timeoutMs: 2000 }),
+    node('api', 'service', 'API Server', COL(1), ROW(1), {
+      capacity: 32,
+      serviceMs: 5,
+      serviceCv: 0.4,
+      queueLimit: 256,
+    }),
+    node('shards', 'shard', 'Sharded Store', COL(2), ROW(1), {
+      serviceMs: 25,
+      serviceCv: 0.6,
+      queueLimit: 32,
+      shardCount: 4,
+      shardCapacity: 4,
+      hotKeyFraction: 0,
+    }),
+  ],
+  edges: [edge('client', 'api'), edge('api', 'shards')],
+};
+
+/* ------------------------------------------------------------------ *
+ * 11. Autoscaling Service
+ *     api: 9 slots / 25ms -> 360 rps, against 250 rps offered. That is 69%
+ *     utilisation, which is deliberately the controller's own setpoint: at
+ *     1x the autoscaler has already converged and holds the size steady, so
+ *     the system is stable and the student sees a controller at rest.
+ *
+ *     The lesson is what happens when you MOVE the load. Raise the client's
+ *     rps and the capacity graph does not follow immediately: the controller
+ *     waits out its 3s cooldown, decides, and then the new slots take a
+ *     further 4s to warm up. Requests fail in that gap, and the gap is the
+ *     whole point -- an autoscaler is a lagging controller, not a shield.
+ *     Scale-DOWN is instant, as it is in reality, which is why the recovery
+ *     looks nothing like the climb.
+ *
+ *     maxCapacity 16 -> 640 rps ceiling, so 4x (1000 rps) outruns the
+ *     autoscaler no matter how patient it is: past some point the answer is
+ *     not more of the same box.
+ * ------------------------------------------------------------------ */
+
+const autoscalingService: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 250, timeoutMs: 3000 }),
+    node('api', 'service', 'API Server', COL(1), ROW(1), {
+      capacity: 9,
+      serviceMs: 25,
+      serviceCv: 0.5,
+      queueLimit: 256,
+    }),
+    node('db', 'db', 'Database', COL(2), ROW(1), {
+      capacity: 24,
+      serviceMs: 8,
+      serviceCv: 0.6,
+      queueLimit: 128,
+    }),
+    // The controller sits below the node it watches, wired to it by the edge
+    // that names its target. It is not in the request path: traffic sent INTO
+    // an autoscaler is refused, because a controller is not a hop.
+    node('scaler', 'autoscaler', 'Autoscaler', COL(1), ROW(2), {
+      targetUtil: 0.7,
+      minCapacity: 4,
+      maxCapacity: 16,
+      cooldownMs: 3000,
+      scaleStepPct: 0.5,
+      warmupMs: 4000,
+    }),
+  ],
+  edges: [edge('client', 'api'), edge('api', 'db'), edge('scaler', 'api')],
+};
+
+/* ------------------------------------------------------------------ *
+ * 12. Multi-Region Failover
+ *     Two regions, each 10 slots / 25ms -> 400 rps. Only ONE serves traffic
+ *     at a time, so the pair buys availability and not one request per second
+ *     of extra capacity -- which is why 4x (1000 rps) melts the active region
+ *     while the standby sits at zero.
+ *     Crash `us-api` (or cut the edge to it) and traffic lands on `eu-api`
+ *     after the 5s failover window, during which every request fails as
+ *     'region-down'. Set failoverMs to 0 to see the cutover no real system
+ *     gets, or to 30000 to feel what a slow one costs.
+ * ------------------------------------------------------------------ */
+
+const multiRegion: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 250, timeoutMs: 2000 }),
+    node('router', 'region', 'Region Router', COL(1), ROW(1), {
+      regions: 2,
+      activeRegion: 0,
+      failoverMs: 5000,
+    }),
+    node('us-api', 'service', 'US API', COL(2), ROW(0), {
+      capacity: 10,
+      serviceMs: 25,
+      serviceCv: 0.5,
+      queueLimit: 64,
+    }),
+    node('eu-api', 'service', 'EU API', COL(2), ROW(2), {
+      capacity: 10,
+      serviceMs: 25,
+      serviceCv: 0.5,
+      queueLimit: 64,
+    }),
+    node('us-db', 'db', 'US Database', COL(3), ROW(0), {
+      capacity: 16,
+      serviceMs: 12,
+      serviceCv: 0.6,
+      queueLimit: 96,
+    }),
+    node('eu-db', 'db', 'EU Database', COL(3), ROW(2), {
+      capacity: 16,
+      serviceMs: 12,
+      serviceCv: 0.6,
+      queueLimit: 96,
+    }),
+  ],
+  // Edge ORDER is region index: the first edge out of the router is region 0.
+  edges: [
+    edge('client', 'router'),
+    edge('router', 'us-api'),
+    edge('router', 'eu-api'),
+    edge('us-api', 'us-db'),
+    edge('eu-api', 'eu-db'),
+  ],
+};
+
+/* ------------------------------------------------------------------ *
+ * 13. Full Stack
+ *     The showcase. Every tier in one picture, each sized so that the thing
+ *     that breaks first is the thing a real system breaks first.
+ *
+ *     600 rps offered, and here is where it goes:
+ *       cdn     hitRate 0.70   -> 30% miss, so ~180 rps reach the LB
+ *       lb      -> 2 api, ~90 rps each
+ *       api     2 x 12 slots / 8ms  -> 3000 rps, never the bottleneck
+ *       cache   hitRate 0.60   -> 40% miss, so ~72 rps reach the shards
+ *       shards  4 x 2 slots / 25ms  -> 320 rps total, 80 rps per shard
+ *       queue   -> workers 6 / 25ms -> 240 rps of async drain
+ *
+ *     Both paths are sized to have real headroom at 1x and to run out of it
+ *     by 4x, but they run out DIFFERENTLY, and that contrast is the lesson:
+ *
+ *       - the synchronous path (cache -> shards) fails LOUDLY. The shards
+ *         saturate, sheds start, and the client sees errors and a fat tail.
+ *       - the asynchronous path (queue -> workers) fails QUIETLY. The workers
+ *         saturate too, but the queue absorbs the excess, so the client is
+ *         still acknowledged instantly while an invisible backlog grows.
+ *
+ *     A student who watches only the error rate sees half the failure. The
+ *     queue depth is the other half, and it is the half that takes hours to
+ *     drain after the spike is over.
+ * ------------------------------------------------------------------ */
+
+const fullStack: Topology = {
+  nodes: [
+    node('client', 'client', 'Client', COL(0), ROW(1), { rps: 600, timeoutMs: 3000 }),
+    node('cdn', 'cdn', 'CDN Edge', COL(1), ROW(1), {
+      capacity: 256,
+      serviceMs: 2,
+      serviceCv: 0.3,
+      hitRate: 0.7,
+      queueLimit: 2048,
+    }),
+    node('lb', 'lb', 'Load Balancer', COL(2), ROW(1), { capacity: 512, serviceMs: 0.5 }),
+    node('api1', 'service', 'API 1', COL(3), ROW(0), {
+      capacity: 12,
+      serviceMs: 8,
+      serviceCv: 0.5,
+      queueLimit: 128,
+    }),
+    node('api2', 'service', 'API 2', COL(3), ROW(2), {
+      capacity: 12,
+      serviceMs: 8,
+      serviceCv: 0.5,
+      queueLimit: 128,
+    }),
+    node('cache', 'cache', 'Cache', COL(4), ROW(0), {
+      capacity: 64,
+      serviceMs: 2,
+      serviceCv: 0.4,
+      hitRate: 0.6,
+      queueLimit: 512,
+    }),
+    node('shards', 'shard', 'Sharded Store', COL(5), ROW(0), {
+      serviceMs: 25,
+      serviceCv: 0.6,
+      queueLimit: 32,
+      shardCount: 4,
+      shardCapacity: 2,
+      hotKeyFraction: 0,
+    }),
+    node('queue', 'queue', 'Job Queue', COL(4), ROW(2), {
+      serviceMs: 1,
+      serviceCv: 0.2,
+      queueLimit: 5000,
+    }),
+    node('workers', 'worker', 'Workers', COL(5), ROW(2), {
+      capacity: 6,
+      serviceMs: 25,
+      serviceCv: 0.6,
+    }),
+  ],
+  edges: [
+    edge('client', 'cdn'),
+    edge('cdn', 'lb'),
+    edge('lb', 'api1'),
+    edge('lb', 'api2'),
+    // Each api reads through the cache AND books async work. Both edges are
+    // taken for every request: a 'service' fans out to all its downstreams.
+    edge('api1', 'cache'),
+    edge('api1', 'queue'),
+    edge('api2', 'cache'),
+    edge('api2', 'queue'),
+    edge('cache', 'shards'),
+    edge('queue', 'workers'),
+  ],
+};
+
 export const PRESETS: Preset[] = [
   {
     id: 'single-server',
@@ -517,5 +921,53 @@ export const PRESETS: Preset[] = [
     name: 'Retry Storm',
     description: 'A short timeout with retries in front of a small database. Retries multiply the load that caused them.',
     topology: retryStorm,
+  },
+  {
+    id: 'cdn-origin',
+    name: 'CDN + Origin',
+    description: 'The CDN answers most requests at the edge, so only a trickle reaches the origin. Drop the hit rate and watch the origin melt.',
+    topology: cdnOrigin,
+  },
+  {
+    id: 'rate-limited-api',
+    name: 'Rate Limited API',
+    description: 'A limiter refuses excess traffic at the door. It serves slightly less, but what it does serve stays fast instead of queueing.',
+    topology: rateLimitedApi,
+  },
+  {
+    id: 'circuit-breaker',
+    name: 'Circuit Breaker',
+    description: 'A breaker watches a failing dependency and stops calling it. Break the payments API and watch the circuit trip, then recover.',
+    topology: circuitBreaker,
+  },
+  {
+    id: 'read-replicas',
+    name: 'Read Replicas',
+    description: 'Replicas scale reads but not writes, and a read can arrive before the write it should have seen.',
+    topology: readReplicas,
+  },
+  {
+    id: 'sharded-database',
+    name: 'Sharded Database',
+    description: 'Four partitions share the load evenly until one key gets hot, and then a single shard melts while the average still looks healthy.',
+    topology: shardedDatabase,
+  },
+  {
+    id: 'autoscaling-service',
+    name: 'Autoscaling Service',
+    description: 'Capacity chases the load, but new servers take time to boot, so requests fail in the gap between the two.',
+    topology: autoscalingService,
+  },
+  {
+    id: 'multi-region',
+    name: 'Multi-Region Failover',
+    description: 'Two regions, one serving. Crash the active one and every request fails until failover lands.',
+    topology: multiRegion,
+  },
+  {
+    id: 'full-stack',
+    name: 'Full Stack',
+    description: 'Every tier at once: edge cache, load balancer, services, cache, shards, and a queue of async work behind it all.',
+    topology: fullStack,
   },
 ];

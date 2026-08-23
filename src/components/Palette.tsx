@@ -73,6 +73,14 @@ const PRESET_NOTE: Record<string, string> = {
   'cache-aside': 'Hit rate collapse',
   'async-workers': 'Backlog growth',
   'retry-storm': 'Retry amplification',
+  'cdn-origin': 'Origin offload',
+  'rate-limited-api': 'Shed at the door',
+  'circuit-breaker': 'Fail fast',
+  'read-replicas': 'Stale reads',
+  'sharded-database': 'Hot key',
+  'autoscaling-service': 'Warmup lag',
+  'multi-region': 'Failover cost',
+  'full-stack': 'Everything at once',
 };
 
 /**

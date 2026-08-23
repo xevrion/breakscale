@@ -67,6 +67,19 @@ interface AutoscalerState {
   pendingCapacity: number;
   /** Node being driven, resolved from the controller's first out edge. */
   watchedId: string;
+  /**
+   * Simulated time the controller may take its FIRST decision about the
+   * current target, or -1 once it has taken one.
+   *
+   * Utilisation is a smoothed average, so at t=0 -- and for a moment after
+   * the controller is pointed at a new node -- it reads near zero no matter
+   * how loaded that node actually is. Acting on that cold reading makes the
+   * controller's opening move a scale-DOWN to minCapacity on a node that is
+   * in fact saturated, which then takes several warm-ups to undo. A real
+   * autoscaler will not act until it has a full metric window, and this is
+   * that rule: observe for one cooldown, then decide.
+   */
+  observeUntilMs: number;
 }
 
 function asAutoscaler(state: NodeStateLike): AutoscalerState | null {
@@ -113,6 +126,7 @@ const autoscaler: ComponentBehaviour = {
     warmupDueMs: -1,
     pendingCapacity: 0,
     watchedId: '',
+    observeUntilMs: -1,
   }),
 
   /**
@@ -142,6 +156,9 @@ const autoscaler: ComponentBehaviour = {
       st.warmupDueMs = -1;
       st.targetCapacity = 0;
       st.lastDecisionMs = -Infinity;
+      // ...and starts a fresh observation window, because the new node's
+      // smoothed utilisation is not a signal yet.
+      st.observeUntilMs = ctx.now + Math.max(0, state.config.cooldownMs ?? DEFAULT_COOLDOWN_MS);
     }
     if (watched === '') return;
 
@@ -172,6 +189,14 @@ const autoscaler: ComponentBehaviour = {
 
     const cfg = state.config;
     const cooldown = Math.max(0, cfg.cooldownMs ?? DEFAULT_COOLDOWN_MS);
+
+    // Hold off until the watched node's utilisation is a real measurement
+    // rather than an average still climbing out of its initial zero.
+    if (st.observeUntilMs >= 0) {
+      if (ctx.now < st.observeUntilMs) return;
+      st.observeUntilMs = -1;
+    }
+
     if (ctx.now - st.lastDecisionMs < cooldown) return;
 
     // A crashed node reports whatever utilisation it held when it died, which
