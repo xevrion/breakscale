@@ -1,4 +1,5 @@
 import {
+  createElement,
   memo,
   useCallback,
   useEffect,
@@ -19,9 +20,9 @@ import type {
   Topology,
 } from '../sim/types';
 import {
-  FILLED_GLYPHS,
-  GLYPH,
-  GLYPH_BOX,
+  ICON_BOX,
+  ICON_STROKE,
+  KIND_ICON,
   KIND_NAME,
   NODE_DND_MIME,
   cellStrip,
@@ -105,8 +106,28 @@ const PAD_X = 12;
  */
 const SEC_HALF = (NODE_W - PAD_X * 2 - 14) / 2;
 
-/** Rough advance width per character at the secondary row's font size. */
-const SEC_CHAR_W = 6.1;
+/**
+ * Advance width per character at the secondary row's font size.
+ *
+ * MEASURED, not guessed. The row renders two tspans at different sizes
+ * (`.cv-val` at 12px, `.cv-cap` at 11px), so a single per-char figure has to
+ * cover the wider of the two. getBBox() on every secondary row the presets
+ * produce gave 6.49-7.29 px/char:
+ *
+ *     "5/5 fleet"  6.49    "72ms p99"   6.59    "500ms p99"  6.64
+ *     "16% err"    6.69    "steady..."  6.96    "252 queue"  7.24
+ *     "0 queue"    7.29
+ *
+ * The previous 6.1 under-measured EVERY one of them, so `fitWidth` cleared
+ * strings that then overflowed the 73px half-budget and collided with the
+ * cell anchored to the opposite edge — observed on the autoscaler as a
+ * 11.1px gap where every other node had 42-56px. Digit-heavy strings are the
+ * worst case (digits are tabular and wide), so the constant is the measured
+ * maximum rounded up rather than the average: under-measuring silently
+ * corrupts the layout, while over-measuring only condenses a string slightly
+ * sooner than strictly necessary.
+ */
+const SEC_CHAR_W = 7.3;
 
 /** The full string a secondary cell will render, for width estimation. */
 function secText(cell: { value: string; label: string }): string {
@@ -558,12 +579,14 @@ const Spark = memo(function Spark({ data, unit }: SparkProps) {
  * Rendered glyph size, in world units.
  *
  * 18, not 14. The set was rendered and inspected at both: at 14px the denser
- * glyphs (region's globe, shard's partitions, service's stacked units) close
- * up into solid blobs, because a 1.5px stroke eats too much of a 14px box.
- * 18px is the smallest size at which all fourteen stay distinguishable.
+ * icons (the globe, the film frame, the calendar-clock) close up into solid
+ * blobs, because the stroke eats too much of a 14px box. 18px is the
+ * smallest size at which the whole set stays distinguishable, and it is
+ * also the header's 14px name cap-height plus its 4px breathing room, so
+ * the icon and the name read as one line.
  */
 const GLYPH_PX = 18;
-const GLYPH_SCALE = GLYPH_PX / GLYPH_BOX;
+const GLYPH_SCALE = GLYPH_PX / ICON_BOX;
 
 /**
  * Trim a node label to what actually fits on the node.
@@ -594,18 +617,39 @@ function truncateLabel(label: string, showHeader: boolean): string {
   return `${label.slice(0, max - 1).trimEnd()}…`;
 }
 
+/**
+ * One kind icon, painted as raw SVG primitives inside the node's <svg>.
+ *
+ * A Lucide COMPONENT renders its own <svg> root, which inside another svg
+ * would be a nested viewport with its own coordinate system; instead the
+ * icon's primitive list (KIND_ICON, the same data the component is built
+ * from) is painted straight into the positioned <g> the caller provides,
+ * exactly the way the old hand-drawn <path> was. Stroke properties sit on
+ * this group so each primitive inherits them; the few primitives that carry
+ * their own fill (chart-scatter's points) keep it via the attribute
+ * spread. Colour is always currentColor, so the surrounding token decides.
+ *
+ * memo on `kind` (a string) means the 10Hz snapshot re-renders skip this
+ * subtree entirely; the primitives are only ever built when a node first
+ * appears or changes kind.
+ */
 const Glyph = memo(function Glyph({ kind }: { kind: NodeKind }) {
-  const filled = FILLED_GLYPHS.has(kind);
   return (
-    <path
-      d={GLYPH[kind]}
+    <g
       className="cv-glyph"
-      fill={filled ? 'currentColor' : 'none'}
-      stroke={filled ? 'none' : 'currentColor'}
-      strokeWidth={1.3 / GLYPH_SCALE}
+      fill="none"
+      stroke="currentColor"
+      // Lucide's native weight (2/24 of the box), stated in screen px
+      // because .cv-glyph uses non-scaling-stroke to stay crisp under zoom.
+      strokeWidth={(ICON_STROKE * GLYPH_PX) / ICON_BOX}
       strokeLinecap="round"
       strokeLinejoin="round"
-    />
+    >
+      {KIND_ICON[kind].map(([tag, attrs]) => {
+        const { key, ...rest } = attrs;
+        return createElement(tag, { key, ...rest });
+      })}
+    </g>
   );
 });
 

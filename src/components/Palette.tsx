@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useState } from 'react';
+import { createElement, useCallback, useMemo, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import type { NodeKind } from '../sim/types';
 import type { Preset } from '../sim/presets';
-import { FILLED_GLYPHS, GLYPH, KIND_NAME, NODE_DND_MIME } from './nodeVisuals';
+import { ICON_BOX, ICON_STROKE, KIND_ICON, KIND_NAME, NODE_DND_MIME } from './nodeVisuals';
 import './Palette.css';
 
 /* ------------------------------------------------------------------ *
@@ -156,28 +156,29 @@ const PRESET_NOTE: Record<string, string> = {
 };
 
 /**
- * The same path data the canvas draws, so a row in the palette is
- * visually the exact object that lands on the canvas. A bare stroked
- * glyph in currentColor — never an icon inside a filled square.
+ * The same icon primitives the canvas draws, so a row in the palette is
+ * visually the exact object that lands on the canvas. A bare stroked icon
+ * in currentColor, never an icon inside a filled square. Sized in em so it
+ * tracks the row's own type size instead of a hardcoded pixel count.
  */
 function Glyph({ kind }: { kind: NodeKind }) {
-  const filled = FILLED_GLYPHS.has(kind);
   return (
     <svg
-      width="14"
-      height="14"
-      viewBox="0 0 16 16"
+      width="1.1em"
+      height="1.1em"
+      viewBox={`0 0 ${ICON_BOX} ${ICON_BOX}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
       role="presentation"
       aria-hidden="true"
     >
-      <path
-        d={GLYPH[kind]}
-        fill={filled ? 'currentColor' : 'none'}
-        stroke={filled ? 'none' : 'currentColor'}
-        strokeWidth={1.3}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      {KIND_ICON[kind].map(([tag, attrs]) => {
+        const { key, ...rest } = attrs;
+        return createElement(tag, { key, ...rest });
+      })}
     </svg>
   );
 }

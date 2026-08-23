@@ -490,7 +490,9 @@
   color: var(--k-ink);
 }
 
-.cv-glyph {
+/* The icon group's primitives, not the group: vector-effect is a
+   presentation attribute on graphics elements and does not inherit. */
+.cv-glyph > * {
   vector-effect: non-scaling-stroke;
 }
 

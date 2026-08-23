@@ -1,5 +1,75 @@
 import type { NodeKind } from '../sim/types';
 
+/* ------------------------------------------------------------------ *
+ * Kind icons, from Lucide.
+ *
+ * One icon per kind, all from one library cut on one 24x24 grid at one
+ * stroke weight, which is what makes thirty-three of them read as a family
+ * rather than as thirty-three separately-sourced pictures.
+ *
+ * WHY `__iconNode` AND NOT THE COMPONENTS. Each lucide-react icon module
+ * exports the React component (default) and `__iconNode`, the list of SVG
+ * primitives ([tag, attrs] pairs) the component is built from. The canvas
+ * draws every node inside ONE parent <svg>; a component that renders its
+ * own <svg> root would have to be nested as an inner viewport, while the
+ * primitive list can be painted straight into a positioned <g> exactly the
+ * way the old hand-drawn paths were. So this module re-exports the
+ * primitives, and each consumer owns one tiny renderer. The deep imports
+ * are typed by lucide-icons.d.ts and are exactly as tree-shakeable as the
+ * barrel: only the thirty-three modules named here are bundled.
+ *
+ * CHOOSING RULES, in priority order:
+ *   BEHAVIOUR   the icon depicts what the component DOES to traffic, not
+ *               what the hardware looks like, because the behaviour is the
+ *               thing a student is here to learn.
+ *   FAMILY      related kinds quote a shared shape and differ in one mark:
+ *               db / cache / replica are all the cylinder, ratelimiter /
+ *               loadshedder are both the funnel, cdn / edgecompute are
+ *               both the cloud, queue / streambroker / retryqueue are all
+ *               rows of items.
+ *   CONTRAST    unrelated kinds must not collide at 14px. The circular
+ *               outlines (globe, clock) stay unique in the set.
+ * ------------------------------------------------------------------ */
+
+/* Traffic */
+import { __iconNode as icClient } from 'lucide-react/dist/esm/icons/monitor-smartphone.mjs';
+import { __iconNode as icLb } from 'lucide-react/dist/esm/icons/split.mjs';
+import { __iconNode as icCdn } from 'lucide-react/dist/esm/icons/cloud-download.mjs';
+import { __iconNode as icRegion } from 'lucide-react/dist/esm/icons/globe.mjs';
+/* Compute */
+import { __iconNode as icService } from 'lucide-react/dist/esm/icons/server.mjs';
+import { __iconNode as icWorker } from 'lucide-react/dist/esm/icons/cog.mjs';
+import { __iconNode as icLambda } from 'lucide-react/dist/esm/icons/square-function.mjs';
+import { __iconNode as icEdgecompute } from 'lucide-react/dist/esm/icons/cloud-lightning.mjs';
+import { __iconNode as icTranscoder } from 'lucide-react/dist/esm/icons/film.mjs';
+import { __iconNode as icCron } from 'lucide-react/dist/esm/icons/calendar-clock.mjs';
+/* Data */
+import { __iconNode as icDb } from 'lucide-react/dist/esm/icons/database.mjs';
+import { __iconNode as icCache } from 'lucide-react/dist/esm/icons/database-zap.mjs';
+import { __iconNode as icReplica } from 'lucide-react/dist/esm/icons/database-backup.mjs';
+import { __iconNode as icShard } from 'lucide-react/dist/esm/icons/columns-3.mjs';
+import { __iconNode as icObjectstore } from 'lucide-react/dist/esm/icons/package.mjs';
+import { __iconNode as icSearchindex } from 'lucide-react/dist/esm/icons/text-search.mjs';
+import { __iconNode as icTimeseriesdb } from 'lucide-react/dist/esm/icons/chart-line.mjs';
+import { __iconNode as icGraphdb } from 'lucide-react/dist/esm/icons/waypoints.mjs';
+import { __iconNode as icColdstorage } from 'lucide-react/dist/esm/icons/snowflake.mjs';
+import { __iconNode as icVectordb } from 'lucide-react/dist/esm/icons/chart-scatter.mjs';
+import { __iconNode as icWritebehind } from 'lucide-react/dist/esm/icons/hard-drive-download.mjs';
+/* Messaging */
+import { __iconNode as icQueue } from 'lucide-react/dist/esm/icons/rows-3.mjs';
+import { __iconNode as icStreambroker } from 'lucide-react/dist/esm/icons/logs.mjs';
+import { __iconNode as icPubsub } from 'lucide-react/dist/esm/icons/share-2.mjs';
+import { __iconNode as icWebsocket } from 'lucide-react/dist/esm/icons/cable.mjs';
+import { __iconNode as icRetryqueue } from 'lucide-react/dist/esm/icons/list-restart.mjs';
+/* Control */
+import { __iconNode as icAutoscaler } from 'lucide-react/dist/esm/icons/scaling.mjs';
+import { __iconNode as icRatelimiter } from 'lucide-react/dist/esm/icons/funnel.mjs';
+import { __iconNode as icBreaker } from 'lucide-react/dist/esm/icons/unplug.mjs';
+import { __iconNode as icApigateway } from 'lucide-react/dist/esm/icons/door-open.mjs';
+import { __iconNode as icSidecar } from 'lucide-react/dist/esm/icons/blocks.mjs';
+import { __iconNode as icBulkhead } from 'lucide-react/dist/esm/icons/square-split-horizontal.mjs';
+import { __iconNode as icLoadshedder } from 'lucide-react/dist/esm/icons/funnel-x.mjs';
+
 /**
  * Shared, non-component values used by both the canvas and the palette.
  * They live outside both component modules so each file exports only
@@ -10,197 +80,154 @@ import type { NodeKind } from '../sim/types';
 /** MIME type the palette sets on dragstart and the canvas checks for on drop. */
 export const NODE_DND_MIME = 'application/x-sys-sim-node';
 
-/* ------------------------------------------------------------------ *
- * Kind glyphs.
- *
- * All fourteen are cut on ONE grid so they read as a family rather than as
- * fourteen separately-sourced icons. The rules every path obeys:
- *
- *   BOX        16x16 (GLYPH_BOX). Nothing is drawn outside it.
- *   LIVE AREA  a 12x12 field inset at 2..14. Every mark stays inside it, so
- *              no glyph optically outweighs another by simply being bigger.
- *   GEOMETRY   coordinates land on the 1px grid or its .5 midpoints, which is
- *              what keeps a 1.5px stroke crisp instead of smeared across two
- *              device pixels at 100% zoom.
- *   STROKE     one weight for all fourteen, applied by the consumer, with
- *              round caps and joins. No glyph sets its own weight.
- *   FILL       none. The previous set mixed filled and stroked art, so
- *              `client` and `cache` read as heavy blobs beside twelve light
- *              line drawings. FILLED_GLYPHS is now empty and the whole set is
- *              stroked, which is the single biggest reason it now coheres.
- *
- * Each glyph is a diagram of the component's BEHAVIOUR, not a picture of a
- * physical object: the thing a student should learn is what it does to
- * traffic. Where two kinds are related (db/replica/shard, cache/cdn) the
- * shared idea is drawn with a shared shape and the difference is the only
- * thing that changes.
- * ------------------------------------------------------------------ */
+/**
+ * One Lucide icon as its raw SVG primitives: [tagName, attributes] pairs.
+ * Drawn in a 24x24 box (ICON_BOX) expecting stroke-width ICON_STROKE,
+ * currentColor stroke and no fill from the surrounding container. A few
+ * primitives (chart-scatter's points) carry their own fill="currentColor",
+ * which the renderer must pass through untouched.
+ */
+export type IconNode = [elementName: string, attrs: Record<string, string>][];
 
-export const GLYPH: Record<NodeKind, string> = {
-  /* Traffic ORIGIN: a cursor/arrow leaving toward the system. Not a person —
-     a person implies one human, and this node is a load generator. */
-  client: 'M3 3l4.5 10 1.8-4.2L13.5 7z',
+/**
+ * The kind -> icon table. The reasoning for each pick is inline, because a
+ * future kind must be slotted into the same system, not just given the
+ * first icon that looks nice.
+ */
+export const KIND_ICON: Record<NodeKind, IconNode> = {
+  /* Traffic ORIGIN: the devices load comes from. A plural picture (monitor
+     and phone), because this node is a population, not one person. */
+  client: icClient,
 
-  /* FAN-OUT: one inbound trunk split across three outbound branches.
-     Only the OUTER two branches carry arrowheads. A third arrowhead on the
-     middle branch is geometrically symmetric but lands right on the trunk
-     junction, and at 18px the three heads merge into an unreadable knot —
-     verified by rendering. Two heads establish the direction for all three. */
-  lb: 'M2 8h3.5M5.5 8V4h4.5M5.5 8h4.5M5.5 8v4h4.5M10 4l-1.5-1.4M10 4l-1.5 1.4M10 12l-1.5-1.4M10 12l-1.5 1.4',
+  /* FAN-OUT: one path dividing. The split IS the job. */
+  lb: icLb,
 
-  /* COMPUTE: a stacked pair of units. The status pip on each is what makes it
-     a running service rather than a generic box. */
-  service: 'M2.5 3.5h11v4h-11zM2.5 8.5h11v4h-11zM4.5 5.5h.01M4.5 10.5h.01',
+  /* COMPUTE: the rack unit with status pips. The one deliberately literal
+     icon, because "a server" is the mental anchor everything else riffs on. */
+  service: icService,
 
-  /* FAST LOOKUP: a store shape (matching db's width) crossed by a bolt. The
-     shared silhouette says "it holds data"; the bolt says "and it is fast". */
-  cache: 'M3 4.5c0-1.1 2.2-2 5-2s5 .9 5 2-2.2 2-5 2-5-.9-5-2M3 4.5v7c0 1.1 2.2 2 5 2s5-.9 5-2v-7M9.6 6.6L6.6 9.9h2.2l-.6 3.1 3-3.4H9z',
+  /* FAST LOOKUP: the db cylinder crossed by a bolt. Same silhouette as db,
+     one mark of difference, exactly like the old hand-drawn pair. */
+  cache: icCache,
 
-  /* DURABLE STORE: the canonical cylinder. Two rings = the reference shape
-     that replica and shard both quote. */
-  db: 'M3 4.5c0-1.1 2.2-2 5-2s5 .9 5 2-2.2 2-5 2-5-.9-5-2M3 4.5v7c0 1.1 2.2 2 5 2s5-.9 5-2v-7M13 8c0 1.1-2.2 2-5 2s-5-.9-5-2',
+  /* DURABLE STORE: the canonical cylinder that cache and replica quote. */
+  db: icDb,
 
-  /* BUFFER: items queued left-to-right with the head leaving. Decreasing bar
-     lengths read as depth without needing a container. */
-  queue: 'M2.5 4.5h11M2.5 8h8M2.5 11.5h5M12.5 8h1',
+  /* BUFFER: a container of ordered rows. Related to streambroker's lanes
+     and retryqueue's list, which are the other row-based kinds. */
+  queue: icQueue,
 
-  /* BACKGROUND CONSUMER: pulls off a queue (the stub at left) and processes.
-     The ring is work in progress; it is deliberately NOT a cog with teeth,
-     which at 14px turned into a grey smudge. */
-  worker: 'M2 8h2.5M12 5.2a4 4 0 1 1-4-2.2M12 3v2.4h-2.4',
+  /* BACKGROUND CONSUMER: the machine-work cog, grinding through jobs. */
+  worker: icWorker,
 
-  /* READ REPLICAS: the db cylinder, duplicated. One primary in front, copies
-     stacked behind it — offset rather than redrawn, so the family is obvious. */
-  replica:
-    'M2.5 4.2c0-.8 1.6-1.5 3.6-1.5s3.6.7 3.6 1.5-1.6 1.5-3.6 1.5-3.6-.7-3.6-1.5M2.5 4.2v5.1c0 .6.9 1.1 2.2 1.4M6.4 7.4c0-.8 1.6-1.5 3.6-1.5s3.6.7 3.6 1.5-1.6 1.5-3.6 1.5-3.6-.7-3.6-1.5M6.4 7.4v4.4c0 .8 1.6 1.5 3.6 1.5s3.6-.7 3.6-1.5V7.4',
+  /* READ REPLICAS: the cylinder with a copy-restore arrow; replication
+     drawn onto the family's shared store shape. */
+  replica: icReplica,
 
-  /* PARTITIONED STORE: one logical store cut into three vertical shards, each
-     independently filled. Same outer width as cache/db. */
-  shard: 'M2.5 4.5h11v7h-11zM6.2 4.5v7M9.8 4.5v7',
+  /* PARTITIONED STORE: one box cut into vertical columns, each its own
+     independent slice; the old glyph's exact idea. */
+  shard: icShard,
 
-  /* CONTROLLER: capacity stepping up under control. The arrow is the decision;
-     the bars are the fleet it resizes. */
-  autoscaler: 'M2.5 13h11M4.5 13v-2M7.5 13v-4M10.5 13v-6M8.8 3.5h4.7v4.7M13.5 3.5L9.6 7.4',
+  /* CONTROLLER: the frame being resized outward; capacity under control. */
+  autoscaler: icAutoscaler,
 
-  /* GEOGRAPHIC SCOPE: a globe with a meridian and two parallels. Circular
-     outline is unique in the set, so it never reads as lb's fan. */
-  region: 'M8 2.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 0 1 0-11M8 2.5c-2.2 2.4-2.2 8.6 0 11M8 2.5c2.2 2.4 2.2 8.6 0 11M3 8h10',
+  /* GEOGRAPHIC SCOPE: the globe. Circular outline stays unique to the
+     place-kinds so it never reads as a flow icon. */
+  region: icRegion,
 
-  /* EDGE CACHE: a cloud (points of presence) with the origin link dropping
-     out of it. The cloud is the only soft outline in the set. */
-  cdn: 'M5 11.5a2.5 2.5 0 0 1 .2-5a3.2 3.2 0 0 1 6.1-.6a2.3 2.3 0 0 1 .4 4.5M5 11.5h6.7M8 11.5v2M6 13.5h4',
+  /* EDGE CACHE: the cloud delivering content downward to the viewer.
+     Shares the cloud with edgecompute; the arrow vs bolt is the difference
+     between serving bytes and running code. */
+  cdn: icCdn,
 
-  /* METERING: a funnel admitting a limited rate. Drops queue above, a single
-     drop passes below — the shape IS the policy. */
-  ratelimiter: 'M2.5 3.5h11l-4 4.5v5l-3 1v-6zM4.5 2h7M8 14.5h.01',
+  /* METERING: the funnel; admits a limited rate by shape alone. */
+  ratelimiter: icRatelimiter,
 
-  /* FAIL FAST: a switch thrown open in a circuit. The gap is the whole idea,
-     so it is the largest single feature in the glyph. */
-  breaker: 'M2 11.5h3.2M10.8 11.5H14M6.4 11.5a1.2 1.2 0 1 0-2.4 0a1.2 1.2 0 0 0 2.4 0M12 11.5a1.2 1.2 0 1 0-2.4 0a1.2 1.2 0 0 0 2.4 0M5.4 10.6l5.2-4.1',
+  /* FAIL FAST: the connection deliberately pulled apart. The gap is the
+     whole idea, same as the old thrown-switch glyph. */
+  breaker: icBreaker,
 
-  /* BLOB BUCKET: a lidded box holding one object. Deliberately NOT the db
-     cylinder: the whole lesson of the kind is that it is not a database. */
-  objectstore: 'M2.5 3.5h11v3h-11zM3.5 6.5v6h9v-6M6.5 9h3',
+  /* BLOB BUCKET: a parcel; an opaque object with a handle, deliberately
+     NOT the db cylinder because the lesson is that it is not a database. */
+  objectstore: icObjectstore,
 
-  /* SEARCH over an index: magnifier front and centre, one index line at the
-     left edge to say there is a corpus behind it. */
-  searchindex: 'M7 3a3.8 3.8 0 1 1 0 7.6A3.8 3.8 0 0 1 7 3M9.7 9.7l3.8 3.8M2.5 13h2.5',
+  /* SEARCH over an index: the magnifier over lines of corpus. */
+  searchindex: icSearchindex,
 
-  /* TIME SERIES: an axis with a rising, spiky series. The axis is what
-     separates it from cache's bolt at a glance. */
-  timeseriesdb: 'M2.5 2.5v11h11M4.5 10.5l2.3-3.2 2 1.7 3.7-5',
+  /* TIME SERIES: a line series on an axis. */
+  timeseriesdb: icTimeseriesdb,
 
-  /* GRAPH: three nodes, three edges. The triangle of relationships is the
-     data model drawn literally. */
-  graphdb:
-    'M4 3.2a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 0 1 0-2.8M12 4.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 0 1 0-2.8M7.5 11a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 0 1 0-2.8M5.4 4.4l5.2.9M4.5 5.9l2.4 4.9M10.9 7.2l-2.5 3.7',
+  /* GRAPH: nodes joined by edges; the data model drawn literally. */
+  graphdb: icGraphdb,
 
-  /* COLD: a snowflake asterisk. The only glyph built of pure diagonals, so
-     it cannot be mistaken for any of the store shapes. */
-  coldstorage: 'M8 2.5v11M3.2 5.25l9.6 5.5M12.8 5.25l-9.6 5.5',
+  /* COLD: the snowflake; pure diagonals, collides with no store shape. */
+  coldstorage: icColdstorage,
 
-  /* NEAREST NEIGHBOUR: scattered points and an arrow landing on the closest
-     one. The arrow is the query; the dots are the embedding space. */
-  vectordb: 'M3 13.5L9.4 7.1M9.4 7.1H6.6M9.4 7.1v2.8M12.5 4h.01M4.5 4.5h.01M8 3h.01M13 8.5h.01M12 12h.01',
+  /* NEAREST NEIGHBOUR: scattered points in a space; the embedding space
+     drawn as a scatter plot, sharing the axis motif with timeseriesdb. */
+  vectordb: icVectordb,
 
-  /* PARTITIONED LOG: three ordered lanes, each with its consumer's cursor
-     at a different offset. The staggered cursors ARE consumer lag. */
-  streambroker:
-    'M2.5 4.5h11M2.5 8h11M2.5 11.5h11M10.5 4.5h.01M6.5 8h.01M4.5 11.5h.01',
+  /* PARTITIONED LOG: lanes of entries with per-lane markers; the ordered
+     row family again, one step more structured than queue. */
+  streambroker: icStreambroker,
 
-  /* FAN-OUT TOPIC: one trunk diverging into three deliveries, arrowheads on
-     the outer pair (same head rule as lb). Distinct from lb by the straight
-     middle line running the full width: the copy that goes everywhere. */
-  pubsub:
-    'M2.5 8h3.5M6 8l6-4M6 8h6.5M6 8l6 4M12 4l-1.9-.5M12 4l-.5 1.9M12 12l-1.9.5M12 12l-.5-1.9',
+  /* FAN-OUT TOPIC: one node sharing out to many; the deliver-to-everyone
+     counterpart of lb's pick-one split. */
+  pubsub: icPubsub,
 
-  /* HELD CHANNEL: two brackets holding a duplex pair open. The parentheses
-     say "this stays open"; the two lines say traffic flows both ways. */
-  websocket:
-    'M4.5 3.5C2.8 5.2 2.8 10.8 4.5 12.5M11.5 3.5c1.7 1.7 1.7 7.3 0 9M5.5 6.5h5M5.5 9.5h5',
+  /* HELD CHANNEL: a cable with both ends drawn; the connection itself is
+     the resource this kind rations. */
+  websocket: icWebsocket,
 
-  /* FRONT DOOR: the door itself, with three routes leaving it. Routing,
-     auth and limiting are all "what happens at the door", so the door is
-     the glyph. */
-  apigateway: 'M2.5 2.5h5.5v11H2.5zM5.75 7v2M9.5 5h4M9.5 8h4M9.5 11h4',
+  /* FRONT DOOR: the open door. Routing, auth and limiting are all "what
+     happens at the door", so the door is the icon. */
+  apigateway: icApigateway,
 
-  /* SIDECAR: the service and the small proxy bolted on beside it, joined by
-     the one link every request now crosses. */
-  sidecar: 'M2.5 4.5h7v7h-7zM11 6.5h2.5v3H11zM9.5 8H11',
+  /* SIDECAR: the small block bolted onto the big one. */
+  sidecar: icSidecar,
 
-  /* SERVERLESS: the lambda letterform itself, cut on the grid. */
-  lambda: 'M4.5 3.5h1.9l4.1 9h2M8.4 8.6l-2.7 3.9',
+  /* SERVERLESS: a function in a box; f(x) is the whole product. */
+  lambda: icLambda,
 
-  /* SCHEDULE: a clock face with hands. Circular like region's globe, but
-     hands instead of meridians read as time at a glance. */
-  cron: 'M8 2.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 0 1 0-11M8 5.2v3l2.2 1.3',
+  /* SCHEDULE: calendar plus clock; fires at a time, not on demand. */
+  cron: icCron,
 
-  /* CONTAINMENT: a hull split by a sealed divider, one compartment hatched
-     as the flooded one. The wall holding is the whole idea. */
-  bulkhead: 'M2.5 3.5h11v9h-11zM8 3.5v9M3.8 10.7l2.4-2.4M3.8 8l2.4-2.4',
+  /* CONTAINMENT: one hull divided into sealed compartments. */
+  bulkhead: icBulkhead,
 
-  /* REDELIVERY: the queue's bars, and a loop arrow taking the failed one
-     back around for another try. */
-  retryqueue:
-    'M2.5 4h6M2.5 6.5h4.5M11.7 12.6a3.1 3.1 0 1 1 1.8-4M13.5 6.6l0 2.1-2.1 0',
+  /* REDELIVERY: the queue's rows plus a restart loop taking the failed
+     item back around. */
+  retryqueue: icRetryqueue,
 
-  /* BATCH ENCODE: a film frame with sprocket rails and the play mark, the
-     job every farm like this exists to chew through. */
-  transcoder: 'M2.5 4h11v8h-11zM4.6 4v8M11.4 4v8M7 6.3l2.4 1.7L7 9.7z',
+  /* BATCH ENCODE: the film frame, the job this farm exists to chew. */
+  transcoder: icTranscoder,
 
-  /* CODE AT THE EDGE: the cdn's cloud with a bolt of compute striking out
-     of it instead of an origin link. */
-  edgecompute:
-    'M5 10.5a2.5 2.5 0 0 1 .2-5a3.2 3.2 0 0 1 6.1-.6a2.3 2.3 0 0 1 .4 4.5M8.9 7.5l-2.1 3h2l-.6 3.2 2.6-3.6H8.6z',
+  /* CODE AT THE EDGE: the cdn's cloud with a bolt of compute instead of a
+     delivery arrow. */
+  edgecompute: icEdgecompute,
 
-  /* DEFERRED WRITE: the store cylinder above, and the write arrow still on
-     its way down to it. The gap between them is the data at risk. */
-  writebehind:
-    'M4 4c0-.8 1.8-1.5 4-1.5s4 .7 4 1.5-1.8 1.5-4 1.5-4-.7-4-1.5M4 4v3c0 .8 1.8 1.5 4 1.5s4-.7 4-1.5V4M8 10v3.5M8 13.5l-1.6-1.6M8 13.5l1.6-1.6',
+  /* DEFERRED WRITE: the arrow still on its way down into durable media;
+     the gap between ack and disk is the data at risk. */
+  writebehind: icWritebehind,
 
-  /* TRIAGE FUNNEL: the limiter's funnel, but one stream is deliberately
-     deflected and crossed out while the other passes. */
-  loadshedder:
-    'M2.5 3.5h11l-4.2 4.7v4.3l-2.6-1.6V8.2zM11.6 9.6l2 2M13.6 9.6l-2 2',
+  /* TRIAGE: the limiter's funnel with the discard cross; some traffic is
+     deliberately turned away so the rest survives. */
+  loadshedder: icLoadshedder,
 };
 
 /**
- * Glyphs drawn as filled shapes rather than strokes.
- *
- * Deliberately EMPTY. The set is now uniformly stroked at one weight, which
- * is what makes fourteen icons read as one family. The export is kept (rather
- * than deleted) because the palette imports it, and because a future glyph
- * that genuinely needs a solid counter can opt in here without the consumers
- * changing.
+ * The viewBox every Lucide icon is drawn in, in icon units. Consumers scale
+ * from this to their rendered size rather than the art being redrawn; one
+ * number to change if the icon set is ever swapped again.
  */
-export const FILLED_GLYPHS: ReadonlySet<NodeKind> = new Set<NodeKind>();
+export const ICON_BOX = 24;
 
 /**
- * The box every path above is drawn in. The node header renders the glyph at
- * 14px, so the consumer scales by 14/16 rather than the paths being redrawn —
- * one number to change if the art is ever re-cut.
+ * The stroke width the set is designed for, in icon units (so 2/24 of the
+ * rendered size). Every consumer derives its stroke from this so all icons
+ * everywhere carry the same visual weight.
  */
-export const GLYPH_BOX = 16;
+export const ICON_STROKE = 2;
 
 /** Human-readable kind names. Used by the canvas, the palette and the inspector. */
 export const KIND_NAME: Record<NodeKind, string> = {
