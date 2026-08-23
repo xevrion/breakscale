@@ -107,49 +107,76 @@ const PAD_X = 12;
 const SEC_HALF = (NODE_W - PAD_X * 2 - 14) / 2;
 
 /**
- * Advance width per character at the secondary row's font size.
+ * Advance widths per character for the two text styles a readout cell mixes.
  *
- * MEASURED, not guessed. The row renders two tspans at different sizes
- * (`.cv-val` at 12px, `.cv-cap` at 11px), so a single per-char figure has to
- * cover the wider of the two. getBBox() on every secondary row the presets
- * produce gave 6.49-7.29 px/char:
- *
- *     "5/5 fleet"  6.49    "72ms p99"   6.59    "500ms p99"  6.64
- *     "16% err"    6.69    "steady..."  6.96    "252 queue"  7.24
- *     "0 queue"    7.29
- *
- * The previous 6.1 under-measured EVERY one of them, so `fitWidth` cleared
- * strings that then overflowed the 73px half-budget and collided with the
- * cell anchored to the opposite edge — observed on the autoscaler as a
- * 11.1px gap where every other node had 42-56px. Digit-heavy strings are the
- * worst case (digits are tabular and wide), so the constant is the measured
- * maximum rounded up rather than the average: under-measuring silently
- * corrupts the layout, while over-measuring only condenses a string slightly
- * sooner than strictly necessary.
+ * MEASURED, not guessed, and measured PER STYLE. A cell renders a mono value
+ * tspan (`.cv-val`, 12px, tabular digits) followed by an uppercase sans label
+ * tspan (`.cv-cap`, 11px, letter-spaced), and the two run at very different
+ * widths: getBBox() gave value glyphs up to 6.6px/char ("1,234" at 33/5) and
+ * uppercase labels 7.5 to 9.0px/char ("QUEUE" 37.5/5, "COOLDOWN" 71.9/8 with
+ * tracking). The previous single 7.3/char figure split the difference and
+ * under-measured every label-heavy string: "12.4k conns" is really 81.2px
+ * against an estimate of 67.1, so it cleared the 73px half-budget unguarded
+ * and overran into the opposite cell. The constants are the measured maxima:
+ * under-measuring silently corrupts the layout, while over-measuring only
+ * condenses a string slightly sooner than strictly necessary.
  */
-const SEC_CHAR_W = 7.3;
+const VAL_CHAR_W = 6.7;
+const CAP_CHAR_W = 9.0;
+/** The dx between the tspans, plus slack for the estimate's rounding. */
+const CELL_GAP_W = 3;
 
-/** The full string a secondary cell will render, for width estimation. */
-function secText(cell: { value: string; label: string }): string {
-  return cell.value && cell.label
-    ? `${cell.value} ${cell.label}`
-    : cell.value || cell.label;
+/** Estimated rendered width of one value+label cell at secondary size. */
+function cellEstimate(value: string, label: string): number {
+  const gap = value && label ? CELL_GAP_W : 0;
+  return value.length * VAL_CHAR_W + label.length * CAP_CHAR_W + gap;
 }
 
 /**
- * Constrain a text run to a width budget.
+ * Constrain a secondary cell to a width budget.
  *
- * Returns `textLength` only when the estimate says the string would overflow,
+ * Returns `textLength` only when the estimate says the cell would overflow,
  * because applying it unconditionally makes short strings render subtly wrong
  * (the browser redistributes spacing to hit the exact length even when it did
  * not need to). `lengthAdjust` condenses the glyphs themselves rather than
  * only the gaps, which stays readable far longer.
  */
-function fitWidth(
-  text: string,
+function fitCell(
+  value: string,
+  label: string,
   budget: number,
 ): { textLength?: number; lengthAdjust?: 'spacingAndGlyphs' } {
-  const estimate = text.length * SEC_CHAR_W;
+  if (cellEstimate(value, label) <= budget) return {};
+  return { textLength: budget, lengthAdjust: 'spacingAndGlyphs' };
+}
+
+/**
+ * The primary row's value renders at 16px (22px when the node is selected)
+ * while its label stays at the 11px cap size, so the same per-style widths
+ * scale by font size for the value alone.
+ */
+const PRIMARY_VAL_CHAR_W = VAL_CHAR_W * (16 / 12);
+const PRIMARY_VAL_SELECTED_CHAR_W = VAL_CHAR_W * (22 / 12);
+
+/**
+ * Constrain the primary readout, accounting for the selected font bump.
+ *
+ * Its budget stops short of the sparkline and vessel slot at SPARK_X.
+ * Previously unguarded, and reachable today: "999,999 depth" measures
+ * 109.2px from x=12, 13px INTO the sparkline, and the selected 22px variant
+ * of "99.9% util" ended 0.1px from the spark at the single most common
+ * danger reading. (Budget computed at call time because SPARK_X is declared
+ * further down this file.)
+ */
+function fitPrimary(
+  value: string,
+  label: string,
+  selected: boolean,
+): { textLength?: number; lengthAdjust?: 'spacingAndGlyphs' } {
+  const budget = SPARK_X - PAD_X - 6;
+  const vw = selected ? PRIMARY_VAL_SELECTED_CHAR_W : PRIMARY_VAL_CHAR_W;
+  const gap = value && label ? CELL_GAP_W + 1 : 0;
+  const estimate = value.length * vw + label.length * CAP_CHAR_W + gap;
   if (estimate <= budget) return {};
   return { textLength: budget, lengthAdjust: 'spacingAndGlyphs' };
 }
@@ -329,14 +356,63 @@ interface Readout {
   health: Health;
   /** Value the sparkline plots, in the primary's units. */
   spark: number;
+  /**
+   * True when `spark` is a 0..1 fraction and the sparkline should plot it
+   * against a fixed unit domain; false for counts and rates, which autoscale.
+   */
+  sparkUnit: boolean;
   /** True when traffic is actively being lost here. */
   losing: boolean;
 }
 
-function readoutFor(
+/** A safe 0..1 ratio: 0 whenever the denominator cannot support one. */
+function frac(n: number, d: number): number {
+  if (!Number.isFinite(n) || !Number.isFinite(d) || d <= 0) return 0;
+  return clamp(n / d, 0, 1);
+}
+
+/**
+ * The worse of two healths, so a kind can combine "how loaded" with "is it
+ * refusing work" without either channel masking the other.
+ */
+function worstHealth(a: Health, b: Health): Health {
+  if (a === 'danger' || b === 'danger') return 'danger';
+  if (a === 'warn' || b === 'warn') return 'warn';
+  return 'ok';
+}
+
+/**
+ * What the three numbers on a node MEAN, per kind.
+ *
+ * This switch is deliberately EXHAUSTIVE over NodeKind, with no default for
+ * real kinds: the compiler proves every kind has a readout (see the `never`
+ * check after the switch), so a future kind cannot silently fall back to the
+ * generic utilisation triple. That fallback is exactly what made the
+ * autoscaler read "0% util, 0ms p99, 0 queue" forever and look broken, and
+ * the same all-zero triple was being printed on the cron, the region, the
+ * rate limiter, the breaker and every other kind that serves no requests.
+ *
+ * Ground rules, learned the hard way:
+ *  - never show a number that is structurally always zero for this kind;
+ *  - a word ("open", "warming", "dark") is a legitimate value when the word
+ *    is the truth;
+ *  - the meter and health must be driven by what actually means trouble for
+ *    THIS kind, never by a utilisation that is hardwired to zero;
+ *  - `losing` must include the kind's own refusal channel (throttled,
+ *    rejected, conn-refused, retention drops...), not just shed/timeout,
+ *    which no gate kind ever sets;
+ *  - values stay about as short as "23ms" or "3/5"; a longer word gets the
+ *    cell to itself with an empty value.
+ *
+ * `backlog` is the summed depth of the buffer nodes feeding a pull-based
+ * consumer (worker, transcoder). Their own queue is structurally always 0;
+ * the work they are behind on lives in the queues that feed them.
+ */
+export function readoutFor(
   kind: NodeKind,
   s: NodeStats,
-  cfg: { queueLimit: number },
+  cfg: NodeConfig,
+  backlog = 0,
 ): Readout {
   const util = clamp(s.utilization, 0, 1);
   const losing = s.shedRate + s.timeoutRate > 0;
@@ -358,18 +434,26 @@ function readoutFor(
         load: err,
         health: healthOfErr(err),
         spark: s.arrivalRate,
-        losing,
+        sparkUnit: false,
+        // The err cell already shows the loss; the indicator must agree.
+        losing: losing || err > 0,
       };
     }
 
+    /* A load balancer's own utilisation is structurally ~0: 256 half-ms
+       slots mean the meter cannot move below thousands of rps (measured
+       0.000 at 100 rps). Throughput is the number that lives; util still
+       drives the meter because it CAN saturate, and when it does the primary
+       is not the place the story shows first anyway. */
     case 'lb':
       return {
-        primary: { value: formatPct(util), label: 'util' },
-        a: { value: formatRate(s.throughput), label: 'rps' },
+        primary: { value: formatRate(s.throughput), label: 'rps' },
+        a: { value: formatMs(s.p99), label: 'p99' },
         b: { value: formatCount(s.queued), label: 'queue' },
         load: util,
         health: healthOfLoad(util),
-        spark: util,
+        spark: s.throughput,
+        sparkUnit: false,
         losing,
       };
 
@@ -384,6 +468,7 @@ function readoutFor(
         load: miss,
         health: healthOfLoad(miss),
         spark: hit,
+        sparkUnit: true,
         losing,
       };
     }
@@ -401,6 +486,7 @@ function readoutFor(
         load: fill,
         health: healthOfLoad(fill),
         spark: depth,
+        sparkUnit: false,
         losing,
       };
     }
@@ -422,13 +508,17 @@ function readoutFor(
      */
     case 'shard': {
       const hot = clamp(s.maxShardUtilization, 0, 1);
+      /* Strip kind: `a` is the single cell drawn beside the primary (the
+         partition strip occupies the secondary row). Coldest next to hottest
+         is what makes a hot key legible: 100% against 0% is the signature. */
       return {
-        primary: { value: formatPct(hot), label: 'hot shard' },
-        a: { value: formatPct(clamp(s.minShardUtilization, 0, 1)), label: 'coldest' },
+        primary: { value: formatPct(hot), label: 'hot' },
+        a: { value: formatPct(clamp(s.minShardUtilization, 0, 1)), label: 'cold' },
         b: { value: formatCount(s.queued), label: 'queue' },
         load: hot,
         health: healthOfLoad(hot),
         spark: hot,
+        sparkUnit: true,
         losing,
       };
     }
@@ -444,21 +534,24 @@ function readoutFor(
      */
     case 'replica': {
       const stale = clamp(s.staleReadRate, 0, 1);
+      /* Strip kind: `a` rides beside the primary. Stale reads are the whole
+         reason a replica set is its own component, so they take the cell the
+         moment they exist; p99 fills it on a synchronous set. */
       return {
         primary: { value: formatPct(util), label: 'util' },
-        a: { value: formatMs(s.p99), label: 'p99' },
-        b:
+        a:
           stale > 0
             ? { value: formatPct(stale), label: 'stale' }
-            : { value: formatCount(s.queued), label: 'queue' },
+            : { value: formatMs(s.p99), label: 'p99' },
+        b: { value: formatCount(s.queued), label: 'queue' },
         load: util,
         health: healthOfLoad(util),
         spark: util,
+        sparkUnit: true,
         losing,
       };
     }
 
-    // service, db, worker
     case 'autoscaler': {
       /* A controller serves no requests, so utilisation, p99 and queue depth
          are all permanently zero for it. Showing them made the autoscaler look
@@ -488,11 +581,16 @@ function readoutFor(
         load: drift,
         health: healthOfLoad(drift),
         spark: watched,
+        sparkUnit: true,
         losing: false,
       };
     }
 
-    default:
+    /* The generic triple is honestly right for a plain server: it has slots,
+       a queue and a latency, and all three move. */
+    case 'service':
+    case 'db':
+    case 'objectstore':
       return {
         primary: { value: formatPct(util), label: 'util' },
         a: { value: formatMs(s.p99), label: 'p99' },
@@ -500,9 +598,482 @@ function readoutFor(
         load: util,
         health: healthOfLoad(util),
         spark: util,
+        sparkUnit: true,
         losing,
       };
+
+    /* A worker's own queue cell is structurally ALWAYS zero: the work it is
+       behind on lives in the queue nodes feeding it. Show that backlog. */
+    case 'worker':
+      return {
+        primary: { value: formatPct(util), label: 'util' },
+        a: { value: formatRate(s.throughput), label: 'rps' },
+        b: { value: formatCount(backlog), label: 'backlog' },
+        load: util,
+        health: healthOfLoad(util),
+        spark: util,
+        sparkUnit: true,
+        losing,
+      };
+
+    /* The batch regime: jobs take seconds, so "how many are running and how
+       far behind are we" is the reading, not a per-request latency. */
+    case 'transcoder': {
+      const stuck = util >= 0.999 && backlog > 0;
+      return {
+        primary: { value: formatCount(s.inFlight), label: 'jobs' },
+        a: { value: formatCount(backlog), label: 'backlog' },
+        b: { value: formatMs(s.p50), label: 'per job' },
+        load: util,
+        health: stuck ? 'danger' : healthOfLoad(util),
+        spark: backlog,
+        sparkUnit: false,
+        losing,
+      };
+    }
+
+    /* A failover switch. During the dark window the old readout showed "0%
+       util", healthy, losing nothing, in the middle of a TOTAL outage. */
+    case 'region': {
+      const total = s.regionsTotal ?? 1;
+      const healthy = s.regionsHealthy ?? total;
+      const dark = s.failingOver === true;
+      const err = clamp(s.errorRate, 0, 1);
+      return {
+        primary: dark
+          ? { value: 'dark', label: 'failover' }
+          : { value: `R${s.activeRegion ?? 0}`, label: 'serving' },
+        a: { value: `${healthy}/${total}`, label: 'healthy' },
+        b: dark
+          ? { value: formatMs(s.failoverRemainingMs), label: 'back in' }
+          : { value: formatRate(s.throughput), label: 'rps' },
+        load: dark ? 1 : 1 - frac(healthy, total),
+        health: dark || healthy === 0 ? 'danger' : healthy < total ? 'warn' : 'ok',
+        spark: err,
+        sparkUnit: true,
+        losing: dark || err > 0,
+      };
+    }
+
+    /* An edge cache: its meter can essentially never move (cap 256), but the
+       origin-fetch rate is the load that actually reaches your servers. */
+    case 'cdn': {
+      const hit = clamp(s.hitRate, 0, 1);
+      const miss = 1 - hit;
+      return {
+        primary: { value: formatPct(hit), label: 'hit' },
+        a: { value: formatRate(s.originFetchRate), label: 'origin' },
+        b: { value: formatRate(s.throughput), label: 'rps' },
+        load: miss,
+        health: healthOfLoad(miss),
+        spark: hit,
+        sparkUnit: true,
+        losing,
+      };
+    }
+
+    /* A token bucket. Utilisation is hardwired 0 and its p99 is its
+       downstream's number; what it DOES is admit and refuse. Measured while
+       the old readout said "util 0%, healthy": refusing 93 rps. */
+    case 'ratelimiter': {
+      const throttled = s.throttledRate ?? 0;
+      const admitted = s.admittedRate ?? 0;
+      const burst = cfg.burst ?? cfg.rateLimitRps ?? 1;
+      return {
+        primary: { value: formatRate(throttled), label: 'refused' },
+        a: { value: formatRate(admitted), label: 'passed' },
+        b: { value: formatCount(s.tokens), label: 'tokens' },
+        // A drained bucket is a limiter working hard; a full one is idle.
+        load: 1 - frac(s.tokens ?? 0, burst),
+        health: throttled <= 0 ? 'ok' : throttled < admitted ? 'warn' : 'danger',
+        spark: throttled,
+        sparkUnit: false,
+        losing: throttled > 0,
+      };
+    }
+
+    /* The circuit's state IS the component. A word beats a number here. */
+    case 'breaker': {
+      const state = s.breakerState ?? 'closed';
+      const errRate = clamp(s.breakerErrorRate ?? 0, 0, 1);
+      const rejected = s.rejectedRate ?? 0;
+      const threshold = cfg.errorThreshold ?? 0.5;
+      // How close the window is to tripping; pinned full while open.
+      const strain = state === 'closed' ? frac(errRate, threshold) : 1;
+      return {
+        primary:
+          state === 'open'
+            ? { value: 'OPEN', label: 'circuit' }
+            : state === 'half-open'
+              ? { value: 'probing', label: 'circuit' }
+              : { value: 'closed', label: 'circuit' },
+        a: { value: formatPct(errRate), label: 'dep err' },
+        b:
+          state === 'open'
+            ? { value: formatRate(rejected), label: 'refused' }
+            : { value: formatCount(s.breakerTrips), label: 'trips' },
+        load: strain,
+        health:
+          state === 'open'
+            ? 'danger'
+            : state === 'half-open'
+              ? 'warn'
+              : healthOfLoad(strain),
+        spark: errRate,
+        sparkUnit: true,
+        losing: rejected > 0,
+      };
+    }
+
+    /* The refresh lag made visible: measured 37% of searches stale while the
+       node showed nothing but "util 25%". */
+    case 'searchindex': {
+      const stale = clamp(s.staleSearchRate ?? 0, 0, 1);
+      return {
+        primary: { value: formatPct(stale), label: 'stale' },
+        a: { value: formatRate(s.searchRate), label: 'search' },
+        b: { value: formatRate(s.indexWriteRate), label: 'index' },
+        load: util,
+        health: worstHealth(healthOfLoad(util), stale > 0.2 ? 'warn' : 'ok'),
+        spark: stale,
+        sparkUnit: true,
+        losing,
+      };
+    }
+
+    /* Two-class cost: the append firehose and the range queries that melt it. */
+    case 'timeseriesdb':
+      return {
+        primary: { value: formatPct(util), label: 'util' },
+        a: { value: formatRate(s.appendRate), label: 'append' },
+        b: { value: formatRate(s.rangeQueryRate), label: 'range' },
+        load: util,
+        health: healthOfLoad(util),
+        spark: util,
+        sparkUnit: true,
+        losing,
+      };
+
+    /* The depth multiplier, measured: what one traversal actually costs. */
+    case 'graphdb':
+      return {
+        primary: { value: formatMs(s.traversalCostMs), label: 'query' },
+        a: { value: formatPct(util), label: 'util' },
+        b: { value: formatRate(s.throughput), label: 'rps' },
+        load: util,
+        health: healthOfLoad(util),
+        spark: s.traversalCostMs ?? 0,
+        sparkUnit: false,
+        losing,
+      };
+
+    /* Multi-second retrieval is this component's entire identity, so the
+       measured latency takes the headline instead of hiding in a cell. */
+    case 'coldstorage':
+      return {
+        primary: { value: formatMs(s.p99), label: 'restore' },
+        a: { value: formatPct(util), label: 'util' },
+        b: { value: formatCount(s.queued), label: 'queue' },
+        load: util,
+        health: healthOfLoad(util),
+        spark: util,
+        sparkUnit: true,
+        losing,
+      };
+
+    /* The recall slider read backwards: measured cost per query. */
+    case 'vectordb':
+      return {
+        primary: { value: formatMs(s.queryCostMs), label: 'query' },
+        a: { value: formatPct(util), label: 'util' },
+        b: { value: formatRate(s.throughput), label: 'rps' },
+        load: util,
+        health: healthOfLoad(util),
+        spark: s.queryCostMs ?? 0,
+        sparkUnit: false,
+        losing,
+      };
+
+    /* Strip kind: the partition strip carries the spread; `a` is the single
+       cell beside the primary. Lag against retention is the meter, and a
+       retention drop is data loss, not lateness: it forces danger. */
+    case 'streambroker': {
+      const lag = s.consumerLag ?? 0;
+      const dropRate = s.retentionDropRate ?? 0;
+      const fill = frac(lag, s.queueLimit);
+      return {
+        primary: { value: formatCount(lag), label: 'lag' },
+        a:
+          dropRate > 0
+            ? { value: formatRate(dropRate), label: 'lost' }
+            : { value: formatRate(s.deliveryRate), label: 'deliver' },
+        b: { value: formatRate(s.throughput), label: 'publish' },
+        load: fill,
+        health: dropRate > 0 ? 'danger' : healthOfLoad(fill),
+        spark: lag,
+        sparkUnit: false,
+        losing: dropRate > 0 || losing,
+      };
+    }
+
+    /* One publish in, fanout deliveries out. The amplification IS the
+       component; a topic has no fill of its own, so the meter stays flat. */
+    case 'pubsub':
+      return {
+        primary: { value: formatRate(s.deliveryRate), label: 'out' },
+        a: { value: formatRate(s.throughput), label: 'in' },
+        b: { value: `x${s.fanout ?? 0}`, label: 'fan-out' },
+        load: 0,
+        health: 'ok',
+        spark: s.deliveryRate ?? 0,
+        sparkUnit: false,
+        losing: false,
+      };
+
+    /* The scarce resource is connections HELD, not requests per second.
+       Measured at saturation the old readout said "util 100%, p99 0ms,
+       queue 0" and losing=false while refusing 11 conn/s. */
+    case 'websocket': {
+      const open = s.connectionsOpen ?? 0;
+      const max = s.maxConnections ?? 0;
+      const refused = s.connectionRejectRate ?? 0;
+      const fill = frac(open, max);
+      return {
+        primary: { value: formatCount(open), label: 'conns' },
+        a: { value: formatCount(max), label: 'slots' },
+        b:
+          refused > 0
+            ? { value: formatRate(refused), label: 'refused' }
+            : { value: formatRate(s.connectRate), label: 'conn/s' },
+        load: fill,
+        health: refused > 0 ? 'danger' : healthOfLoad(fill),
+        spark: fill,
+        sparkUnit: true,
+        losing: refused > 0,
+      };
+    }
+
+    /* The front door: admitted against the two reasons it refuses. Its own
+       utilisation is structurally ~0 (measured 0.008 at 353 rps). */
+    case 'apigateway': {
+      const admitted = s.admittedRate ?? 0;
+      const throttled = s.throttledRate ?? 0;
+      const badAuth = s.authRejectRate ?? 0;
+      const burst = cfg.burst ?? cfg.rateLimitRps ?? 1;
+      return {
+        primary: { value: formatRate(admitted), label: 'passed' },
+        a: { value: formatRate(throttled), label: 'limited' },
+        b: { value: formatRate(badAuth), label: 'denied' },
+        load: 1 - frac(s.tokens ?? 0, burst),
+        health: throttled > admitted ? 'danger' : throttled > 0 ? 'warn' : 'ok',
+        spark: admitted,
+        sparkUnit: false,
+        losing: throttled + badAuth > 0,
+      };
+    }
+
+    /* Envoy-style outlier ejection: the proxy's state in a word, plus the
+       failure rate it is judging its upstream by. */
+    case 'sidecar': {
+      const state = s.breakerState ?? 'closed';
+      const fails = s.upstreamFailRate ?? 0;
+      const rejected = s.rejectedRate ?? 0;
+      const after = Math.max(1, cfg.outlierAfter ?? 5);
+      const strain = state === 'closed' ? frac(s.consecutiveFails ?? 0, after) : 1;
+      return {
+        primary:
+          state === 'open'
+            ? { value: 'EJECTED', label: 'upstream' }
+            : state === 'half-open'
+              ? { value: 'probing', label: 'upstream' }
+              : { value: 'proxying', label: '' },
+        a: { value: formatRate(fails), label: 'fails' },
+        b:
+          state === 'open'
+            ? { value: formatRate(rejected), label: 'refused' }
+            : { value: formatMs(s.p99), label: 'p99' },
+        load: strain,
+        health:
+          state === 'open'
+            ? 'danger'
+            : state === 'half-open' || strain > 0
+              ? 'warn'
+              : 'ok',
+        spark: fails,
+        sparkUnit: false,
+        losing: rejected > 0,
+      };
+    }
+
+    /* Serverless: the cold-start story was invisible behind "util 45%". */
+    case 'lambda': {
+      const cold = clamp(s.coldStartRate ?? 0, 0, 1);
+      const running = s.runningNow ?? 0;
+      const cap = Math.max(1, cfg.maxConcurrency ?? 1);
+      const throttled = s.throttledRate ?? 0;
+      const fill = frac(running, cap);
+      return {
+        primary: { value: formatPct(cold), label: 'cold' },
+        a: { value: `${formatCount(running)}/${formatCount(cap)}`, label: 'running' },
+        b:
+          throttled > 0
+            ? { value: formatRate(throttled), label: 'refused' }
+            : { value: formatCount(s.warmIdle), label: 'warm' },
+        load: fill,
+        health:
+          throttled > 0
+            ? 'danger'
+            : worstHealth(healthOfLoad(fill), cold > 0.5 ? 'warn' : 'ok'),
+        spark: cold,
+        sparkUnit: true,
+        losing: throttled > 0,
+      };
+    }
+
+    /* A job on a clock. The countdown is the movement: between firings the
+       node used to sit at "0% util, 0ms p99, 0 queue" forever, the exact
+       all-zero box the autoscaler was before its fix. */
+    case 'cron': {
+      const interval = Math.max(1, cfg.intervalMs ?? 20000);
+      const next = s.nextFireInMs ?? interval;
+      return {
+        primary: { value: formatMs(next), label: 'next run' },
+        a: { value: formatCount(s.burstSize), label: 'burst' },
+        b: { value: formatCount(s.batchEmitted), label: 'sent' },
+        // Fills toward the firing, like a fuse. A cron is never unhealthy.
+        load: 1 - frac(next, interval),
+        health: 'ok',
+        spark: s.batchEmitted ?? 0,
+        sparkUnit: false,
+        losing: false,
+      };
+    }
+
+    /* Pool occupancy is the earliest possible warning a dependency slowed:
+       the pool fills within one round trip, long before errors show. Its
+       p99 IS the dependency's, which is the number the pool protects. */
+    case 'bulkhead': {
+      const inUse = s.bulkheadInFlight ?? 0;
+      const limit = s.bulkheadLimit ?? 0;
+      const refused = s.bulkheadRejectedRate ?? 0;
+      const fill = frac(inUse, limit);
+      return {
+        primary: {
+          value: `${formatCount(inUse)}/${formatCount(limit)}`,
+          label: 'pool',
+        },
+        a: { value: formatRate(refused), label: 'refused' },
+        b: { value: formatMs(s.p99), label: 'p99' },
+        load: fill,
+        health: refused > 0 ? 'danger' : healthOfLoad(fill),
+        spark: fill,
+        sparkUnit: true,
+        losing: refused > 0,
+      };
+    }
+
+    /* Failures with somewhere to go: the dead-letter shelf is the bill, the
+       redelivery rate the early warning that it is about to grow. */
+    case 'retryqueue': {
+      const dead = s.deadLetters ?? 0;
+      const deadRate = s.deadLetterRate ?? 0;
+      const redeliver = s.redeliveryRate ?? 0;
+      const fill = frac(s.queued, s.queueLimit);
+      return {
+        primary: { value: formatCount(dead), label: 'dead' },
+        a: { value: formatRate(s.deliveredRate), label: 'deliver' },
+        b: { value: formatRate(redeliver), label: 'retry' },
+        load: fill,
+        health:
+          deadRate > 0
+            ? 'danger'
+            : worstHealth(healthOfLoad(fill), redeliver > 0 ? 'warn' : 'ok'),
+        spark: dead,
+        sparkUnit: false,
+        losing: deadRate > 0 || losing,
+      };
+    }
+
+    /* The split is the component: what the PoP answers against what still
+       pays the full origin path. */
+    case 'edgecompute': {
+      const handled = s.edgeHandledRate ?? 0;
+      const passed = s.passedThroughRate ?? 0;
+      const share = frac(handled, handled + passed);
+      return {
+        primary: { value: formatPct(share), label: 'at edge' },
+        a: { value: formatRate(passed), label: 'origin' },
+        b: { value: formatMs(s.p99), label: 'p99' },
+        // The meter shows what still reaches the origin; its own small pool
+        // can also melt, which health tracks separately.
+        load: 1 - share,
+        health: healthOfLoad(util),
+        spark: share,
+        sparkUnit: true,
+        losing,
+      };
+    }
+
+    /* Every dirty write is a write the caller was told is safe and a crash
+       would lose. That population is the headline, not a generic queue. */
+    case 'writebehind': {
+      const failRate = s.flushFailRate ?? 0;
+      return {
+        primary: { value: formatCount(s.dirtyWrites), label: 'at risk' },
+        a: { value: formatRate(s.flushedRate), label: 'flushed' },
+        b: { value: formatRate(s.throughput), label: 'acked' },
+        // Utilisation here genuinely means buffer fill (measured 0.146 with
+        // 44 dirty writes), so the meter keeps it.
+        load: util,
+        health: failRate > 0 ? 'danger' : healthOfLoad(util),
+        spark: s.dirtyWrites ?? 0,
+        sparkUnit: false,
+        losing: losing || failRate > 0,
+      };
+    }
+
+    /* Triage in numbers: low-priority drops are the component doing its job;
+       any high-priority drop means the protection is exhausted. */
+    case 'loadshedder': {
+      const lowShed = s.lowSheddedRate ?? 0;
+      const highShed = s.highSheddedRate ?? 0;
+      const highIn = s.highAdmittedRate ?? 0;
+      const burst = cfg.burst ?? cfg.rateLimitRps ?? 1;
+      return {
+        primary: { value: formatRate(lowShed), label: 'low shed' },
+        a: { value: formatRate(highIn), label: 'high in' },
+        b:
+          highShed > 0
+            ? { value: formatRate(highShed), label: 'hi shed' }
+            : { value: formatCount(s.tokens), label: 'tokens' },
+        load: 1 - frac(s.tokens ?? 0, burst),
+        health: highShed > 0 ? 'danger' : lowShed > 0 ? 'warn' : 'ok',
+        spark: lowShed + highShed,
+        sparkUnit: false,
+        losing: lowShed + highShed > 0,
+      };
+    }
   }
+
+  /* Compile-time exhaustiveness: if a NodeKind is ever added without a case
+     above, `kind` no longer narrows to `never` here and the build fails,
+     which is precisely what stops the dead-box bug returning. The runtime
+     fallback below it can then only be reached by data from outside the
+     type system (a corrupted save), and shows the generic triple rather
+     than crashing the canvas. */
+  return ((k: never): Readout => {
+    void k;
+    return {
+      primary: { value: formatPct(util), label: 'util' },
+      a: { value: formatMs(s.p99), label: 'p99' },
+      b: { value: formatCount(s.queued), label: 'queue' },
+      load: util,
+      health: healthOfLoad(util),
+      spark: util,
+      sparkUnit: true,
+      losing,
+    };
+  })(kind);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1573,7 +2144,7 @@ const NodeView = memo(function NodeView({
                 className="cv-node-sec"
                 x={PAD_X}
                 y={70}
-                {...fitWidth(secText(readout.a), SEC_HALF)}
+                {...fitCell(readout.a.value, readout.a.label, SEC_HALF)}
               >
                 <tspan className="cv-val">{readout.a.value}</tspan>
                 {readout.a.value && readout.a.label ? (
@@ -1589,7 +2160,7 @@ const NodeView = memo(function NodeView({
                 x={NODE_W - PAD_X}
                 y={70}
                 textAnchor="end"
-                {...fitWidth(secText(readout.b), SEC_HALF)}
+                {...fitCell(readout.b.value, readout.b.label, SEC_HALF)}
               >
                 <tspan className="cv-val">{readout.b.value}</tspan>
                 {readout.b.value && readout.b.label ? (
