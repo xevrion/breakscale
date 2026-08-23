@@ -35,6 +35,10 @@
 
 .ins-empty {
   padding: var(--sp-7) 0 0;
+  /* Prose gets a measure cap like every other run of prose in the app. The
+     rail can widen, and a line that runs the full column is harder to read
+     than one that wraps at a comfortable length. */
+  max-width: 34ch;
   color: var(--text-dim);
   font-size: var(--fs-base);
   line-height: var(--lh-prose);
@@ -89,6 +93,14 @@
 .ins-title:focus {
   background: var(--surface);
   border-color: var(--accent);
+}
+
+/* Pressed, but only while it is not already being edited: once focused the
+   field is a text input and a press inside it is a caret placement, not a
+   button press. */
+.ins-title:active:not(:focus) {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
 }
 
 .ins-kind {
@@ -404,15 +416,49 @@
    of reach, and never drifts up under the last field either.
    -------------------------------------------------------------------------- */
 
+/* The footer's right padding has to clear the SCROLLBAR the body above it
+   reserves, or the one full-width control in the panel is the only thing
+   that does not share the content column's right edge. Measured: every value
+   row ended at 1965.6 and the delete button at 1973.6, exactly 8px past —
+   and it is the destructive action, so that is where the eye goes. */
 .ins-foot {
   flex: none;
-  padding: var(--sp-3) var(--sp-5);
-  border-top: var(--bw) solid var(--border);
+  padding: var(--sp-3) calc(var(--sp-5) + var(--scrollbar-w)) var(--sp-3) var(--sp-5);
   background: var(--surface);
 }
 
+/* Destructive, and QUIET until wanted.
+
+   This was a full-width bar with a red border and red text, permanently the
+   loudest object in a panel whose actual job is teaching. Deleting a
+   component is a rare action and an easily-undone one; it does not earn more
+   visual weight than every reading on the panel combined.
+
+   So it is a ghost button at rest, sized to its own label rather than to the
+   panel, and it asserts itself — full danger tint, red text — only on hover
+   and focus, at the moment the student has actually reached for it. */
 .ins-delete {
-  width: 100%;
+  align-self: flex-start;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.ins-delete:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.ins-delete:focus-visible {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.ins-delete:active:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 /* ==========================================================================
@@ -504,10 +550,11 @@
   position: absolute;
   inset: auto 0 0;
   height: 12px;
-  /* The thumb is 18px, so its centre can only reach 9px from either end.
+  /* The thumb's centre can only reach half its own width from either end.
      Insetting the mark rail by that much makes a mark sit under the thumb
-     position it names instead of drifting outward at the extremes. */
-  margin: 0 9px;
+     position it names instead of drifting outward at the extremes.
+     Derived from the token so the two cannot drift apart. */
+  margin: 0 calc(var(--thumb) / 2);
   pointer-events: none;
 }
 
@@ -534,18 +581,41 @@
    Readouts — the effect
    -------------------------------------------------------------------------- */
 
+/* The hero and the supporting set.
+
+   p99 is deliberately larger than Goodput / Errors / Dropped: it is the one
+   number a student should be watching, and the size IS that instruction. The
+   critique read the size difference as an accident; it is not, and it stays.
+
+   What was wrong is that the two tiers were aligned on `baseline` while being
+   set at 34px and 16px, which put their text baselines 13.8px apart and made
+   the eye drop and jump reading left to right. They are aligned on their
+   LABELS instead — every eyebrow now sits on one line, the values hang below
+   at their own sizes, and the group reads as a hero with a supporting set
+   rather than as four numbers that failed to line up. */
 .traffic-headline {
   display: flex;
   flex: none;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--sp-7);
   min-width: 0;
+}
+
+/* No components on the canvas: one quiet sentence where the numbers go. */
+.traffic-empty {
+  margin: 0;
+  align-self: center;
+  max-width: 46ch;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  color: var(--text-faint);
+  text-wrap: pretty;
 }
 
 .traffic-metric {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sp-1);
   /* Right-aligned so each figure's last digit sits on a fixed axis: a
      value going from 99 to 100 must not shove its own label sideways. */
   align-items: flex-end;
@@ -561,7 +631,7 @@
    rather than as three more competing headlines. */
 .traffic-metric-group {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--sp-5);
 }
 
@@ -570,6 +640,19 @@
   flex: none;
   align-items: center;
   gap: var(--sp-2);
+}
+
+/* One width for the three transport controls.
+
+   Their labels are 4-6 characters, so intrinsic sizing gave 66.8 / 55.1 /
+   62.3px — a ragged group that reads as three unrelated buttons rather than
+   one control cluster. 68px fits the longest label ("Pause") at its 650
+   weight with the button's own padding intact, so nothing is squeezed.
+
+   Not a `width`: a min-width still lets a translated label grow rather than
+   clipping it. */
+.traffic-actions .btn {
+  min-width: 68px;
 }
 
 /* --------------------------------------------------------------------------

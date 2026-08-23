@@ -386,7 +386,7 @@
 .mx-key-gap {
   height: 8px;
   border-top: none;
-  border-radius: 2px;
+  border-radius: var(--r-mark);
   background: var(--danger-mark);
   opacity: 0.28;
 }
@@ -427,7 +427,7 @@
 .mx-legend-stack {
   flex-direction: column;
   flex-wrap: nowrap;
-  gap: 2px;
+  gap: var(--sp-1);
   /* Five reasons is the realistic ceiling; beyond that the list scrolls
      rather than pushing the strip taller and stealing canvas height. */
   max-height: 76px;
@@ -439,8 +439,9 @@
 /* A grid, so the swatch, name, bar, rate and share columns line up down the
    list instead of each row laying itself out independently. */
 .mx-key-fail {
+  --swatch: 8px;
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) 40px auto 38px;
+  grid-template-columns: var(--swatch) minmax(0, 1fr) 40px auto 38px;
   align-items: center;
   gap: var(--sp-2);
   width: 100%;
@@ -448,26 +449,37 @@
 }
 
 .mx-key-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+  width: var(--swatch);
+  height: var(--swatch);
+  border-radius: var(--r-mark);
   background: currentColor;
 }
 
 /* Share as a length as well as a figure. With up to ten reasons the hues
    alone cannot be ranked by eye; the bar is the channel that actually
    sorts them. */
+/* The trough behind a reason's share bar.
+
+   --track measured 1.21:1 against the panel and --border only 1.27:1 —
+   both functionally invisible, so a reason at 1% share rendered a sub-pixel
+   fill inside a trough nobody could see, and read as an empty gap.
+   --border-strong measures 1.58:1, which is the lightest token that
+   actually reads as a container rather than as nothing. A trough is a
+   non-essential decorative bound (the value is printed as text beside it),
+   so it is not held to the 3:1 a meaningful graphic needs. */
 .mx-key-bar {
   display: block;
   width: 100%;
   height: 4px;
   border-radius: var(--r-pill);
-  background: var(--track);
+  background: var(--border-strong);
   overflow: hidden;
 }
 
 .mx-key-bar-fill {
   display: block;
+  /* A 1% share still has to read as a mark rather than as a hairline. */
+  min-width: 2px;
   height: 100%;
   border-radius: var(--r-pill);
   background: currentColor;
@@ -490,9 +502,14 @@
 /* The healthy case: one calm line, not five rows of zeros. */
 .mx-clean {
   margin-top: var(--sp-2);
-  /* Matches the height the legend would occupy, so the strip does not
-     change height the moment a failure appears or clears. */
-  min-height: 20px;
+  /* Matches the height a one-row legend occupies, so the strip does not
+     change height the moment a failure appears or clears.
+
+     MEASURED at 18px, not the 20px this used to claim: the 2px difference
+     made the failures column 233.3px tall against its two siblings' 231.3px,
+     so the three panel bottoms did not line up and neither did their footer
+     baselines. */
+  min-height: 18px;
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
   color: var(--text-faint);

@@ -222,24 +222,33 @@ const retryqueue: ComponentBehaviour = {
  * ================================================================== */
 
 /**
- * A transcoder farm: workers whose jobs take SECONDS, not milliseconds.
+ * A transcoder farm: workers whose jobs take SECONDS, and whose output is
+ * FILES, not responses.
  *
- * Mechanically this is the worker's discipline -- it drains the queue nodes
- * that feed it -- and it is deliberately a separate kind anyway, for the same
- * reason db is separate from service: the numbers it is used with are from a
- * different regime and teach a different lesson. At serviceMs in the
- * thousands, capacity stops meaning "threads" and starts meaning "how many
- * encodes fit on one box", throughput is single digits per second, and the
- * queue in front of it is measured in minutes of backlog rather than
- * requests. Undersize the farm by 10% and the backlog grows FOREVER -- there
- * is no burst to ride out, because the deficit is structural. That is the
- * capacity-planning arithmetic every video pipeline lives and dies by, and
- * it is the beating heart of the Netflix and Spotify ingest architectures.
+ * The intake is the worker's discipline -- it drains the queue nodes that
+ * feed it -- but what happens at completion is what makes it an encode farm
+ * rather than a worker in a slow regime. A finished job produces the
+ * quality LADDER: `renditions` output files per outgoing edge, handed
+ * downstream as detached uploads that nothing waits on. Storage therefore
+ * sees `renditions * jobRate` writes -- upload one video, store four
+ * encodes -- and a job that finished cleanly is done even if an upload
+ * later fails, exactly as a real pipeline treats its origin push.
  *
- * It can also be pushed to directly (an ordinary edge into it works), but
- * queue-fed is the intended shape: the queue is what makes the deficit
- * visible instead of shedding it.
+ * Two lessons, both in the numbers. Capacity: at serviceMs in the
+ * thousands, `capacity` means "encodes per box", throughput is single
+ * digits, and undersizing the farm by 10% grows the queue in front of it
+ * FOREVER, because the deficit is structural. Amplification: the write
+ * load on the store behind the farm is a multiple the ladder chose, not
+ * the ingest rate the client sees.
+ *
+ * Emitting consumes no randomness; failed emits (a cut edge, a missing
+ * target) are simply lost artifacts, counted nowhere upstream.
  */
+function cfgRenditions(state: NodeStateLike): number {
+  const v = state.config.renditions;
+  return v !== undefined && v >= 1 ? Math.floor(v) : 3;
+}
+
 const transcoder: ComponentBehaviour = {
   kind: 'transcoder',
   servesRequests: true,
@@ -249,7 +258,30 @@ const transcoder: ComponentBehaviour = {
   pullsFromQueues: true,
   buffersForConsumers: false,
   pump: 'sources',
-  creditsJoinCompletion: true,
+  // FALSE, and it must be: a finished job is booked here by the 'complete'
+  // path below, and the detached uploads join back through this node -- were
+  // joins credited too, every rendition landing on storage would count as a
+  // second (and third, and fourth) completed job, and the store's latency
+  // would pollute the farm's. Same reasoning as the stream broker.
+  creditsJoinCompletion: false,
+
+  onServiceComplete: (ctx, state, req) => {
+    const renditions = cfgRenditions(state);
+    for (let i = 0; i < state.out.length; i++) {
+      const edge = state.out[i];
+      for (let n = 0; n < renditions; n++) {
+        if (!ctx.emitDetached(state, edge, req.key)) break;
+        ctx.countCustom(state, 'output', 1);
+      }
+    }
+    // The job is finished HERE: uploads are detached, so a slow store makes
+    // artifacts queue at the store, never the encode slot wait on it.
+    return 'complete';
+  },
+
+  decorateStats: (ctx, state, stats: NodeStats) => {
+    stats.outputRate = ctx.counterRate(state, 'output');
+  },
 };
 
 /* ================================================================== *
@@ -272,6 +304,13 @@ const transcoder: ComponentBehaviour = {
  * client sees is a blend of two distributions, and moving work to the edge
  * moves requests between them one slider-notch at a time.
  *
+ * What keeps it honest is the CPU BUDGET (`cpuMsCap`): an edge runtime is
+ * not a server, and a request whose execution runs past the per-request
+ * ceiling is killed at the edge and passed to the origin even though the
+ * code could have answered it. Push heavier logic outward (raise serviceMs)
+ * and the budget starts eating the very share you were trying to raise --
+ * the trade every Workers/Lambda@Edge deployment lives with.
+ *
  * One RNG draw per completion, unconditionally and in a fixed position, for
  * the same replay-stability reason the cache documents.
  */
@@ -286,9 +325,23 @@ const edgecompute: ComponentBehaviour = {
   pump: 'own',
   creditsJoinCompletion: true,
 
-  onServiceComplete: (ctx, state, _req) => {
-    const share = clamp01(state.config.edgeShare ?? 0);
-    if (ctx.roll() < share) {
+  onServiceComplete: (ctx, state, req) => {
+    // One RNG draw, unconditionally and first, so the stream never depends
+    // on the CPU budget check below.
+    const canAnswer = ctx.roll() < clamp01(state.config.edgeShare ?? 0);
+    if (canAnswer) {
+      // The CPU budget: an edge runtime kills a request that runs past its
+      // per-request ceiling, and the work falls through to the origin even
+      // though the code COULD have answered it. Judged against the actual
+      // execution time this request drew (req.ownMs), so a heavier function
+      // body (higher serviceMs) blows the budget more often -- the exact
+      // trade a student makes when pushing logic outward.
+      const cap = state.config.cpuMsCap;
+      if (cap !== undefined && cap > 0 && req.ownMs > cap) {
+        ctx.countCustom(state, 'cpuExceeded', 1);
+        ctx.countCustom(state, 'passedThrough', 1);
+        return state.out.length === 0 ? 'complete' : 'downstream';
+      }
       ctx.countCustom(state, 'edgeHandled', 1);
       return 'complete';
     }
@@ -301,6 +354,7 @@ const edgecompute: ComponentBehaviour = {
   decorateStats: (ctx, state, stats: NodeStats) => {
     stats.edgeHandledRate = ctx.counterRate(state, 'edgeHandled');
     stats.passedThroughRate = ctx.counterRate(state, 'passedThrough');
+    stats.cpuExceededRate = ctx.counterRate(state, 'cpuExceeded');
   },
 };
 

@@ -55,7 +55,7 @@
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sp-1);
   min-width: 0;
 }
 
@@ -136,25 +136,36 @@
 /* --------------------------------------------------------------------------
    Body: palette | stage | inspector.
 
-   The rails are FIXED. They hold a grouped component list and a config form;
-   neither reads better wider, and letting them grow is exactly what makes a
-   large display feel empty. Every extra pixel goes to the stage, which is
-   the subject of the app.
+   Every panel is OPTIONAL — the shell mounts a panel only while it is open,
+   so the layout is flex rather than a fixed grid template: whatever is
+   absent simply is not there, and the stage takes its space with no
+   per-combination CSS.
+
+   The rails are FIXED width when present. They hold a grouped component
+   list and a config form; neither reads better wider, and letting them grow
+   is exactly what makes a large display feel empty. Every extra pixel goes
+   to the stage, which is the subject of the app.
    -------------------------------------------------------------------------- */
 
 .app-body {
-  display: grid;
-  grid-template-columns: 224px minmax(0, 1fr) 320px;
+  display: flex;
   min-height: 0;
   overflow: hidden;
 }
 
 /* Both rails scroll internally via the shared .scroll primitive and paint
-   their own surface. The grid only supplies the separating hairline, so
+   their own surface. The body only supplies the separating hairline, so
    the rule that draws it lives with the layout that needs it. */
 .app-body > .pal {
+  flex: none;
+  width: 224px;
   border-right: var(--bw) solid var(--border);
   background: var(--surface);
+}
+
+.app-body > .ins {
+  flex: none;
+  width: 320px;
 }
 
 /* --------------------------------------------------------------------------
@@ -165,13 +176,9 @@
    -------------------------------------------------------------------------- */
 
 .app-stage {
-  display: grid;
-  /* The strip's track is `auto` but CAPPED (see .mx below). An uncapped
-     auto track sizes to the strip's intrinsic content, and when the charts
-     reflow to two rows that content is ~520px — which starved the canvas,
-     the actual subject of the app, down to 170px. The canvas takes what is
-     left over, and it is guaranteed the larger share. */
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -183,17 +190,71 @@
   container-name: stage;
 }
 
+/* The canvas and the chrome that floats over it. A positioning root so the
+   panel toggles can sit at its corners; the toggles are siblings of the
+   Canvas component, outside .cv-surface, so the canvas gesture router never
+   sees a press on them. */
+.stage-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Floating panel toggles.
+
+   One 32px button per collapsible panel, pinned to the canvas edge that
+   panel occupies, present in BOTH states. Collapsing a panel therefore
+   never leaves a dead edge — the control that closed it is still sitting
+   where the panel was, ready to bring it back — and the open state carries
+   no extra chrome beyond the same small button.
+
+   Quiet on purpose: the resting colour is --text-dim (6.71:1 on --surface,
+   AA) and the open state is NOT the accent — these are layout switches,
+   not modes, and lighting them like Play would spend emphasis the bar owns.
+   -------------------------------------------------------------------------- */
+
+.stage-toggle {
+  position: absolute;
+  z-index: 5;
+  color: var(--text-dim);
+}
+
+.stage-toggle:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.stage-toggle-library {
+  top: var(--sp-3);
+  left: var(--sp-3);
+}
+
+.stage-toggle-inspector {
+  top: var(--sp-3);
+  right: var(--sp-3);
+}
+
+/* Bottom-left, above the strip when it is open. The canvas ledger yields
+   this corner (see .cv-ledger in Canvas.css). */
+.stage-toggle-metrics {
+  bottom: var(--sp-3);
+  left: var(--sp-3);
+}
+
 /* The strip gets a floor AND a ceiling.
 
    min-height keeps the charts from being crushed when the window is short.
    max-height is the part that was missing: `min-height` alone is only a
-   floor, so an `auto` track still grows to whatever the content wants, and
-   a two-row chart reflow made the strip 521px against a 172px canvas. The
-   canvas must always be the bigger half of the stage.
+   floor, so a content-sized strip still grows to whatever the charts want,
+   and a two-row chart reflow made the strip 521px against a 172px canvas.
+   The canvas must always be the bigger half of the stage.
 
    40vh is deliberately below half the stage's height at every window size
    the app is used at, so the diagram always dominates. */
 .app-stage > .mx {
+  /* Sized by its own content between the floor and ceiling below; the
+     canvas flexes, the strip does not. */
+  flex: none;
   min-height: clamp(196px, 26vh, 260px);
   max-height: 40vh;
   /* The cap can only be honoured if the strip is allowed to scroll rather
@@ -213,8 +274,12 @@
    -------------------------------------------------------------------------- */
 
 @media (max-width: 1360px) {
-  .app-body {
-    grid-template-columns: 200px minmax(0, 1fr) 288px;
+  .app-body > .pal {
+    width: 200px;
+  }
+
+  .app-body > .ins {
+    width: 288px;
   }
 
   /* The bar's own regions tighten before anything inside them has to. */

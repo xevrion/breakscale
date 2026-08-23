@@ -798,9 +798,13 @@ const FailureChart = memo(function FailureChart({
 
   const total = useMemo(() => active.reduce((s, r) => s + r.rate, 0), [active]);
 
-  // Axis top tracks the largest stacked total in the window.
+  /* Axis top tracks the largest stacked total in the window, AND the live
+     total. The live figure matters because the header prints it: for the
+     first second after a reset or a preset load there is only one sample,
+     so a window-only maximum left the axis at its 0-1 floor while the
+     header said "Failures 6/s". The chart contradicted its own title. */
   const max = useMemo(() => {
-    let m = 0;
+    let m = total;
     for (const s of samples) {
       let sum = 0;
       for (const reason of REASON_ORDER) {
@@ -810,7 +814,7 @@ const FailureChart = memo(function FailureChart({
       if (sum > m) m = sum;
     }
     return m;
-  }, [samples]);
+  }, [samples, total]);
 
   const { top, ticks } = useStickyAxis(max, 1);
 
@@ -830,7 +834,12 @@ const FailureChart = memo(function FailureChart({
    * cumulative top edge forward, the previous band's top edge back.
    */
   const bands = useMemo(() => {
-    if (samples.length < 2) return [];
+    /* One sample is still a reading. It used to render nothing at all, so
+       for about a second after every reset and every preset load the panel
+       showed an empty plot under a header quoting a real failure rate.
+       A lone sample is drawn as a short flat band at the right edge — the
+       shape it will have anyway once the next sample arrives. */
+    if (samples.length === 0) return [];
     const cum = samples.map(() => 0);
     const out: { reason: FailureReason; points: string }[] = [];
 
@@ -848,12 +857,25 @@ const FailureChart = memo(function FailureChart({
       });
       if (!any) continue;
 
-      const fwd = samples.map(
-        (s, i) => `${xAt(s.t).toFixed(2)},${yOf(cum[i]!, top).toFixed(2)}`,
+      /* A single sample has no horizontal extent, so forward and reverse
+         edges would collapse onto one another and the polygon would paint
+         nothing. Give it a short run back from the right edge instead. */
+      const SOLO_W = 6;
+      const xs = samples.map((s) =>
+        samples.length === 1 ? PLOT_W - SOLO_W : xAt(s.t),
       );
+      const fwd = samples.map(
+        (_s, i) => `${xs[i]!.toFixed(2)},${yOf(cum[i]!, top).toFixed(2)}`,
+      );
+      if (samples.length === 1) {
+        fwd.push(`${PLOT_W.toFixed(2)},${yOf(cum[0]!, top).toFixed(2)}`);
+      }
       const rev = samples
-        .map((s, i) => `${xAt(s.t).toFixed(2)},${yOf(lower[i]!, top).toFixed(2)}`)
+        .map((_s, i) => `${xs[i]!.toFixed(2)},${yOf(lower[i]!, top).toFixed(2)}`)
         .reverse();
+      if (samples.length === 1) {
+        rev.unshift(`${PLOT_W.toFixed(2)},${yOf(lower[0]!, top).toFixed(2)}`);
+      }
       out.push({ reason, points: [...fwd, ...rev].join(' ') });
     }
     return out;

@@ -103,6 +103,10 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         rps: 0,
       };
     case 'db':
+      // Reads share the 6 slots; writes (10% at the default readFraction
+      // 0.9) also pay 15ms of lock wait per concurrent writer. At the
+      // default mix that is a barely-visible tax; raise the write share and
+      // watch lockWaitMs climb while adding instances fixes nothing.
       return {
         capacity: 6,
         serviceMs: 30,
@@ -113,6 +117,7 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         timeoutMs: 0,
         retries: 0,
         rps: 0,
+        lockMs: 15,
       };
     case 'queue':
       return {
@@ -277,6 +282,9 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
       // Blob storage: every request pays a high flat latency, but the pool
       // is wide. 64 slots / 90ms -> ~710 rps of ceiling at ~90ms each,
       // which is "effectively unlimited" next to any database in this app.
+      // The real limit is PER PREFIX: 150 rps on each of the 8 key
+      // prefixes (~1200 rps spread evenly), and a hot prefix gets SlowDown
+      // refusals while the rest of the store idles.
       return {
         capacity: 64,
         serviceMs: 90,
@@ -287,6 +295,7 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         timeoutMs: 0,
         retries: 0,
         rps: 0,
+        prefixRps: 150,
       };
     case 'searchindex':
       // Searches are cheap (8ms); a write pays +60ms of indexing on top and
@@ -338,9 +347,11 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         traversalDepth: 2,
       };
     case 'coldstorage':
-      // Archival: SECONDS per retrieval, deliberately few slots. 24 slots /
-      // 2.8s is ~8.5 rps -- fine for a trickle of restores, hopeless for
-      // anything shaped like online traffic. Callers need a long timeout.
+      // Archival: SECONDS per restore JOB, a hard quota of 24 concurrent
+      // jobs (24 / 2.8s is ~8.5 rps of ceiling), and NO queue: a restore
+      // beyond the quota is refused on the spot, not queued. Fine for a
+      // trickle of restores, hopeless for anything shaped like online
+      // traffic. Callers need a long timeout. queueLimit is ignored.
       return {
         capacity: 24,
         serviceMs: 2800,
@@ -518,7 +529,9 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
       // Batch regime: 1.2 SECONDS per job, two jobs per box. One instance
       // is 2 * (1000/1200) = ~1.7 jobs/s; feed it from a queue and size the
       // farm against the arrival rate, because a structural deficit grows
-      // the backlog forever.
+      // the backlog forever. Each finished job hands 3 renditions (the
+      // quality ladder) downstream as detached uploads, so storage sees 3x
+      // the job rate.
       return {
         capacity: 2,
         serviceMs: 1200,
@@ -529,10 +542,13 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         timeoutMs: 0,
         retries: 0,
         rps: 0,
+        renditions: 3,
       };
     case 'edgecompute':
       // A PoP function: ~1ms, lots of concurrency, and it can fully answer
-      // 30% of requests without the origin ever hearing about them.
+      // 30% of requests without the origin ever hearing about them -- as
+      // long as the execution fits the 2ms CPU budget; the tail that runs
+      // past it is killed and passed to the origin anyway.
       return {
         capacity: 64,
         serviceMs: 1,
@@ -544,6 +560,7 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         retries: 0,
         rps: 0,
         edgeShare: 0.3,
+        cpuMsCap: 2,
       };
     case 'writebehind':
       // `capacity` is the dirty buffer (memory, not threads): up to 256

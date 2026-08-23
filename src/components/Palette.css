@@ -83,6 +83,13 @@
   color: var(--text);
 }
 
+/* Pressed. A disclosure that opens a section is one of the most-clicked
+   controls in the rail; without this it was the only one that did not
+   acknowledge the press. */
+.pal-toggle:active {
+  background: var(--surface-3);
+}
+
 .pal-toggle:focus-visible {
   outline: 2px solid var(--accent);
   /* Inset rather than offset: a full-bleed row has no margin to ring into,
@@ -162,6 +169,70 @@
    active-preset marker can then sit in the gutter without producing the
    rounded-box-with-a-coloured-edge shape the design rules forbid.
    -------------------------------------------------------------------------- */
+
+/* --------------------------------------------------------------------------
+   A component row and its explain mark.
+
+   The <li> becomes the flex line so the mark can sit beside the button
+   without being inside it. The button still takes all the width it can, so
+   the click and drag target is unchanged from when it was the only child.
+   -------------------------------------------------------------------------- */
+
+.pal-item {
+  display: flex;
+  align-items: center;
+}
+
+/* The mark is quiet until the row is engaged. Thirty-three permanent question
+   marks down a 224px rail would read as clutter and compete with the names
+   they annotate; revealed on hover or focus they are exactly as discoverable
+   as they need to be, and a keyboard user reaches one by tabbing.
+
+   `opacity`, not `display`, so the space is always reserved: the names must
+   not shift sideways when a row is hovered. */
+.pal-explain {
+  flex: none;
+  display: grid;
+  place-items: center;
+  /* CONTAINING BLOCK FOR THE .sr-only LABEL INSIDE IT.
+
+     .sr-only is `position: absolute` with a 1px box. Absolute positioning
+     resolves against the nearest POSITIONED ancestor, and without this line
+     there is none until far up the tree, so all 33 labels anchored to a
+     distant ancestor and were laid out at their own document offsets rather
+     than here. Individually invisible, collectively they extended the
+     document's scroll box by 638px, and the whole fixed-viewport app could
+     be scrolled off the top of the window.
+
+     Measured, not theorised: documentElement.scrollHeight was 1639 against a
+     1001px viewport, and window.scrollTo(0, 900) moved the app. Verified
+     back to a non-scrolling page after this rule. */
+  position: relative;
+  width: 20px;
+  height: 20px;
+  margin-right: var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-med);
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.pal-item:hover .pal-explain,
+.pal-explain:focus-visible,
+.pal-explain[data-open='true'] {
+  opacity: 1;
+}
+
+/* Engaged, it takes the same accent treatment every other .term does; the
+   shared rules in Tooltip.css supply the tint, this only raises the ink so
+   the glyph itself is legible rather than staying at --text-faint. */
+.pal-explain:hover,
+.pal-explain[data-open='true'] {
+  color: var(--accent-ink);
+}
 
 .pal-row {
   display: flex;
@@ -264,13 +335,15 @@
 }
 
 .pal-mark::after {
+  --pal-dot: 6px;
   content: '';
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 6px;
-  height: 6px;
-  margin: -3px 0 0 -3px;
+  width: var(--pal-dot);
+  height: var(--pal-dot);
+  /* Half the dot, back up and left, to centre it on the 50%/50% origin. */
+  margin: calc(var(--pal-dot) / -2) 0 0 calc(var(--pal-dot) / -2);
   border-radius: var(--r-pill);
   background: transparent;
   transition: background-color var(--dur-fast) var(--ease);
@@ -347,7 +420,7 @@
   /* Wide enough for "Shift", the longest cap, so every description starts
      on the same axis instead of stepping in and out with the key width. */
   width: 44px;
-  padding: 2px 0;
+  padding: var(--sp-1) 0;
   border: var(--bw) solid var(--border-strong);
   border-radius: var(--r-sm);
   background: var(--surface-2);

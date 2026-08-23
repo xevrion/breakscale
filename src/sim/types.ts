@@ -472,6 +472,62 @@ export interface NodeConfig {
    * high-priority traffic keeps being admitted. Defaults to 0.3.
    */
   priorityReserve?: number;
+
+  /* ---- db: write lock contention ------------------------------------- *
+   * Reads share the slot pool freely. Writes also contend with each other:
+   * each write entering service waits an extra `lockMs` for every other
+   * write already in flight, which is row/page lock contention stated as
+   * arithmetic. The consequence it teaches: adding instances multiplies
+   * read capacity but does nothing for the write path, because the lock is
+   * a property of the data, not of the fleet.
+   * ------------------------------------------------------------------- */
+
+  /**
+   * Database only: extra service milliseconds a WRITE pays per concurrent
+   * write already in flight when it starts. 0 (or unset) disables
+   * contention entirely. The read/write split reuses `readFraction`.
+   */
+  lockMs?: number;
+
+  /* ---- objectstore: per-prefix rate ceiling --------------------------- *
+   * Blob stores scale by key prefix: each prefix is its own partition with
+   * its own request-rate ceiling, and the store as a whole has no queue.
+   * A hot prefix is refused with a 'slowdown' while the rest of the store
+   * idles -- which is why S3 performance guidance is about key LAYOUT, not
+   * about buying a bigger bucket.
+   * ------------------------------------------------------------------- */
+
+  /**
+   * Object storage only: sustained requests per second ONE key prefix
+   * sustains before further requests to it are refused ('throttled', the
+   * S3 503 SlowDown). Keys map onto 8 fixed prefixes; uniform traffic
+   * therefore sustains ~8x this figure while a single-prefix hotspot gets
+   * exactly 1x. 0 or unset means no per-prefix limit.
+   */
+  prefixRps?: number;
+
+  /* ---- transcoder: the quality ladder --------------------------------- */
+
+  /**
+   * Transcoder only: output files produced per finished job, per outgoing
+   * edge -- the bitrate ladder of a real encode pipeline. Each finished
+   * job hands `renditions` detached uploads to every node wired after the
+   * farm; nothing waits on them. Storage therefore sees `renditions` times
+   * the job rate, the write amplification every video pipeline budgets
+   * for. Floored to >= 1; defaults to 3 when unset.
+   */
+  renditions?: number;
+
+  /* ---- edgecompute: the CPU budget ------------------------------------ */
+
+  /**
+   * Edge compute only: hard per-request CPU budget in ms. An edge runtime
+   * is not a server: a request whose execution runs past this budget is
+   * killed at the edge and passed through to the origin path instead, even
+   * when `edgeShare` says the code could have answered it. 0 or unset
+   * means no budget.
+   */
+  cpuMsCap?: number;
 }
 
 export interface SimNode {
@@ -1029,6 +1085,60 @@ export interface NodeStats {
   highSheddedRate?: number;
   /** Load shedder only: low-priority requests per second dropped ('deprioritized'). */
   lowSheddedRate?: number;
+
+  /* ---- db readouts ------------------------------------------------------ *
+   * The database's own mechanism is the write lock: reads share the pool,
+   * writes also serialise against each other. These three numbers are that
+   * mechanism measured, and they are why "add more instances" fixes a slow
+   * read path but does nothing for a slow write path.
+   * ---------------------------------------------------------------------- */
+
+  /** Database only: reads per second entering service. */
+  readRate?: number;
+  /** Database only: writes per second entering service. */
+  writeRate?: number;
+  /**
+   * Database only: mean extra milliseconds a write spent waiting on lock
+   * contention, measured over the window. Grows with concurrent writers, not
+   * with fleet size, which is the whole lesson.
+   */
+  lockWaitMs?: number;
+
+  /* ---- objectstore readouts --------------------------------------------- */
+
+  /**
+   * Object storage only: requests per second refused because one key prefix
+   * exceeded its per-prefix rate ceiling. The pool can be nearly idle while
+   * this is nonzero: the limit is per prefix, not per store, which is why
+   * hot-prefix layouts melt and spread ones do not.
+   */
+  slowdownRate?: number;
+
+  /* ---- coldstorage readouts --------------------------------------------- *
+   * Cold storage reuses `throttledRate` above for restore requests refused
+   * because every retrieval slot was taken; `inFlight` is restore jobs
+   * currently running. There is no queue: that absence is the component.
+   * ---------------------------------------------------------------------- */
+
+  /* ---- transcoder readouts ---------------------------------------------- */
+
+  /**
+   * Transcoder only: finished renditions per second handed downstream as
+   * detached uploads. `renditions` output files leave per finished job, so
+   * this runs at `renditions * jobRate`: the write amplification a video
+   * pipeline pays for its quality ladder.
+   */
+  outputRate?: number;
+
+  /* ---- edgecompute readouts --------------------------------------------- */
+
+  /**
+   * Edge compute only: requests per second the edge WOULD have answered but
+   * could not, because their execution exceeded the per-request CPU budget
+   * (`cpuMsCap`); they fell through to the origin path instead. The hard CPU
+   * ceiling is what separates an edge runtime from a real server.
+   */
+  cpuExceededRate?: number;
 }
 
 /** End-to-end results measured at the client. */

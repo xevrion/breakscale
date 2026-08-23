@@ -98,11 +98,16 @@
   --sp-10: 40px;
 
   /* Radii. Soft enough to feel welcoming, tight enough to stay adult.
+       2    small filled marks (8px swatches), where 6 would read as a circle
        6    inputs, small chips, meter troughs
        8    buttons
        10   panels, nodes
        14   large containers, modals
        999  pills and circular thumbs */
+  /* A small filled mark — an 8px legend swatch or band sample — where the
+     6px --r-sm would round it almost to a circle and stop reading as a
+     square. Proportional to the mark, not to a panel. */
+  --r-mark: 2px;
   --r-sm: 6px;
   --r-btn: 8px;
   --r-md: 10px;
@@ -114,6 +119,22 @@
      that must hold its own against the canvas. */
   --bw: 1px;
   --bw-strong: 1.5px;
+
+  /* Width a thin scrollbar occupies inside a scrolling panel.
+
+     MEASURED, not assumed: offsetWidth - clientWidth on .ins-scroll is 8px
+     with `scrollbar-width: thin`. Anything that must line up with the
+     CONTENT of a scrolling column, rather than with the column's box, has to
+     add this — otherwise it sits exactly this far out, which is how the
+     inspector's footer button ended up 8px past every value above it. */
+  --scrollbar-w: 8px;
+
+  /* Slider geometry. The track height and thumb diameter are each repeated
+     across two vendor-prefixed pseudo-elements, and the thumb's centring
+     offset and the scale rail's inset are both DERIVED from them. Naming
+     them once is what stops the four copies drifting apart. */
+  --track-h: 6px;
+  --thumb: 18px;
 
   /* Elevation. Neutral, low-opacity, never coloured, never glowing.
      Shadow carries a warm-neutral hue at very low alpha so it sits on paper
@@ -1226,7 +1247,7 @@ h4 {
    expressed through gradient syntax, not a gradient: both stops meet at the
    same position, so no blend is ever rendered. */
 .slider::-webkit-slider-runnable-track {
-  height: 6px;
+  height: var(--track-h);
   border-radius: var(--r-pill);
   background-color: var(--track);
   background-image: linear-gradient(
@@ -1238,13 +1259,13 @@ h4 {
 }
 
 /* --- Thumb: WebKit ---
-   margin-top centres an 18px thumb on a 6px track: (6 - 18) / 2 = -6px. */
+   margin-top centres the thumb on the track: (track - thumb) / 2. */
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
-  margin-top: -6px;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc((var(--track-h) - var(--thumb)) / 2);
   border-radius: 50%;
   background: #ffffff;
   border: 2px solid var(--accent);
@@ -1273,21 +1294,21 @@ h4 {
 
 /* --- Track: Firefox --- */
 .slider::-moz-range-track {
-  height: 6px;
+  height: var(--track-h);
   border-radius: var(--r-pill);
   background: var(--track);
   border: none;
 }
 
 .slider::-moz-range-progress {
-  height: 6px;
+  height: var(--track-h);
   border-radius: var(--r-pill);
   background: var(--accent);
 }
 
 .slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
+  width: var(--thumb);
+  height: var(--thumb);
   border-radius: 50%;
   background: #ffffff;
   border: 2px solid var(--accent);

@@ -1028,7 +1028,10 @@
 /* Status ledger. Bottom-left, carrying four true numbers. */
 .cv-ledger {
   position: absolute;
-  left: var(--sp-3);
+  /* Inset past the 32px metrics toggle the shell floats in this corner
+     (.stage-toggle-metrics in App.css), plus the same gap again, so the
+     two never overlap at any strip state. */
+  left: calc(var(--sp-3) + 32px + var(--sp-3));
   bottom: var(--sp-3);
   display: flex;
   align-items: center;

@@ -17,6 +17,86 @@ import './App.css';
 
 const STORAGE_KEY = 'breakscale.session.v1';
 
+/* ------------------------------------------------------------------ *
+ * Layout persistence
+ *
+ * Which panels are open is kept separate from the session: clearing a
+ * topology should never reset a student's layout, and vice versa.
+ *
+ * The inspector is deliberately NOT in here. It is selection-driven (see
+ * the inspector state in App), and persisting "hidden" would mean a
+ * student who dismissed it once could select nodes forever after and
+ * never see their settings again, with nothing on screen to explain why.
+ * ------------------------------------------------------------------ */
+
+const LAYOUT_KEY = 'breakscale.layout.v1';
+
+interface LayoutPrefs {
+  /** The left component rail. */
+  library: boolean;
+  /** The bottom charts strip. */
+  metrics: boolean;
+}
+
+/**
+ * First run: the rail is open because it is the app's verbs — components
+ * to add and examples to load — and a canvas with no visible way to act
+ * on it is a dead end. The charts start closed: the top bar already
+ * carries p99, goodput, errors and dropped, so the strip is depth to be
+ * opened when a headline number needs explaining, not a fixture.
+ */
+const DEFAULT_LAYOUT: LayoutPrefs = { library: true, metrics: false };
+
+function loadLayout(): LayoutPrefs {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (!raw) return DEFAULT_LAYOUT;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return DEFAULT_LAYOUT;
+    const p = parsed as Partial<LayoutPrefs>;
+    return {
+      library: typeof p.library === 'boolean' ? p.library : DEFAULT_LAYOUT.library,
+      metrics: typeof p.metrics === 'boolean' ? p.metrics : DEFAULT_LAYOUT.metrics,
+    };
+  } catch {
+    // Blocked or corrupt storage: the default layout, never a crash.
+    return DEFAULT_LAYOUT;
+  }
+}
+
+function saveLayout(layout: LayoutPrefs): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+  } catch {
+    // Persistence is a convenience; losing it must stay invisible.
+  }
+}
+
+/**
+ * One shape for the three panel-toggle glyphs: a frame with the edge that
+ * panel lives on marked. The icon states position, the accessible name and
+ * `title` state content, so together the button says "the thing over here".
+ */
+function PanelGlyph({ edge }: { edge: 'left' | 'right' | 'bottom' }) {
+  const d = edge === 'left' ? 'M9 4v16' : edge === 'right' ? 'M15 4v16' : 'M4 14h16';
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="4" y="4" width="16" height="16" rx="2.5" />
+      <path d={d} />
+    </svg>
+  );
+}
+
 /** Snapshot rate for React. The engine still advances every animation frame. */
 const SNAPSHOT_HZ = 10;
 const SNAPSHOT_INTERVAL_MS = 1000 / SNAPSHOT_HZ;
@@ -239,6 +319,45 @@ export default function App() {
    */
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [glossaryFocusId, setGlossaryFocusId] = useState<string | undefined>(undefined);
+
+  /* ---------------- panel layout ---------------- */
+
+  const [layout, setLayout] = useState<LayoutPrefs>(loadLayout);
+
+  const toggleLibrary = useCallback(
+    () => setLayout((l) => ({ ...l, library: !l.library })),
+    [],
+  );
+  const toggleMetrics = useCallback(
+    () => setLayout((l) => ({ ...l, metrics: !l.metrics })),
+    [],
+  );
+
+  useEffect(() => {
+    saveLayout(layout);
+  }, [layout]);
+
+  /**
+   * The inspector is selection-driven, the way Excalidraw's properties
+   * panel is: nothing selected means nothing to configure, so the panel is
+   * simply absent and the canvas has the width. `inspectorHidden` is the
+   * manual override on top of that — pressing I (or the floating toggle)
+   * dismisses the panel for the CURRENT selection, and the effect below
+   * clears the override on the next selection gesture. That gives "get
+   * this out of my way while I look" without creating a mode a student
+   * has to remember: selecting something is always enough to bring the
+   * settings back. Deliberately not persisted, for the same reason.
+   */
+  const [inspectorHidden, setInspectorHidden] = useState(false);
+
+  useEffect(() => {
+    if (selectedIds.size > 0) setInspectorHidden(false);
+  }, [selectedIds]);
+
+  const toggleInspector = useCallback(() => setInspectorHidden((h) => !h), []);
+
+  const hasSelection = selectedIds.size > 0;
+  const inspectorVisible = hasSelection && !inspectorHidden;
 
   const openGlossary = useCallback((id?: string) => {
     setGlossaryFocusId(id);
@@ -656,6 +775,36 @@ export default function App() {
         return;
       }
 
+      /*
+       * Panel toggles. Single letters, like S above, and inert inside a
+       * text field by the same guard: C for the components rail, M for the
+       * metrics strip, I for the inspector. All three ignore held
+       * modifiers so they can never shadow Cmd/Ctrl+C, Cmd/Ctrl+M or
+       * Cmd/Ctrl+I in the browser.
+       *
+       * I is a no-op with nothing selected: the inspector is
+       * selection-driven and an empty panel is not worth opening.
+       */
+      if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.key === 'c' || e.key === 'C') {
+          e.preventDefault();
+          toggleLibrary();
+          return;
+        }
+        if (e.key === 'm' || e.key === 'M') {
+          e.preventDefault();
+          toggleMetrics();
+          return;
+        }
+        if (e.key === 'i' || e.key === 'I') {
+          if (hasSelection) {
+            e.preventDefault();
+            toggleInspector();
+          }
+          return;
+        }
+      }
+
       // Delete/Backspace, Escape and Ctrl/Cmd+A belong to the canvas, which
       // owns the selection and knows how to partition it. Handling them here
       // too would double-fire.
@@ -663,7 +812,16 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleStep, glossaryOpen, openGlossary, closeGlossary]);
+  }, [
+    handleStep,
+    glossaryOpen,
+    openGlossary,
+    closeGlossary,
+    toggleLibrary,
+    toggleMetrics,
+    toggleInspector,
+    hasSelection,
+  ]);
 
   /* ---------------- derived ---------------- */
 
@@ -829,39 +987,99 @@ export default function App() {
       </header>
 
       <div className="app-body">
-        <Palette
-          onAdd={handlePaletteAdd}
-          presets={PRESETS}
-          activePresetId={presetId}
-          onLoadPreset={handleLoadPreset}
-        />
+        {layout.library ? (
+          <Palette
+            onAdd={handlePaletteAdd}
+            presets={PRESETS}
+            activePresetId={presetId}
+            onLoadPreset={handleLoadPreset}
+          />
+        ) : null}
 
         <main className="app-stage">
-          <Canvas
-            topology={topology}
-            snapshot={snapshot}
-            selectedIds={selectedIds}
-            onSelectionChange={setSelectedIds}
-            onMoveNode={handleMoveNode}
-            onConnect={handleConnect}
-            onDeleteSelection={handleDeleteSelection}
-            onDropNode={handleAddNode}
-            spark={spark}
-          />
-          {snapshot ? <Metrics snapshot={snapshot} /> : null}
+          {/*
+            The canvas plus the chrome that floats OVER it. The toggles are
+            SIBLINGS of the Canvas, never children of .cv-surface, so the
+            canvas gesture router cannot see a press on them; data-chrome is
+            belt and braces on top of that, matching the exclusion selector
+            the router uses.
+
+            Each panel's toggle lives at the canvas edge the panel occupies
+            and stays there in both states, so collapsing something never
+            leaves a dead edge: the affordance that closed it is the
+            affordance that brings it back, in the same place.
+          */}
+          <div className="stage-canvas">
+            <Canvas
+              topology={topology}
+              snapshot={snapshot}
+              selectedIds={selectedIds}
+              onSelectionChange={setSelectedIds}
+              onMoveNode={handleMoveNode}
+              onConnect={handleConnect}
+              onDeleteSelection={handleDeleteSelection}
+              onDropNode={handleAddNode}
+              spark={spark}
+            />
+            <button
+              type="button"
+              className="btn btn-sm btn-icon stage-toggle stage-toggle-library"
+              data-chrome="layout"
+              aria-expanded={layout.library}
+              aria-label={layout.library ? 'Hide components' : 'Show components'}
+              title={layout.library ? 'Hide components (C)' : 'Show components (C)'}
+              onClick={toggleLibrary}
+            >
+              <PanelGlyph edge="left" />
+            </button>
+            {/*
+              Rendered only while something is selected, because that is the
+              only time the inspector can exist at all. With nothing
+              selected there is no panel AND no button — the affordance for
+              the inspector is selection itself, which the empty-canvas copy
+              and the palette rows already teach.
+            */}
+            {hasSelection ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-icon stage-toggle stage-toggle-inspector"
+                data-chrome="layout"
+                aria-expanded={inspectorVisible}
+                aria-label={inspectorVisible ? 'Hide inspector' : 'Show inspector'}
+                title={inspectorVisible ? 'Hide inspector (I)' : 'Show inspector (I)'}
+                onClick={toggleInspector}
+              >
+                <PanelGlyph edge="right" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-sm btn-icon stage-toggle stage-toggle-metrics"
+              data-chrome="layout"
+              aria-expanded={layout.metrics}
+              aria-label={layout.metrics ? 'Hide charts' : 'Show charts'}
+              title={layout.metrics ? 'Hide charts (M)' : 'Show charts (M)'}
+              onClick={toggleMetrics}
+            >
+              <PanelGlyph edge="bottom" />
+            </button>
+          </div>
+          {layout.metrics && snapshot ? <Metrics snapshot={snapshot} /> : null}
         </main>
 
-        <Inspector
-          node={selectedNode}
-          stats={selectedStats}
-          onChange={handleConfigChange}
-          onDelete={handleDeleteNode}
-          onRename={handleRename}
-          selectedNodes={selectedNodes}
-          selectedEdgeCount={selectedEdgeCount}
-          onChangeMany={handleConfigChangeMany}
-          onDeleteMany={handleDeleteMany}
-        />
+        {inspectorVisible ? (
+          <Inspector
+            node={selectedNode}
+            stats={selectedStats}
+            onChange={handleConfigChange}
+            onDelete={handleDeleteNode}
+            onRename={handleRename}
+            selectedNodes={selectedNodes}
+            selectedEdgeCount={selectedEdgeCount}
+            onChangeMany={handleConfigChangeMany}
+            onDeleteMany={handleDeleteMany}
+          />
+        ) : null}
       </div>
 
       {/*

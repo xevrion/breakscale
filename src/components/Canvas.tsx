@@ -425,8 +425,8 @@ export function readoutFor(
          thing worth seeing. */
       return {
         primary: { value: formatRate(s.arrivalRate), label: 'sent' },
-        a: { value: formatRate(s.throughput), label: 'ok' },
-        b: { value: formatPct(err), label: 'err' },
+        a: { value: formatRate(s.throughput), label: 'ok/s' },
+        b: { value: formatPct(err), label: 'failing' },
         load: err,
         health: healthOfErr(err),
         spark: s.arrivalRate,
@@ -443,9 +443,9 @@ export function readoutFor(
        is not the place the story shows first anyway. */
     case 'lb':
       return {
-        primary: { value: formatRate(s.throughput), label: 'rps' },
+        primary: { value: formatRate(s.throughput), label: '/s' },
         a: { value: formatMs(s.p99), label: 'p99' },
-        b: { value: formatCount(s.queued), label: 'queue' },
+        b: { value: formatCount(s.queued), label: 'waiting' },
         load: util,
         health: healthOfLoad(util),
         spark: s.throughput,
@@ -460,7 +460,7 @@ export function readoutFor(
       return {
         primary: { value: formatPct(hit), label: 'hit' },
         a: { value: formatMs(s.p99), label: 'p99' },
-        b: { value: formatRate(s.throughput), label: 'rps' },
+        b: { value: formatRate(s.throughput), label: '/s' },
         load: miss,
         health: healthOfLoad(miss),
         spark: hit,
@@ -476,7 +476,7 @@ export function readoutFor(
       const limit = cfg.queueLimit > 0 ? cfg.queueLimit : 1;
       const fill = clamp(depth / limit, 0, 1);
       return {
-        primary: { value: formatCount(depth), label: 'depth' },
+        primary: { value: formatCount(depth), label: 'waiting' },
         a: { value: formatRate(s.arrivalRate), label: 'in' },
         b: { value: formatRate(s.throughput), label: 'out' },
         load: fill,
@@ -510,7 +510,7 @@ export function readoutFor(
       return {
         primary: { value: formatPct(hot), label: 'hot' },
         a: { value: formatPct(clamp(s.minShardUtilization, 0, 1)), label: 'cold' },
-        b: { value: formatCount(s.queued), label: 'queue' },
+        b: { value: formatCount(s.queued), label: 'waiting' },
         load: hot,
         health: healthOfLoad(hot),
         spark: hot,
@@ -534,12 +534,12 @@ export function readoutFor(
          reason a replica set is its own component, so they take the cell the
          moment they exist; p99 fills it on a synchronous set. */
       return {
-        primary: { value: formatPct(util), label: 'util' },
+        primary: { value: formatPct(util), label: 'busy' },
         a:
           stale > 0
             ? { value: formatPct(stale), label: 'stale' }
             : { value: formatMs(s.p99), label: 'p99' },
-        b: { value: formatCount(s.queued), label: 'queue' },
+        b: { value: formatCount(s.queued), label: 'waiting' },
         load: util,
         health: healthOfLoad(util),
         spark: util,
@@ -585,12 +585,10 @@ export function readoutFor(
     /* The generic triple is honestly right for a plain server: it has slots,
        a queue and a latency, and all three move. */
     case 'service':
-    case 'db':
-    case 'objectstore':
       return {
-        primary: { value: formatPct(util), label: 'util' },
+        primary: { value: formatPct(util), label: 'busy' },
         a: { value: formatMs(s.p99), label: 'p99' },
-        b: { value: formatCount(s.queued), label: 'queue' },
+        b: { value: formatCount(s.queued), label: 'waiting' },
         load: util,
         health: healthOfLoad(util),
         spark: util,
@@ -598,13 +596,56 @@ export function readoutFor(
         losing,
       };
 
+    /* A database is a service plus the write lock. While contention is quiet
+       the triple reads like a server's; once writes start waiting on each
+       other, that wait takes the b cell, because it is the number a fleet
+       slider cannot fix. */
+    case 'db': {
+      const lockWait = s.lockWaitMs ?? 0;
+      const contended = lockWait >= 1;
+      return {
+        primary: { value: formatPct(util), label: 'busy' },
+        a: { value: formatMs(s.p99), label: 'p99' },
+        b: contended
+          ? { value: formatMs(lockWait), label: 'lock' }
+          : { value: formatCount(s.queued), label: 'waiting' },
+        load: util,
+        health:
+          contended && lockWait > s.p50
+            ? worstHealth(healthOfLoad(util), 'warn')
+            : healthOfLoad(util),
+        spark: util,
+        sparkUnit: true,
+        losing,
+      };
+    }
+
+    /* Blob storage refuses per PREFIX, and can do so with the pool idle; a
+       readout built on utilisation alone would look healthy through it. */
+    case 'objectstore': {
+      const slowdown = s.slowdownRate ?? 0;
+      return {
+        primary: { value: formatPct(util), label: 'busy' },
+        a: { value: formatMs(s.p99), label: 'p99' },
+        b:
+          slowdown > 0
+            ? { value: formatRate(slowdown), label: 'refused' }
+            : { value: formatCount(s.queued), label: 'waiting' },
+        load: util,
+        health: slowdown > 0 ? 'danger' : healthOfLoad(util),
+        spark: slowdown > 0 ? slowdown : util,
+        sparkUnit: slowdown === 0,
+        losing: losing || slowdown > 0,
+      };
+    }
+
     /* A worker's own queue cell is structurally ALWAYS zero: the work it is
        behind on lives in the queue nodes feeding it. Show that backlog. */
     case 'worker':
       return {
-        primary: { value: formatPct(util), label: 'util' },
-        a: { value: formatRate(s.throughput), label: 'rps' },
-        b: { value: formatCount(backlog), label: 'backlog' },
+        primary: { value: formatPct(util), label: 'busy' },
+        a: { value: formatRate(s.throughput), label: '/s' },
+        b: { value: formatCount(backlog), label: 'waiting' },
         load: util,
         health: healthOfLoad(util),
         spark: util,
@@ -618,7 +659,7 @@ export function readoutFor(
       const stuck = util >= 0.999 && backlog > 0;
       return {
         primary: { value: formatCount(s.inFlight), label: 'jobs' },
-        a: { value: formatCount(backlog), label: 'backlog' },
+        a: { value: formatCount(backlog), label: 'waiting' },
         b: { value: formatMs(s.p50), label: 'per job' },
         load: util,
         health: stuck ? 'danger' : healthOfLoad(util),
@@ -642,7 +683,7 @@ export function readoutFor(
         a: { value: `${healthy}/${total}`, label: 'healthy' },
         b: dark
           ? { value: formatMs(s.failoverRemainingMs), label: 'back in' }
-          : { value: formatRate(s.throughput), label: 'rps' },
+          : { value: formatRate(s.throughput), label: '/s' },
         load: dark ? 1 : 1 - frac(healthy, total),
         health: dark || healthy === 0 ? 'danger' : healthy < total ? 'warn' : 'ok',
         spark: err,
@@ -659,7 +700,7 @@ export function readoutFor(
       return {
         primary: { value: formatPct(hit), label: 'hit' },
         a: { value: formatRate(s.originFetchRate), label: 'origin' },
-        b: { value: formatRate(s.throughput), label: 'rps' },
+        b: { value: formatRate(s.throughput), label: '/s' },
         load: miss,
         health: healthOfLoad(miss),
         spark: hit,
@@ -703,7 +744,7 @@ export function readoutFor(
             : state === 'half-open'
               ? { value: 'probing', label: 'circuit' }
               : { value: 'closed', label: 'circuit' },
-        a: { value: formatPct(errRate), label: 'dep err' },
+        a: { value: formatPct(errRate), label: 'dep fails' },
         b:
           state === 'open'
             ? { value: formatRate(rejected), label: 'refused' }
@@ -740,7 +781,7 @@ export function readoutFor(
     /* Two-class cost: the append firehose and the range queries that melt it. */
     case 'timeseriesdb':
       return {
-        primary: { value: formatPct(util), label: 'util' },
+        primary: { value: formatPct(util), label: 'busy' },
         a: { value: formatRate(s.appendRate), label: 'append' },
         b: { value: formatRate(s.rangeQueryRate), label: 'range' },
         load: util,
@@ -754,8 +795,8 @@ export function readoutFor(
     case 'graphdb':
       return {
         primary: { value: formatMs(s.traversalCostMs), label: 'query' },
-        a: { value: formatPct(util), label: 'util' },
-        b: { value: formatRate(s.throughput), label: 'rps' },
+        a: { value: formatPct(util), label: 'busy' },
+        b: { value: formatRate(s.throughput), label: '/s' },
         load: util,
         health: healthOfLoad(util),
         spark: s.traversalCostMs ?? 0,
@@ -764,25 +805,32 @@ export function readoutFor(
       };
 
     /* Multi-second retrieval is this component's entire identity, so the
-       measured latency takes the headline instead of hiding in a cell. */
-    case 'coldstorage':
+       measured latency takes the headline. There is no queue to report: the
+       vault runs restore jobs against a quota and refuses the excess, so the
+       b cell carries the refusals once they start. */
+    case 'coldstorage': {
+      const denied = s.throttledRate ?? 0;
       return {
         primary: { value: formatMs(s.p99), label: 'restore' },
-        a: { value: formatPct(util), label: 'util' },
-        b: { value: formatCount(s.queued), label: 'queue' },
+        a: { value: formatPct(util), label: 'busy' },
+        b:
+          denied > 0
+            ? { value: formatRate(denied), label: 'refused' }
+            : { value: formatCount(s.inFlight), label: 'jobs' },
         load: util,
-        health: healthOfLoad(util),
+        health: denied > 0 ? 'danger' : healthOfLoad(util),
         spark: util,
         sparkUnit: true,
-        losing,
+        losing: losing || denied > 0,
       };
+    }
 
     /* The recall slider read backwards: measured cost per query. */
     case 'vectordb':
       return {
         primary: { value: formatMs(s.queryCostMs), label: 'query' },
-        a: { value: formatPct(util), label: 'util' },
-        b: { value: formatRate(s.throughput), label: 'rps' },
+        a: { value: formatPct(util), label: 'busy' },
+        b: { value: formatRate(s.throughput), label: '/s' },
         load: util,
         health: healthOfLoad(util),
         spark: s.queryCostMs ?? 0,
@@ -840,7 +888,7 @@ export function readoutFor(
         b:
           refused > 0
             ? { value: formatRate(refused), label: 'refused' }
-            : { value: formatRate(s.connectRate), label: 'conn/s' },
+            : { value: formatRate(s.connectRate), label: 'new/s' },
         load: fill,
         health: refused > 0 ? 'danger' : healthOfLoad(fill),
         spark: fill,
@@ -1036,11 +1084,11 @@ export function readoutFor(
       const highIn = s.highAdmittedRate ?? 0;
       const burst = cfg.burst ?? cfg.rateLimitRps ?? 1;
       return {
-        primary: { value: formatRate(lowShed), label: 'low shed' },
+        primary: { value: formatRate(lowShed), label: 'shed low' },
         a: { value: formatRate(highIn), label: 'high in' },
         b:
           highShed > 0
-            ? { value: formatRate(highShed), label: 'hi shed' }
+            ? { value: formatRate(highShed), label: 'shed high' }
             : { value: formatCount(s.tokens), label: 'tokens' },
         load: 1 - frac(s.tokens ?? 0, burst),
         health: highShed > 0 ? 'danger' : lowShed > 0 ? 'warn' : 'ok',
@@ -1060,9 +1108,9 @@ export function readoutFor(
   return ((k: never): Readout => {
     void k;
     return {
-      primary: { value: formatPct(util), label: 'util' },
+      primary: { value: formatPct(util), label: 'busy' },
       a: { value: formatMs(s.p99), label: 'p99' },
-      b: { value: formatCount(s.queued), label: 'queue' },
+      b: { value: formatCount(s.queued), label: 'waiting' },
       load: util,
       health: healthOfLoad(util),
       spark: util,
@@ -2856,8 +2904,19 @@ export default function Canvas({
       // next time the cursor crossed the canvas the stale entry would clear
       // the threshold and promote a drag with no button held, leaving a node
       // stuck to the cursor.
+      //
+      // One exception keeps ordinary clicks alive: browsers (and automation
+      // that drives them) may deliver a hover move with buttons already 0 at
+      // the press point, between pointerdown and pointerup. A pending press
+      // that has not moved is a click in progress, not a stale gesture, so it
+      // is left for pointerup to resolve. The stale-entry scenario above is
+      // unaffected: a cursor re-entering the canvas has always moved.
       if (e.buttons === 0) {
-        cancelGesture();
+        const sdx = e.clientX - p.screenX;
+        const sdy = e.clientY - p.screenY;
+        if (p.active || sdx * sdx + sdy * sdy >= 1) {
+          cancelGesture();
+        }
         return;
       }
 

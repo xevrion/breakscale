@@ -1,11 +1,22 @@
 /**
- * Specialised storage behaviours: object storage, search index, time-series
- * store, graph database, cold storage, vector database.
+ * Storage behaviours: relational database, object storage, search index,
+ * time-series store, graph database, cold storage, vector database.
  *
- * All six are pure registry entries -- no branch is added to the event loop.
- * Two of them (objectstore, coldstorage) are ordinary slot-and-queue servers
- * distinguished only by their default knobs, so they carry no machinery at
- * all. The other four share one piece of machinery: a self-managed slot pool
+ * All seven are pure registry entries -- no branch is added to the event
+ * loop. Each one carries a mechanism no other kind has, because a store
+ * whose only identity is its default sliders is a store the student can
+ * rightly call a re-skinned service:
+ *
+ *   db           write lock contention (writes serialise against each other)
+ *   objectstore  per-prefix rate ceilings and no queue (S3 SlowDown)
+ *   searchindex  asynchronous indexing (a commit is not yet searchable)
+ *   timeseriesdb two-class cost (cheap appends, expensive range queries)
+ *   graphdb      traversal cost compounds with depth
+ *   coldstorage  restore JOBS: flat multi-second latency, a slot quota,
+ *                and no queue at all
+ *   vectordb     recall target multiplies scan cost hyperbolically
+ *
+ * Five of them share one piece of machinery: a self-managed slot pool
  * whose per-request service cost is decided by the kind (a write pays an
  * indexing surcharge, a range query pays a scan surcharge, a deep traversal
  * multiplies, a high-recall vector query probes more of its index). The
@@ -37,12 +48,65 @@ function num(v: number | undefined, fallback: number): number {
 /* ================================================================== *
  * objectstore -- blob storage (S3-like)
  *
- * Not a database: every request pays a high flat latency, but the slot
- * pool is so wide that saturating it takes deliberate effort. The lesson
- * is entirely in the defaults (see presets.ts), so the behaviour itself
- * is a plain server. No instance model and no scaleField: it is a managed
- * service, one logical thing an autoscaler has no business resizing.
+ * A wide flat-latency pool with one mechanism of its own: PER-PREFIX rate
+ * ceilings. A blob store partitions its keyspace by prefix and each
+ * partition sustains `prefixRps` on its own; a request that finds its
+ * prefix over the ceiling is refused instantly with a SlowDown
+ * ('throttled'), while the rest of the store idles. That is the S3 503,
+ * and it is why blob-store performance advice is about key LAYOUT --
+ * spread your prefixes -- rather than about capacity. The gate consumes
+ * zero randomness (a continuous token bucket per prefix, refilled against
+ * simulated time exactly like the rate limiter); requests that pass it
+ * are served on the engine's ordinary wide slot pool.
+ *
+ * No instance model and no scaleField: it is a managed service, one
+ * logical thing an autoscaler has no business resizing -- which is itself
+ * part of the lesson, because when a prefix melts there is no "add
+ * servers" knob to reach for.
  * ================================================================== */
+
+/**
+ * Fixed prefix count the 64-key keyspace folds onto. A constant rather
+ * than a knob: the lesson lives in `prefixRps` and in the key layout of
+ * the traffic, not in how many prefixes exist.
+ */
+const OBJECT_PREFIXES = 8;
+
+interface ObjectStoreExt {
+  /** Token bucket level per prefix. Fractional: refill is continuous. */
+  tokens: Float64Array;
+  /** Simulated time each prefix's bucket was last refilled. */
+  lastRefillMs: Float64Array;
+  /** Ceiling the buckets were last capped against, to catch slider moves. */
+  lastRate: number;
+}
+
+function objectPrefixRate(state: NodeStateLike): number {
+  const r = state.config.prefixRps;
+  return r !== undefined && r > 0 ? r : 0;
+}
+
+/** Bring ONE prefix's bucket up to date with simulated time. */
+function objectRefill(
+  ext: ObjectStoreExt,
+  prefix: number,
+  rate: number,
+  now: number,
+): void {
+  if (rate !== ext.lastRate) {
+    // The ceiling moved: re-cap every bucket rather than letting one filled
+    // under the old ceiling stay oversized.
+    for (let p = 0; p < OBJECT_PREFIXES; p++) {
+      if (ext.tokens[p] > rate) ext.tokens[p] = rate;
+    }
+    ext.lastRate = rate;
+  }
+  const elapsed = now - ext.lastRefillMs[prefix];
+  if (elapsed <= 0) return;
+  ext.lastRefillMs[prefix] = now;
+  ext.tokens[prefix] += (elapsed / 1000) * rate;
+  if (ext.tokens[prefix] > rate) ext.tokens[prefix] = rate;
+}
 
 const objectstore: ComponentBehaviour = {
   kind: 'objectstore',
@@ -52,16 +116,66 @@ const objectstore: ComponentBehaviour = {
   buffersForConsumers: false,
   pump: 'own',
   creditsJoinCompletion: true,
+
+  initState(state: NodeStateLike): ObjectStoreExt {
+    const rate = objectPrefixRate(state);
+    const tokens = new Float64Array(OBJECT_PREFIXES);
+    // Buckets start full, like every other token bucket in the app: an idle
+    // store absorbs one burst per prefix before the ceiling bites.
+    tokens.fill(rate > 0 ? rate : 0);
+    return { tokens, lastRefillMs: new Float64Array(OBJECT_PREFIXES), lastRate: rate };
+  },
+
+  onAdmit(ctx, state, req): AdmitAction {
+    const rate = objectPrefixRate(state);
+    // No ceiling configured: a plain wide pool, exactly the old behaviour.
+    if (rate <= 0) return 'serve';
+
+    const ext = state.ext as ObjectStoreExt;
+    const prefix = ((req.key % OBJECT_PREFIXES) + OBJECT_PREFIXES) % OBJECT_PREFIXES;
+    objectRefill(ext, prefix, rate, ctx.now);
+    if (ext.tokens[prefix] < 1) {
+      ctx.countCustom(state, 'slowdown', 1);
+      ctx.reject(state, req, 'throttled');
+      return 'handled';
+    }
+    ext.tokens[prefix] -= 1;
+    return 'serve';
+  },
+
+  decorateStats(ctx, state, stats: NodeStats): void {
+    stats.slowdownRate = ctx.counterRate(state, 'slowdown');
+  },
 };
 
 /* ================================================================== *
  * coldstorage -- archival tier (Glacier-like)
  *
- * Same plain-server shape as objectstore; the identity is in the knobs.
- * Service time is SECONDS, capacity is small, and that combination is the
- * teaching point: a trickle of archival traffic is fine, but anything
- * shaped like online traffic melts it instantly.
+ * NOT a slow database, and the difference is the whole component. A slow
+ * database queues: push online traffic at it and latency compounds as the
+ * line grows. An archive runs restore JOBS: a retrieval takes its flat
+ * multi-second time no matter how busy the vault is, there is NO queue to
+ * stand in, and the vault runs at most `capacity` concurrent restores
+ * (its provisioned retrieval capacity). A request that finds every
+ * restore slot taken is refused on the spot ('throttled', the archival
+ * tier's RequestLimitExceeded).
+ *
+ * So under overload the two kinds fail in opposite directions: the slow
+ * db's p99 explodes while its error rate stays low; the archive's p99
+ * stays pinned at the flat retrieval time while refusals climb. Both
+ * teach "keep online traffic away", but only this one teaches it the way
+ * Glacier actually does.
  * ================================================================== */
+
+interface ColdStorageExt {
+  /** Restore jobs currently running. */
+  jobs: number;
+}
+
+const coldDrained = (_ctx: BehaviourCtx, state: NodeStateLike, _req: ReqLike): void => {
+  const ext = state.ext as ColdStorageExt;
+  if (ext.jobs > 0) ext.jobs--;
+};
 
 const coldstorage: ComponentBehaviour = {
   kind: 'coldstorage',
@@ -69,8 +183,37 @@ const coldstorage: ComponentBehaviour = {
   generatesLoad: false,
   pullsFromQueues: false,
   buffersForConsumers: false,
-  pump: 'own',
+  // No queue and no engine slots: jobs are tracked in ext, timed by
+  // serveWithin, and the only admission outcomes are "job started" and
+  // "refused". queueLimit is ignored, because a vault has no line to wait in.
+  pump: 'none',
   creditsJoinCompletion: true,
+
+  initState: (): ColdStorageExt => ({ jobs: 0 }),
+
+  onAdmit(ctx, state, req): AdmitAction {
+    const ext = state.ext as ColdStorageExt;
+    if (ext.jobs >= ctx.effectiveCapacity(state)) {
+      ctx.countCustom(state, 'restoreDenied', 1);
+      ctx.reject(state, req, 'throttled');
+      return 'handled';
+    }
+    ext.jobs++;
+    ctx.serveWithin(state, req, coldDrained);
+    return 'handled';
+  },
+
+  onTick(ctx, state): void {
+    const ext = state.ext as ColdStorageExt;
+    ctx.reportOccupancy(state, ext.jobs, ctx.effectiveCapacity(state));
+  },
+
+  decorateStats(ctx, state, stats: NodeStats): void {
+    const ext = state.ext as ColdStorageExt | null;
+    stats.inFlight = ext ? ext.jobs : 0;
+    stats.queued = 0;
+    stats.throttledRate = ctx.counterRate(state, 'restoreDenied');
+  },
 };
 
 /* ================================================================== *
@@ -193,6 +336,91 @@ function meanServedMs(ctx: BehaviourCtx, state: NodeStateLike): number {
   const ms = ctx.counterRate(state, 'servedMs') / served;
   return Number.isFinite(ms) && ms > 0 ? ms : 0;
 }
+
+/* ================================================================== *
+ * db -- a relational store with write lock contention
+ *
+ * The one thing a database does that a stateless service cannot: it
+ * guards shared data. Reads share the slot pool freely. A WRITE entering
+ * service pays `lockMs` of extra wait for every other write already in
+ * flight -- row and page locks, stated as arithmetic -- so write latency
+ * grows with write CONCURRENCY, not with load per se.
+ *
+ * The consequence this exists to teach: `instances` multiplies the slot
+ * pool, so adding instances fixes a slow READ path -- but the lock is a
+ * property of the data, shared across the whole fleet, so the write path
+ * gets nothing. Watch lockWaitMs stay put while a scale-up halves read
+ * latency, and the case for read replicas (split the reads out) and
+ * sharding (split the DATA, and with it the lock) writes itself.
+ *
+ * Classification draws one unconditional roll against `readFraction`,
+ * the same convention the replica set and search index follow, so replay
+ * never depends on the slider's value.
+ * ================================================================== */
+
+interface DbExt extends PoolExt {
+  /** Writes currently holding service slots. */
+  writers: number;
+}
+
+function dbClassify(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): void {
+  const isWrite = ctx.roll() >= clamp01(num(state.config.readFraction, 0.9));
+  ctx.markWrite(req, isWrite);
+}
+
+/**
+ * At service start: judge contention against the writers holding slots at
+ * this moment (not at admission -- a write that waited in the queue meets
+ * the lock as it actually is when its turn comes).
+ */
+const dbStart = (ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): void => {
+  ctx.countCustom(state, req.isWrite ? 'write' : 'read', 1);
+  if (!req.isWrite) return;
+  const ext = state.ext as DbExt;
+  const lockMs = Math.max(0, num(state.config.lockMs, 0));
+  const wait = lockMs * ext.writers;
+  if (wait > 0) {
+    ctx.addServiceDelay(req, wait);
+    ctx.countCustom(state, 'lockWaitMs', wait);
+  }
+  ext.writers++;
+};
+
+const dbDrained = makeDrained(dbStart, (_ctx, state, req) => {
+  if (!req.isWrite) return;
+  const ext = state.ext as DbExt;
+  if (ext.writers > 0) ext.writers--;
+});
+
+const db: ComponentBehaviour = {
+  kind: 'db',
+  servesRequests: true,
+  instanceModel: 'slots',
+  scaleField: 'instances',
+  generatesLoad: false,
+  pullsFromQueues: false,
+  buffersForConsumers: false,
+  pump: 'none',
+  creditsJoinCompletion: true,
+
+  initState: (): DbExt => ({ ...initPool(), writers: 0 }),
+
+  onAdmit(ctx, state, req): AdmitAction {
+    return poolAdmit(ctx, state, req, dbClassify, dbStart, dbDrained);
+  },
+
+  onTick: reportPool,
+
+  decorateStats(ctx, state, stats: NodeStats): void {
+    decoratePool(state, stats);
+    const writes = ctx.counterRate(state, 'write');
+    stats.readRate = ctx.counterRate(state, 'read');
+    stats.writeRate = writes;
+    const waited = ctx.counterRate(state, 'lockWaitMs');
+    const mean = writes > 0 ? waited / writes : 0;
+    stats.lockWaitMs = Number.isFinite(mean) && mean > 0 ? mean : 0;
+  },
+};
 
 /* ================================================================== *
  * searchindex -- a search cluster with asynchronous indexing
@@ -449,6 +677,7 @@ const vectordb: ComponentBehaviour = {
 };
 
 export const STORE_BEHAVIOURS: ComponentBehaviour[] = [
+  db,
   objectstore,
   searchindex,
   timeseriesdb,

@@ -341,18 +341,9 @@ const cache: ComponentBehaviour = {
   },
 };
 
-/** Same discipline as a service; kept separate so it can diverge later. */
-const db: ComponentBehaviour = {
-  kind: 'db',
-  servesRequests: true,
-  instanceModel: 'slots',
-  scaleField: 'instances',
-  generatesLoad: false,
-  pullsFromQueues: false,
-  buffersForConsumers: false,
-  pump: 'own',
-  creditsJoinCompletion: true,
-};
+/* `db` lives in behaviour-store.ts with the other stores: it runs the
+ * shared costed pool there, with write lock contention as its own
+ * mechanism, and is registered via STORE_BEHAVIOURS below. */
 
 /**
  * A buffer, not a server. It acknowledges the caller immediately (so the
@@ -397,7 +388,6 @@ const ALL: ComponentBehaviour[] = [
   lb,
   service,
   cache,
-  db,
   queue,
   worker,
   ...EDGE_BEHAVIOURS,
@@ -406,8 +396,9 @@ const ALL: ComponentBehaviour[] = [
 // Data-tier kinds (replica, shard) live in their own module: both carry real
 // internal machinery, and keeping it there leaves this file declarative.
 ALL.push(...DATA_BEHAVIOURS);
-// Specialised stores (object storage, search, time-series, graph, cold
-// storage, vector) likewise: four of the six run a self-managed costed pool.
+// Stores (db, object storage, search, time-series, graph, cold storage,
+// vector) likewise: each carries a mechanism of its own, and five of the
+// seven run the shared self-managed costed pool.
 ALL.push(...STORE_BEHAVIOURS);
 // Messaging and coordination kinds (streambroker, pubsub, websocket,
 // apigateway, sidecar, lambda, cron): the glue between services. Same deal;

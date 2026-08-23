@@ -8,7 +8,7 @@ import type {
   SystemStats,
 } from '../sim/types';
 import { defaultConfig } from '../sim/presets';
-import { KIND_NAME } from './nodeVisuals';
+import { KIND_NAME, KIND_TERM } from './nodeVisuals';
 import {
   NA,
   formatCount,
@@ -90,7 +90,11 @@ type Field =
   | 'flushDelayMs'
   | 'edgeShare'
   | 'lowPriorityShare'
-  | 'priorityReserve';
+  | 'priorityReserve'
+  | 'lockMs'
+  | 'prefixRps'
+  | 'renditions'
+  | 'cpuMsCap';
 
 const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   // The client generates load and decides how long to wait for an answer.
@@ -112,8 +116,18 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   ],
   // Only the cache has a hit rate. That single knob is the interesting one.
   cache: ['hitRate', 'instances', 'capacity', 'serviceMs', 'serviceCv', 'queueLimit'],
-  // A database is slots and service time. It does not retry on your behalf.
-  db: ['instances', 'capacity', 'serviceMs', 'serviceCv', 'queueLimit', 'errorRate'],
+  // A database is slots, service time, and the write lock: the read/write
+  // mix and the per-writer lock wait are what make it more than a service.
+  db: [
+    'readFraction',
+    'lockMs',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'serviceCv',
+    'queueLimit',
+    'errorRate',
+  ],
   // A queue is a buffer. Depth is the only thing that matters about it.
   queue: ['queueLimit', 'serviceMs'],
   // Workers drain a queue. No inbound queue limit of their own.
@@ -161,9 +175,16 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   // The four knobs of a breaker are the four questions it answers: how bad,
   // measured over how long, shut for how long, and reopened on what evidence.
   breaker: ['errorThreshold', 'windowMs', 'openMs', 'halfOpenProbes'],
-  // Blob storage is slots and a high flat latency; nothing else about it is
-  // interesting, which is itself the lesson.
-  objectstore: ['capacity', 'serviceMs', 'serviceCv', 'queueLimit', 'errorRate'],
+  // Blob storage: a high flat latency, a wide pool, and the per-prefix rate
+  // ceiling that is the real limit long before the pool is.
+  objectstore: [
+    'prefixRps',
+    'capacity',
+    'serviceMs',
+    'serviceCv',
+    'queueLimit',
+    'errorRate',
+  ],
   // The search trade: cheap queries, surcharged writes, and the refresh lag
   // that decides how stale a search can be.
   searchindex: [
@@ -269,8 +290,10 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
     'serviceMs',
     'queueLimit',
   ],
-  // The batch-regime worker: boxes, jobs per box, and seconds per job.
+  // The encode farm: boxes, jobs per box, seconds per job, and the quality
+  // ladder each finished job hands downstream.
   transcoder: [
+    'renditions',
     'instances',
     'capacity',
     'serviceMs',
@@ -278,9 +301,16 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
     'errorRate',
     'queueLimit',
   ],
-  // The share it can answer locally is the lesson; the rest is a fast,
-  // wide pool like any edge tier.
-  edgecompute: ['edgeShare', 'instances', 'capacity', 'serviceMs', 'queueLimit'],
+  // The share it can answer locally, and the CPU budget that decides how
+  // much of that share it actually gets to keep.
+  edgecompute: [
+    'edgeShare',
+    'cpuMsCap',
+    'instances',
+    'capacity',
+    'serviceMs',
+    'queueLimit',
+  ],
   // How long writes sit dirty, and how many may sit at once. `capacity`
   // here is the buffer (memory), not threads.
   writebehind: ['flushDelayMs', 'capacity', 'serviceMs', 'queueLimit'],
@@ -508,12 +538,12 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     min: 0,
     max: 2,
     step: 0.05,
-    display: (v) => (v === 0 ? 'fixed' : `cv ${v.toFixed(2)}`),
+    display: (v) => (v === 0 ? 'every one the same' : v.toFixed(2)),
   },
   queueLimit: {
     control: 'number',
     term: 'queue-limit',
-    label: 'Requests waiting in line',
+    label: 'Most that can wait in line',
     unit: 'at most',
     min: 0,
     max: 20000,
@@ -522,7 +552,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   hitRate: {
     control: 'slider',
     term: 'hit-rate',
-    label: 'Hit rate',
+    label: 'Hit rate you set',
     unit: 'percent',
     min: 0,
     max: 1,
@@ -770,7 +800,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   indexLagMs: {
     control: 'slider',
-    term: 'index-lag',
+    term: 'stale-search',
     label: 'Searchable after',
     unit: 'milliseconds after a write commits',
     hint: 'The refresh interval: how long after a write commits before searches can see it. Searches inside that window read the old index.',
@@ -845,7 +875,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   connectionMs: {
     control: 'slider',
-    term: 'connections-held',
+    term: 'connection-slot',
     label: 'Connection lifetime',
     unit: 'milliseconds held',
     hint: 'How long each accepted connection occupies a slot. Held connections settle at rate x lifetime, which is the number that actually saturates.',
@@ -932,7 +962,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
   },
   flushDelayMs: {
     control: 'slider',
-    term: 'dirty-writes',
+    term: 'dirty-write',
     label: 'Writes sit dirty for',
     unit: 'milliseconds',
     hint: 'Time between the ack and the flush landing. Everything inside this window is lost if the node crashes.',
@@ -973,6 +1003,49 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     step: 0.05,
     display: (v) => formatPct(v),
   },
+  lockMs: {
+    control: 'slider',
+    term: 'lock-contention',
+    label: 'Lock wait per concurrent write',
+    unit: 'milliseconds each',
+    hint: 'Each write entering service waits this long for every write already in flight. Fleet size does not appear in that sentence, which is the lesson.',
+    min: 0,
+    max: 100,
+    step: 1,
+    display: (v) => (v === 0 ? 'no contention' : formatMs(v)),
+  },
+  prefixRps: {
+    control: 'slider',
+    term: 'prefix-ceiling',
+    label: 'Ceiling per key prefix',
+    unit: 'requests per second, each prefix',
+    hint: 'Keys map onto 8 prefixes. Evenly spread traffic sustains 8x this; a hot prefix gets exactly 1x and then slowdowns, however idle the pool is.',
+    min: 0,
+    max: 1000,
+    step: 10,
+    display: (v) => (v === 0 ? 'no limit' : `${v}/s`),
+  },
+  renditions: {
+    control: 'number',
+    term: 'rendition',
+    label: 'Renditions per job',
+    unit: 'output files, per finished job',
+    hint: 'The quality ladder. Storage behind the farm sees this many uploads per job, so its write load is this times the job rate.',
+    min: 1,
+    max: 12,
+    step: 1,
+  },
+  cpuMsCap: {
+    control: 'slider',
+    term: 'cpu-budget',
+    label: 'CPU budget per request',
+    unit: 'milliseconds of execution',
+    hint: 'A request that runs past this is killed at the edge and sent to the origin anyway. Heavier edge code blows the budget more often.',
+    min: 0,
+    max: 50,
+    step: 0.5,
+    display: (v) => (v === 0 ? 'no budget' : formatMs(v)),
+  },
 };
 
 /* ------------------------------------------------------------------ *
@@ -997,7 +1070,7 @@ const KIND_FIELD_OVERRIDES: Partial<
       // Overrides the shared `capacity` term too: a slot here is a held
       // connection, and pointing this at the generic capacity entry would
       // explain the wrong idea to the one kind that most needs the right one.
-      term: 'connections-held',
+      term: 'connection-slot',
       label: 'Connections per instance',
       unit: 'held at once, on one machine',
       hint: 'A slot here is a held connection, not a request in service. Held connections settle at connect rate x lifetime, which is the number that saturates.',
@@ -1005,7 +1078,7 @@ const KIND_FIELD_OVERRIDES: Partial<
   },
   writebehind: {
     capacity: {
-      term: 'dirty-writes',
+      term: 'dirty-write',
       label: 'Dirty writes held',
       unit: 'buffered at once',
       hint: 'The buffer is memory: how many acknowledged writes may sit dirty at once. It is not a thread count.',
@@ -1417,7 +1490,7 @@ function VitalsMeter({
         <div className="ins-util">
           <div className="ins-util-head">
             <span className="label">
-              <Term id="connections-held">Connections held</Term>
+              <Term id="connection-slot">Connections held</Term>
             </span>
             <span className={tone ? `num num-md ${tone}` : 'num num-md'}>
               {formatCount(open)} / {formatCount(max)}
@@ -1522,7 +1595,7 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
     case 'cache':
       return (
         <StatRow
-          label="Hit rate, measured"
+          label="Hit rate right now"
           term="hit-rate"
           value={formatPct(stats.hitRate)}
         />
@@ -1532,7 +1605,7 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
       return (
         <>
           <StatRow
-            label="Hit rate, measured"
+            label="Hit rate right now"
             term="hit-rate"
             value={formatPct(stats.hitRate)}
           />
@@ -1699,7 +1772,7 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
         <>
           <StatRow
             label="Subscribers"
-            term="fanout"
+            term="fan-out"
             value={formatCount(stats.fanout)}
           />
           <StatRow label="Delivering" value={formatRate(stats.deliveryRate)} />
@@ -1725,12 +1798,64 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
         </>
       );
 
+    case 'db':
+      return (
+        <>
+          <StatRow label="Reads" value={formatRate(stats.readRate)} />
+          <StatRow label="Writes" value={formatRate(stats.writeRate)} />
+          <StatRow
+            label="Lock wait per write"
+            term="lock-contention"
+            value={formatMs(stats.lockWaitMs)}
+            tone={
+              (stats.lockWaitMs ?? 0) > 2 * Math.max(1, stats.p50)
+                ? 'is-danger'
+                : (stats.lockWaitMs ?? 0) > 0.5 * Math.max(1, stats.p50)
+                  ? 'is-warn'
+                  : undefined
+            }
+          />
+        </>
+      );
+
+    case 'objectstore':
+      return (
+        <StatRow
+          label="Slowdowns, hot prefix"
+          term="prefix-ceiling"
+          value={formatRate(stats.slowdownRate)}
+          tone={(stats.slowdownRate ?? 0) > 0 ? 'is-danger' : undefined}
+        />
+      );
+
+    case 'coldstorage':
+      return (
+        <>
+          <StatRow label="Restore jobs running" value={formatCount(stats.inFlight)} />
+          <StatRow
+            label="Refused, quota full"
+            term="throttled"
+            value={formatRate(stats.throttledRate)}
+            tone={(stats.throttledRate ?? 0) > 0 ? 'is-danger' : undefined}
+          />
+        </>
+      );
+
+    case 'transcoder':
+      return (
+        <StatRow
+          label="Renditions out"
+          term="rendition"
+          value={formatRate(stats.outputRate)}
+        />
+      );
+
     case 'searchindex':
       return (
         <>
           <StatRow
             label="Stale searches"
-            term="index-lag"
+            term="stale-search"
             value={formatPct(stats.staleSearchRate)}
             tone={(stats.staleSearchRate ?? 0) > 0.2 ? 'is-warn' : undefined}
           />
@@ -1813,7 +1938,7 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
         <>
           <StatRow
             label="Dirty writes held"
-            term="dirty-writes"
+            term="dirty-write"
             value={formatCount(stats.dirtyWrites)}
           />
           <StatRow label="Flushing" value={formatRate(stats.flushedRate)} />
@@ -1835,6 +1960,12 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
           <StatRow
             label="Passed to origin"
             value={formatRate(stats.passedThroughRate)}
+          />
+          <StatRow
+            label="Killed by the CPU budget"
+            term="cpu-budget"
+            value={formatRate(stats.cpuExceededRate)}
+            tone={(stats.cpuExceededRate ?? 0) > 0 ? 'is-warn' : undefined}
           />
         </>
       );
@@ -2226,7 +2357,7 @@ function QueuePanel({ stats }: { stats: NodeStats }) {
   const fill = Math.min(1, depth / limit);
   const shedding = stats.shedRate > 0;
   return (
-    <Section title="The backlog">
+    <Section title="The line">
       <div className="ins-util">
         <div className="ins-util-head">
           <span className="label">
@@ -2321,10 +2452,32 @@ function SingleInspector({
             aria-label="Node name"
             onChange={(e) => onRename(node.id, e.currentTarget.value)}
           />
-          <span className="label ins-kind">{KIND_NAME[node.kind]}</span>
+          {/*
+            The kind name is where a student learns WHAT they have selected.
+            It is also the one place a canvas readout's concepts can be
+            explained: the node's own numbers live in <svg> and cannot carry
+            a trigger, so the inspector carries them instead.
+          */}
+          {/* Shown only once it says something the name field does not.
+
+              At the default the two are the same word: the field read
+              "Sharded Store" and this eyebrow read "Sharded store" directly
+              beneath it — the same two words, in two capitalisations, 20px
+              apart. The kind only carries information once a student has
+              renamed the node to something of their own, so that is when it
+              appears. The glossary trigger is not lost either way: the blurb
+              below always carries it. */}
+          {node.label.trim().toLowerCase() !== KIND_NAME[node.kind].toLowerCase() && (
+            <span className="label ins-kind">
+              <Term id={KIND_TERM[node.kind]}>{KIND_NAME[node.kind]}</Term>
+            </span>
+          )}
         </header>
 
-        <p className="ins-blurb">{KIND_BLURB[node.kind]}</p>
+        <p className="ins-blurb">
+          <Term id={KIND_TERM[node.kind]}>{KIND_NAME[node.kind]}</Term>.{' '}
+          {KIND_BLURB[node.kind]}
+        </p>
 
         {/* The headline meter, chosen per kind: utilisation where slots are
             real, tokens for a bucket, pool fill for a bulkhead, lag against
@@ -2421,7 +2574,7 @@ function SingleInspector({
                       value={formatCount(stats.inFlight)}
                     />
                     <StatRow
-                      label={node.kind === 'queue' ? 'Backlog' : 'Waiting in line'}
+                      label="Waiting in line"
                       term={node.kind === 'queue' ? 'backlog' : 'queue-time'}
                       value={formatCount(stats.queued)}
                     />
@@ -2438,10 +2591,18 @@ function SingleInspector({
                   value={formatRate(stats.arrivalRate)}
                 />
                 <KindStatRows kind={node.kind} stats={stats} />
-                <StatRow label="p50" term="p50" value={formatMs(stats.p50)} />
-                <StatRow label="p95" term="p95" value={formatMs(stats.p95)} />
                 <StatRow
-                  label="p99"
+                  label="Typical request"
+                  term="p50"
+                  value={formatMs(stats.p50)}
+                />
+                <StatRow
+                  label="Slower requests"
+                  term="p95"
+                  value={formatMs(stats.p95)}
+                />
+                <StatRow
+                  label="Slowest requests"
                   term="p99"
                   value={formatMs(stats.p99)}
                   tone={toneClass(healthOfLatency(stats.p99))}
@@ -2590,7 +2751,11 @@ function MultiInspector({
             ) : null}
           </p>
           <span className="label ins-kind">
-            {sameKind ? KIND_NAME[kind!] : 'Mixed selection'}
+            {sameKind ? (
+              <Term id={KIND_TERM[kind!]}>{KIND_NAME[kind!]}</Term>
+            ) : (
+              'Mixed selection'
+            )}
           </span>
         </header>
 
@@ -2772,7 +2937,7 @@ export function TrafficControl({
           <span className="traffic-load-readout">
             <span className="num num-hero">{formatRateBare(rps)}</span>
             <span className="label traffic-load-unit">
-              <Term id="rps">rps</Term>
+              <Term id="rps">requests / sec</Term>
             </span>
           </span>
         </div>
@@ -2790,7 +2955,7 @@ export function TrafficControl({
                 '--fill-pct': fillPct(rpsToPosition(rps), 0, SLIDER_STEPS),
               } as React.CSSProperties
             }
-            aria-valuetext={`${Math.round(rps)} requests per second`}
+            aria-valuetext={`${Math.round(rps)} request${Math.round(rps) === 1 ? '' : 's'} per second`}
             onChange={(e) => onRpsChange(positionToRps(Number(e.currentTarget.value)))}
           />
           <div className="traffic-scale" aria-hidden="true">
@@ -2864,12 +3029,11 @@ export function TrafficControl({
       </div>
 
       <div className="traffic-actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={onToggleRun}
-          aria-pressed={running}
-        >
+        <button type="button" className="btn btn-primary" onClick={onToggleRun}>
+          {/* No aria-pressed. The label itself flips Pause <-> Play, so the
+              button already states its effect; adding a pressed state made a
+              running simulation announce "Pause, pressed", which reads as
+              ALREADY paused — the opposite of the truth. */}
           {running ? 'Pause' : 'Play'}
         </button>
         {/* Stepping is only meaningful against a stopped clock, and it

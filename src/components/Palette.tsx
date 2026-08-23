@@ -7,8 +7,10 @@ import {
   ICON_STROKE,
   KIND_ICON,
   KIND_NAME,
+  KIND_TERM,
   NODE_DND_MIME,
 } from './nodeVisuals';
+import { Term } from './Tooltip';
 import './Palette.css';
 
 /* ------------------------------------------------------------------ *
@@ -319,7 +321,25 @@ export function Palette({
               <p className="label pal-group-title">{group.title}</p>
               <ul className="pal-list">
                 {group.kinds.map((kind) => (
-                  <li key={kind}>
+                  /*
+                    WHY THE EXPLANATION IS NOT ON THE ROW ITSELF.
+
+                    Every other surface in the app wraps the label in <Term>.
+                    Here that is wrong, and the reason is what the row DOES:
+                    clicking it puts a component on the canvas. Making the
+                    name a tooltip trigger would nest one interactive element
+                    inside another, and worse, it would mean the gesture for
+                    "what IS a circuit breaker?" and the gesture for "give me
+                    a circuit breaker" are the same click. A student browsing
+                    to learn would litter the canvas doing it.
+
+                    So the trigger is a SIBLING of the button, not a child.
+                    The row keeps its click, its drag and its keyboard
+                    activation exactly as they were; the mark beside it
+                    explains. Hovering anywhere on the row reveals the mark,
+                    so it is discoverable without being 33 permanent dots.
+                  */
+                  <li key={kind} className="pal-item">
                     <button
                       type="button"
                       className="pal-row"
@@ -339,6 +359,15 @@ export function Palette({
                       </span>
                       <span className="pal-name">{KIND_NAME[kind]}</span>
                     </button>
+                    {/*
+                      `bare` because the row is already a strong affordance
+                      and a dotted underline on a lone question mark would be
+                      noise on top of noise. The tooltip itself is unchanged.
+                    */}
+                    <Term id={KIND_TERM[kind]} className="pal-explain" bare>
+                      <span aria-hidden="true">?</span>
+                      <span className="sr-only">What is a {KIND_NAME[kind]}?</span>
+                    </Term>
                   </li>
                 ))}
               </ul>
@@ -386,7 +415,7 @@ export function Palette({
         <Section
           id="keys"
           title="Keys"
-          count={6}
+          count={7}
           open={!closed.has('keys')}
           onToggle={() => toggle('keys')}
         >
@@ -414,6 +443,10 @@ export function Palette({
             <div className="pal-keyrow">
               <dt className="pal-key">Esc</dt>
               <dd className="pal-keydesc">Cancel / deselect</dd>
+            </div>
+            <div className="pal-keyrow">
+              <dt className="pal-key">?</dt>
+              <dd className="pal-keydesc">Open the glossary</dd>
             </div>
           </dl>
         </Section>

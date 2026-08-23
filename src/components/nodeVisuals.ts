@@ -266,6 +266,60 @@ export const KIND_NAME: Record<NodeKind, string> = {
   loadshedder: 'Load shedder',
 };
 
+/**
+ * Glossary entry for each component kind.
+ *
+ * Lives beside KIND_NAME because it is the same fact about a kind: what it is
+ * called, and where its explanation is. The palette and the inspector both
+ * read it, so a kind cannot end up explained in one place and silently bare
+ * in the other.
+ *
+ * Typed as a total Record, so adding a kind to the engine is a compile error
+ * until someone writes its glossary entry. That is deliberate: a new
+ * component with no explanation is exactly the gap this feature exists to
+ * close, and a partial map with a fallback would let it ship unnoticed.
+ *
+ * Several kinds share an entry where they genuinely are the same idea to a
+ * student: `replica` is the read-replica entry, `db` and the specialised
+ * stores each get their own because the whole point of that shelf is that
+ * they are NOT the same thing as a database.
+ */
+export const KIND_TERM: Record<NodeKind, string> = {
+  client: 'client',
+  lb: 'load-balancer',
+  service: 'service',
+  cache: 'cache',
+  db: 'database',
+  queue: 'queue',
+  worker: 'worker',
+  replica: 'read-replica',
+  shard: 'shard',
+  autoscaler: 'autoscaler',
+  region: 'region',
+  cdn: 'cdn',
+  ratelimiter: 'rate-limiter',
+  breaker: 'breaker',
+  objectstore: 'objectstore',
+  searchindex: 'searchindex',
+  timeseriesdb: 'timeseriesdb',
+  graphdb: 'graphdb',
+  coldstorage: 'coldstorage',
+  vectordb: 'vectordb',
+  streambroker: 'streambroker',
+  pubsub: 'pubsub',
+  websocket: 'websocket',
+  apigateway: 'apigateway',
+  sidecar: 'sidecar',
+  lambda: 'lambda',
+  cron: 'cron',
+  bulkhead: 'bulkhead',
+  retryqueue: 'retryqueue',
+  transcoder: 'transcoder',
+  edgecompute: 'edgecompute',
+  writebehind: 'writebehind',
+  loadshedder: 'loadshedder',
+};
+
 /* ================================================================== *
  * UNIT RENDERING — how a node made of several things is drawn
  *
