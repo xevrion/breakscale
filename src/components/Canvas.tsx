@@ -1234,19 +1234,27 @@ const MARK_SIZE = 7;
 /** Horizontal room a status mark claims at the right edge, gap included. */
 const MARK_RESERVE = MARK_SIZE + NAME_GAP;
 /**
- * Top-left of the glyph box, so the 24-unit icon grid centres on the header
- * line.
+ * Optical centre of the icon grid, in grid units.
  *
- * Centred by its BOX, deliberately, not by its measured ink. Lucide draws
- * each icon on a shared 24x24 grid and lets the ink fill different amounts
- * of it — a monitor is nearly full-height, a split arrow is not. Measured
- * across the set, ink centres land between y=12.0 and y=13.0. Centring each
- * icon on its own ink would put a full-height glyph and a short one on
- * different lines, which is worse: the grid is the shared reference that
- * makes thirty-three icons read as one family, so the grid is what gets
- * aligned.
+ * MEASURED, across all 33 icons, with getBBox() on the rendered primitives:
+ * ink centres land between 12.0 and 13.0 with a mean of 12.11 — never at the
+ * grid's geometric centre of 12.0 by accident, and never far from it. Lucide
+ * draws its ink slightly high in the 24-unit box, consistently.
+ *
+ * So the grid is aligned with that offset applied once, rather than each icon
+ * being centred on its own ink. Two reasons for the grid and not the ink:
+ * the spread is only 1.0 unit, which is a quarter-pixel once scaled, while
+ * ink-centring would put a tall glyph and a short one on visibly different
+ * lines; and the shared grid is exactly what makes 33 icons read as one
+ * family, so it is the thing worth holding true.
  */
-const GLYPH_Y = HEAD_CENTER_Y - GLYPH_PX / 2;
+const GLYPH_INK_CENTER = 12.11;
+
+/**
+ * Top-left of the glyph box, placed so the icons' measured optical centre —
+ * not the box's geometric centre — lands on the header line.
+ */
+const GLYPH_Y = HEAD_CENTER_Y - GLYPH_INK_CENTER * GLYPH_SCALE;
 
 /**
  * Trim a node label to what actually fits on the node.

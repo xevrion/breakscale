@@ -44,6 +44,18 @@ Useful commands:
 | `bun run lint`   | Lint                               |
 | `bun run format` | Format with Prettier               |
 
+## Checks run automatically
+
+Two git hooks are installed when you run `bun install`:
+
+- **On commit**, staged files are formatted with Prettier. You cannot commit badly formatted code.
+- **On push**, the full CI suite runs locally: typecheck, lint, format, tests. If any of it fails
+  the push is blocked, with the failure printed.
+
+This mirrors `.github/workflows/ci.yml` exactly, so a push that succeeds locally will not turn CI
+red. If you ever need to bypass a hook deliberately, `git push --no-verify` works, but expect CI to
+catch whatever the hook would have.
+
 ## How the project is laid out
 
 ```
