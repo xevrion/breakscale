@@ -43,7 +43,7 @@
        T3  14  450             body default, node name, list rows  [BASE]
        T4  16  650  mono       workhorse numeric: node primary, stat values
        T5  22  650  mono       chart header readouts, selected node primary
-       T6  34  650  mono       exactly two: offered load, system p99
+       T6  34  650  mono       exactly one: the system p99
 
      The base step is 14px rather than the 13px a dense professional tool
      would use. This is read, not scanned.
@@ -676,8 +676,9 @@ h4 {
   letter-spacing: var(--tr-lg);
 }
 
-/* The single largest element on screen: the offered-load and system-p99
-   readouts. Nothing else may use this step. */
+/* The single largest element on screen: the system-p99 readout, and only
+   it. The hero size IS the instruction "watch this number"; a second hero
+   would repeal it. */
 .num-hero {
   font-size: var(--fs-hero);
   font-weight: var(--fw-num);

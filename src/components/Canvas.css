@@ -1033,6 +1033,9 @@
      two never overlap at any strip state. */
   left: calc(var(--sp-3) + 32px + var(--sp-3));
   bottom: var(--sp-3);
+  /* The toggle's height, so the two read as one row: the ledger text
+     centres on the button beside it instead of hanging below its middle. */
+  min-height: 32px;
   display: flex;
   align-items: center;
   /* The four facts are separated by SPACE, not by punctuation. A `·` glyph

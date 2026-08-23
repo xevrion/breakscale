@@ -2935,7 +2935,11 @@ export function TrafficControl({
             <Term id="offered">Offered load</Term>
           </label>
           <span className="traffic-load-readout">
-            <span className="num num-hero">{formatRateBare(rps)}</span>
+            {/* num-lg, not the hero. The slider's own value is feedback the
+                student just caused; p99 is the consequence they are meant to
+                watch, and it reads as the most important number on screen
+                only if it is the ONLY number at the hero size. */}
+            <span className="num num-lg">{formatRateBare(rps)}</span>
             <span className="label traffic-load-unit">
               <Term id="rps">requests / sec</Term>
             </span>

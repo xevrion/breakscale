@@ -464,10 +464,11 @@
 /* ==========================================================================
    TrafficControl — the top bar.
 
-   Two hero numbers and one slider. The slider is the only thing on screen
+   One hero number and one slider. The slider is the only thing on screen
    the student manipulates continuously, and p99 is the thing they are meant
-   to watch while they do it, so those two are the largest elements in the
-   application and everything else in the bar is deliberately smaller.
+   to watch while they do it — so p99 alone gets the hero size, the load
+   readout sits a step below it, and everything else in the bar is smaller
+   again.
    ========================================================================== */
 
 .traffic {
@@ -520,11 +521,11 @@
   gap: var(--sp-1);
 }
 
-/* The hero is 34px with a line-height of 1. Fixed minimum width for four
-   glyphs plus the unit, so the slider beside it does not resize as the
-   value steps between "9", "370" and "5k". */
-.traffic-load-readout .num-hero {
-  min-width: 62px;
+/* Fixed minimum width for four glyphs at the 22px step, so the slider
+   beside it does not resize as the value steps between "9", "370" and
+   "5k". */
+.traffic-load-readout .num-lg {
+  min-width: 52px;
 }
 
 .traffic-load-unit {

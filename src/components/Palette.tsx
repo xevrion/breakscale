@@ -415,7 +415,7 @@ export function Palette({
         <Section
           id="keys"
           title="Keys"
-          count={7}
+          count={10}
           open={!closed.has('keys')}
           onToggle={() => toggle('keys')}
         >
@@ -447,6 +447,18 @@ export function Palette({
             <div className="pal-keyrow">
               <dt className="pal-key">?</dt>
               <dd className="pal-keydesc">Open the glossary</dd>
+            </div>
+            <div className="pal-keyrow">
+              <dt className="pal-key">C</dt>
+              <dd className="pal-keydesc">Components rail</dd>
+            </div>
+            <div className="pal-keyrow">
+              <dt className="pal-key">I</dt>
+              <dd className="pal-keydesc">Inspector panel</dd>
+            </div>
+            <div className="pal-keyrow">
+              <dt className="pal-key">M</dt>
+              <dd className="pal-keydesc">Metrics charts</dd>
             </div>
           </dl>
         </Section>
