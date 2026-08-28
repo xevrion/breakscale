@@ -66,6 +66,7 @@ import {
   NEW_NOTE_TEXT,
   NEW_SECTION_H,
   NEW_SECTION_W,
+  NOTE_BOLD_WEIGHT,
   NOTE_SIZES,
   RESIZE_DIRS,
   handleAnchor,
@@ -417,7 +418,13 @@ export interface CanvasProps {
    */
   onSetNoteStyle?: (
     id: string,
-    change: { font?: AnnotationFont; tone?: number | null; bold?: 'toggle' },
+    change: {
+      font?: AnnotationFont;
+      tone?: number | null;
+      bold?: 'toggle';
+      italic?: 'toggle';
+      underline?: 'toggle';
+    },
   ) => void;
   /** Optional: per-node sparkline history. Omitted -> no sparklines. */
   spark?: SparkData;
@@ -1978,14 +1985,15 @@ interface NoteViewProps {
  */
 const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewProps) {
   const layout = useMemo(
-    () => layoutNote(note.text, note.width, note.size, note.font, note.bold),
-    [note.text, note.width, note.size, note.font, note.bold],
+    () =>
+      layoutNote(note.text, note.width, note.size, note.font, note.bold, note.italic),
+    [note.text, note.width, note.size, note.font, note.bold, note.italic],
   );
   return (
     <g
       className={`cv-note is-${note.size}${selected ? ' is-selected' : ''}${
         note.bold ? ' is-bold' : ''
-      }`}
+      }${note.italic ? ' is-italic' : ''}${note.underline ? ' is-underline' : ''}`}
       data-font={note.font ?? 'sans'}
       data-tone={note.tone ?? undefined}
       // A note with no colour inherits the theme's ink; one with a colour has
@@ -2116,8 +2124,9 @@ function SectionChrome({
  */
 function NoteChrome({ note, ui }: { note: Note; ui: number }) {
   const layout = useMemo(
-    () => layoutNote(note.text, note.width, note.size, note.font, note.bold),
-    [note.text, note.width, note.size, note.font, note.bold],
+    () =>
+      layoutNote(note.text, note.width, note.size, note.font, note.bold, note.italic),
+    [note.text, note.width, note.size, note.font, note.bold, note.italic],
   );
   // Selection ring only. Everything that STYLES the note lives in the
   // floating bar above the charts strip: a toolbar anchored to the note is
@@ -5532,15 +5541,30 @@ export default function Canvas({
                 editNote.width,
                 editNote.size,
                 editNote.font,
+                editNote.bold,
+                editNote.italic,
               ).height *
                 view.k +
               4,
             fontSize: NOTE_SIZES[editNote.size].font * view.k,
             lineHeight: `${NOTE_SIZES[editNote.size].line * view.k}px`,
-            fontWeight: NOTE_SIZES[editNote.size].weight,
-            // The editor must be set in the face the note is painted in, or
-            // the two wrap at different widths and the text jumps on commit.
+            // EVERY style the note carries is mirrored here, not just the
+            // family. Editing is meant to feel like typing into the note that
+            // is already there, and an editor that drops the colour, the
+            // weight or the slant turns a coloured bold note into plain black
+            // text for as long as the caret is in it. The bold and italic
+            // also have to match because they change glyph widths: a lighter
+            // editor wraps to different lines than the paint will.
+            fontWeight: editNote.bold
+              ? NOTE_BOLD_WEIGHT
+              : NOTE_SIZES[editNote.size].weight,
+            fontStyle: editNote.italic ? 'italic' : undefined,
+            textDecoration: editNote.underline ? 'underline' : undefined,
             fontFamily: `var(--${editNote.font ?? 'sans'})`,
+            color:
+              editNote.tone !== undefined
+                ? `var(--ann-${editNote.tone}-ink)`
+                : undefined,
           }}
           value={noteEdit.draft}
           onChange={(e) =>
@@ -5762,6 +5786,28 @@ export default function Canvas({
               onClick={() => onSetNoteStyle?.(formatNote.id, { bold: 'toggle' })}
             >
               B
+            </button>
+            <button
+              type="button"
+              className={`btn btn-ghost cv-format-btn cv-format-italic${
+                formatNote.italic ? ' is-active' : ''
+              }`}
+              aria-pressed={formatNote.italic === true}
+              title="Italic"
+              onClick={() => onSetNoteStyle?.(formatNote.id, { italic: 'toggle' })}
+            >
+              I
+            </button>
+            <button
+              type="button"
+              className={`btn btn-ghost cv-format-btn cv-format-underline${
+                formatNote.underline ? ' is-active' : ''
+              }`}
+              aria-pressed={formatNote.underline === true}
+              title="Underline"
+              onClick={() => onSetNoteStyle?.(formatNote.id, { underline: 'toggle' })}
+            >
+              U
             </button>
           </div>
 

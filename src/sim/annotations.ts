@@ -55,6 +55,15 @@ export interface Note {
   tone?: number;
   /** Heavier weight, on top of whatever the size already sets. */
   bold?: boolean;
+  /**
+   * Slanted, and underlined.
+   *
+   * Separate flags rather than one enum because they combine: a note can be
+   * bold AND italic. Absent rather than false when off, so a note that has
+   * never been styled stores nothing and a share link stays short.
+   */
+  italic?: boolean;
+  underline?: boolean;
 }
 
 /**
@@ -218,6 +227,8 @@ export function sanitizeAnnotations(input: unknown): Annotation[] {
         ...colour(a.color),
         ...noteTone(a.tone),
         ...(a.bold === true ? { bold: true } : {}),
+        ...(a.italic === true ? { italic: true } : {}),
+        ...(a.underline === true ? { underline: true } : {}),
       });
       seen.add(id);
     } else if (a.kind === 'section') {

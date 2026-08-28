@@ -1207,6 +1207,14 @@
   font-weight: 700;
 }
 
+.cv-format-italic {
+  font-style: italic;
+}
+
+.cv-format-underline {
+  text-decoration: underline;
+}
+
 /* Each face button is SET in the face it selects, so the row is a specimen
    rather than five identical letters that have to be learned. */
 .cv-format-btn[data-font-name='hand'] {
@@ -1869,6 +1877,17 @@
    disagree and the text overruns the box it was wrapped to. */
 .cv-note.is-bold .cv-note-text {
   font-weight: 700;
+}
+
+.cv-note.is-italic .cv-note-text {
+  font-style: italic;
+}
+
+/* text-decoration on an SVG <text> is inherited by its tspans, which is what
+   puts the rule under every wrapped line rather than only the first. */
+.cv-note.is-underline .cv-note-text {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
 
 /* Each face button is SET in the face it selects, so the row is a specimen

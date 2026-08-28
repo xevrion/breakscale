@@ -109,6 +109,15 @@ interface Req {
   childReason: FailureReason;
   /** Simulated time this request entered its current node. */
   enterMs: number;
+  /**
+   * Simulated time this request ARRIVED at its current node, kept separate
+   * from enterMs because startService overwrites that one when the work
+   * actually begins. The gap between the two is the time the request spent
+   * waiting in line, which is the single number the tracer exists to show:
+   * latency under load is mostly queueing, not service, and nothing in the
+   * interface said so.
+   */
+  arriveMs: number;
   /** Simulated time the root request was generated (client only). */
   rootStartMs: number;
   /** Hop depth from the client root. */
@@ -1395,6 +1404,9 @@ export class Engine implements BehaviourCtx {
   /** Offer a request to a node: shed, buffer, or start service. */
   private admit(state: NodeState, req: Req): void {
     state.arrivals.add(this.now, 1);
+    // Stamped here, at the ONE point every request enters a node, so the
+    // queued time the tracer reports cannot miss a path.
+    req.arriveMs = this.now;
 
     // A crashed node accepts nothing. Checked before the behaviour runs, so a
     // crash takes a node out whatever kind it is, and the caller sees an
@@ -2404,6 +2416,7 @@ export class Engine implements BehaviourCtx {
       pooled.childFailed = false;
       pooled.childReason = 'error';
       pooled.enterMs = 0;
+      pooled.arriveMs = 0;
       pooled.rootStartMs = 0;
       pooled.hop = 0;
       pooled.attempt = 0;
@@ -2430,6 +2443,7 @@ export class Engine implements BehaviourCtx {
       childFailed: false,
       childReason: 'error',
       enterMs: 0,
+      arriveMs: 0,
       rootStartMs: 0,
       hop: 0,
       attempt: 0,

@@ -106,6 +106,11 @@ export interface TextStyle {
   tracking?: number;
   /** Measure the uppercased string, for a text-transform: uppercase style. */
   uppercase?: boolean;
+  /**
+   * Slanted. Part of the style because an italic face has different glyph
+   * widths: measuring upright and painting slanted wraps to the wrong width.
+   */
+  italic?: boolean;
 }
 
 /**
@@ -115,17 +120,29 @@ export interface TextStyle {
  * because `CanvasRenderingContext2D.letterSpacing` is not supported
  * everywhere and silently does nothing where it is not.
  */
+/**
+ * The canvas `font` shorthand for a style.
+ *
+ * One builder, because the order matters (style, then weight, then size) and
+ * a shorthand assembled differently in two places is how a measurement ends
+ * up describing a face the browser never paints.
+ */
+function fontString(style: TextStyle): string {
+  const slant = style.italic ? 'italic ' : '';
+  return `${slant}${style.weight} ${style.size}px ${stack(style.family)}`;
+}
+
 export function measureText(text: string, style: TextStyle): number {
   if (!text) return 0;
   const s = style.uppercase ? text.toUpperCase() : text;
-  const key = `${style.size}|${style.weight}|${style.family}|${style.tracking ?? 0}|${s}`;
+  const key = `${style.size}|${style.weight}|${style.family}|${style.italic ? 'i' : ''}|${style.tracking ?? 0}|${s}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
 
   const c = context();
   let w: number;
   if (c) {
-    c.font = `${style.weight} ${style.size}px ${stack(style.family)}`;
+    c.font = fontString(style);
     w = c.measureText(s).width + (style.tracking ?? 0) * s.length;
   } else {
     w = s.length * FALLBACK_CHAR_W * (style.size / 14);
@@ -150,7 +167,7 @@ export function measureText(text: string, style: TextStyle): number {
 export function baselineIn(lineH: number, style: TextStyle): number {
   const c = context();
   if (!c) return (lineH - style.size) / 2 + style.size * 0.8;
-  const key = `bl|${style.size}|${style.weight}|${style.family}|${lineH}`;
+  const key = `bl|${style.size}|${style.weight}|${style.family}|${style.italic ? 'i' : ''}|${lineH}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
 
@@ -179,10 +196,10 @@ export function baselineIn(lineH: number, style: TextStyle): number {
 export function descentBelow(style: TextStyle): number {
   const c = context();
   if (!c) return style.size * 0.2;
-  const key = `dc|${style.size}|${style.weight}|${style.family}`;
+  const key = `dc|${style.size}|${style.weight}|${style.family}|${style.italic ? 'i' : ''}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
-  c.font = `${style.weight} ${style.size}px ${stack(style.family)}`;
+  c.font = fontString(style);
   const d = c.measureText('Hxgpqy').fontBoundingBoxDescent;
   const v = Number.isFinite(d) && d > 0 ? d : style.size * 0.2;
   cache.set(key, v);

@@ -1,9 +1,12 @@
 version: 2
 
 updates:
-  # Bun reads package.json, so the npm ecosystem is the right one to watch here.
+  # `bun`, not `npm`. Bun is its own ecosystem: under `npm` Dependabot bumps
+  # package.json and never touches bun.lock, so every PR failed CI on
+  # `bun install --frozen-lockfile`. Supported since February 2025 and needs
+  # no opt-in flag.
   # Grouped so a week of patch bumps arrives as one PR instead of a dozen.
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: weekly

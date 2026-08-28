@@ -969,7 +969,13 @@ export default function App() {
   const handleSetNoteStyle = useCallback(
     (
       id: string,
-      change: { font?: AnnotationFont; tone?: number | null; bold?: 'toggle' },
+      change: {
+        font?: AnnotationFont;
+        tone?: number | null;
+        bold?: 'toggle';
+        italic?: 'toggle';
+        underline?: 'toggle';
+      },
     ) => {
       const anns = topoLiveRef.current.annotations ?? [];
       const cur = anns.find((a) => a.id === id);
@@ -977,11 +983,12 @@ export default function App() {
 
       const next: Note = { ...cur };
       if (change.font) next.font = change.font;
-      if (change.bold === 'toggle') {
-        // Absent rather than false, so a note that was never bolded stores
-        // nothing and a share link stays as short as it can be.
-        if (cur.bold) delete next.bold;
-        else next.bold = true;
+      // Absent rather than false when off, so a note that was never styled
+      // stores nothing and a share link stays as short as it can be.
+      for (const flag of ['bold', 'italic', 'underline'] as const) {
+        if (change[flag] !== 'toggle') continue;
+        if (cur[flag]) delete next[flag];
+        else next[flag] = true;
       }
       if (change.tone !== undefined) {
         if (change.tone === null) delete next.tone;

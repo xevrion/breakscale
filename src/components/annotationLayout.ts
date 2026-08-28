@@ -60,14 +60,18 @@ export function noteStyle(
   size: Note['size'],
   font?: AnnotationFont,
   bold?: boolean,
+  italic?: boolean,
 ): TextStyle {
   const spec = NOTE_SIZES[size];
-  // Bold measures wider, so it has to reach the measurement and not only the
-  // paint: wrapping a bold note at the regular width overruns its own box.
+  // Bold and italic both change glyph widths, so both have to reach the
+  // MEASUREMENT and not only the paint: wrapping upright and regular while
+  // painting slanted and heavy overruns the note's own box. Underline is
+  // absent here on purpose, because it changes no width.
   return {
     size: spec.font,
     weight: bold ? NOTE_BOLD_WEIGHT : spec.weight,
     family: font ?? 'sans',
+    ...(italic ? { italic: true } : {}),
   };
 }
 
@@ -136,9 +140,10 @@ export function layoutNote(
   size: Note['size'],
   font?: AnnotationFont,
   bold?: boolean,
+  italic?: boolean,
 ): NoteLayout {
   const spec = NOTE_SIZES[size];
-  const style = noteStyle(size, font, bold);
+  const style = noteStyle(size, font, bold, italic);
   const lines = wrapText(text, width, style);
   const baseline = baselineIn(spec.line, style);
   return {
