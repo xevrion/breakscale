@@ -645,9 +645,6 @@
      none of the named faces still renders something sane rather than falling
      back to the UI sans and quietly losing the distinction. */
   --hand: 'Caveat', 'Segoe Print', 'Bradley Hand', Chalkboard, 'Comic Neue', cursive;
-  --marker:
-    'Permanent Marker', 'Marker Felt', 'Segoe Script', 'Comic Sans MS', 'Comic Neue',
-    cursive;
   --serif: ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
 
   color-scheme: light;

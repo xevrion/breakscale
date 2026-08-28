@@ -1148,6 +1148,182 @@
   border: var(--bw) solid var(--border);
 }
 
+/* --------------------------------------------------------------------------
+   Note format bar.
+
+   Pinned to the bottom of the canvas rather than drawn beside the note it
+   edits. An anchored toolbar is wider than a default note, so it clipped
+   against the right edge of the viewport, and it slid under the reader's
+   hand on every pan. A fixed position can do neither.
+
+   Centred, and inset above the metrics toggle's row so the two never share
+   a line. Chrome, so it carries [data-chrome] and the pointer router leaves
+   it alone.
+   -------------------------------------------------------------------------- */
+
+.cv-format {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--sp-3) + 32px + var(--sp-3));
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1);
+  max-width: calc(100% - var(--sp-5) * 2);
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+}
+
+.cv-format-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* A hairline between groups, so size, face and colour read as three sets
+   rather than one undifferentiated row of buttons. */
+.cv-format-group + .cv-format-group {
+  padding-left: var(--sp-2);
+  border-left: 1px solid var(--border);
+}
+
+.cv-format-btn {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 var(--sp-1);
+}
+
+.cv-format-btn.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.cv-format-bold {
+  font-weight: 700;
+}
+
+/* Each face button is SET in the face it selects, so the row is a specimen
+   rather than five identical letters that have to be learned. */
+.cv-format-btn[data-font-name='hand'] {
+  font-family: var(--hand);
+}
+
+.cv-format-btn[data-font-name='serif'] {
+  font-family: var(--serif);
+}
+
+.cv-format-btn[data-font-name='mono'] {
+  font-family: var(--mono);
+}
+
+.cv-format-tone {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--ann-tone-fill, var(--surface-2));
+  cursor: pointer;
+}
+
+.cv-format-tone:hover {
+  border-color: var(--text-dim);
+}
+
+.cv-format-tone.is-active {
+  border-color: var(--text);
+  border-width: 2px;
+}
+
+.cv-format-tone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.cv-format-tone[data-tone='0'] {
+  --ann-tone-fill: var(--ann-0-fill);
+  border-color: var(--ann-0-line);
+}
+
+.cv-format-tone[data-tone='1'] {
+  --ann-tone-fill: var(--ann-1-fill);
+  border-color: var(--ann-1-line);
+}
+
+.cv-format-tone[data-tone='2'] {
+  --ann-tone-fill: var(--ann-2-fill);
+  border-color: var(--ann-2-line);
+}
+
+.cv-format-tone[data-tone='3'] {
+  --ann-tone-fill: var(--ann-3-fill);
+  border-color: var(--ann-3-line);
+}
+
+.cv-format-tone[data-tone='4'] {
+  --ann-tone-fill: var(--ann-4-fill);
+  border-color: var(--ann-4-line);
+}
+
+.cv-format-tone[data-tone='5'] {
+  --ann-tone-fill: var(--ann-5-fill);
+  border-color: var(--ann-5-line);
+}
+
+.cv-format-tone[data-tone='6'] {
+  --ann-tone-fill: var(--ann-6-fill);
+  border-color: var(--ann-6-line);
+}
+
+.cv-format-tone[data-tone='7'] {
+  --ann-tone-fill: var(--ann-7-fill);
+  border-color: var(--ann-7-line);
+}
+
+.cv-format-tone[data-tone='8'] {
+  --ann-tone-fill: var(--ann-8-fill);
+  border-color: var(--ann-8-line);
+}
+
+.cv-format-tone[data-tone='9'] {
+  --ann-tone-fill: var(--ann-9-fill);
+  border-color: var(--ann-9-line);
+}
+
+.cv-format-tone[data-tone='10'] {
+  --ann-tone-fill: var(--ann-10-fill);
+  border-color: var(--ann-10-line);
+}
+
+.cv-format-tone[data-tone='11'] {
+  --ann-tone-fill: var(--ann-11-fill);
+  border-color: var(--ann-11-line);
+}
+
+.cv-format-tone[data-tone='12'] {
+  --ann-tone-fill: var(--ann-12-fill);
+  border-color: var(--ann-12-line);
+}
+
+/* "No colour": a slash, because an empty swatch reads as white, which is a
+   colour and not the absence of one. */
+.cv-format-tone-none {
+  background:
+    linear-gradient(
+      to bottom right,
+      transparent calc(50% - 1px),
+      var(--text-faint) calc(50% - 1px),
+      var(--text-faint) calc(50% + 1px),
+      transparent calc(50% + 1px)
+    ),
+    var(--surface);
+}
+
 .cv-zoom {
   position: absolute;
   right: var(--sp-3);
@@ -1471,10 +1647,6 @@
   font-family: var(--hand);
 }
 
-.cv-note[data-font='marker'] .cv-note-text {
-  font-family: var(--marker);
-}
-
 .cv-note[data-font='serif'] .cv-note-text {
   font-family: var(--serif);
 }
@@ -1638,6 +1810,101 @@
   stroke-width: 2;
 }
 
+/* A note's text colour, when it has been given one. Indices resolve through
+   the same --ann-* aliases the sections use, so a colour picked in the light
+   theme is the dark theme's version of that colour after a switch. */
+.cv-note[data-tone='0'] .cv-note-text {
+  color: var(--ann-0-ink);
+}
+
+.cv-note[data-tone='1'] .cv-note-text {
+  color: var(--ann-1-ink);
+}
+
+.cv-note[data-tone='2'] .cv-note-text {
+  color: var(--ann-2-ink);
+}
+
+.cv-note[data-tone='3'] .cv-note-text {
+  color: var(--ann-3-ink);
+}
+
+.cv-note[data-tone='4'] .cv-note-text {
+  color: var(--ann-4-ink);
+}
+
+.cv-note[data-tone='5'] .cv-note-text {
+  color: var(--ann-5-ink);
+}
+
+.cv-note[data-tone='6'] .cv-note-text {
+  color: var(--ann-6-ink);
+}
+
+.cv-note[data-tone='7'] .cv-note-text {
+  color: var(--ann-7-ink);
+}
+
+.cv-note[data-tone='8'] .cv-note-text {
+  color: var(--ann-8-ink);
+}
+
+.cv-note[data-tone='9'] .cv-note-text {
+  color: var(--ann-9-ink);
+}
+
+.cv-note[data-tone='10'] .cv-note-text {
+  color: var(--ann-10-ink);
+}
+
+.cv-note[data-tone='11'] .cv-note-text {
+  color: var(--ann-11-ink);
+}
+
+.cv-note[data-tone='12'] .cv-note-text {
+  color: var(--ann-12-ink);
+}
+
+/* Bold. Set here as well as in the measurement, or the paint and the wrap
+   disagree and the text overruns the box it was wrapped to. */
+.cv-note.is-bold .cv-note-text {
+  font-weight: 700;
+}
+
+/* Each face button is SET in the face it selects, so the row is a specimen
+   rather than five identical letters that have to be learned. */
+.cv-note-size [data-font-name='hand'] text {
+  font-family: var(--hand);
+}
+
+.cv-note-size [data-font-name='serif'] text {
+  font-family: var(--serif);
+}
+
+.cv-note-size [data-font-name='mono'] text {
+  font-family: var(--mono);
+}
+
+/* The "no colour" button: a slash over an empty swatch. */
+.cv-note-clear rect {
+  fill: var(--surface);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.cv-note-clear path {
+  stroke: var(--text-faint);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.cv-note-clear.is-active rect {
+  stroke: var(--text);
+  stroke-width: 2.5;
+}
+
 .cv-note-size rect {
   fill: var(--surface);
   stroke: var(--border-strong);
@@ -1684,7 +1951,10 @@
   outline: 1px solid var(--accent);
   outline-offset: 2px;
   border-radius: 2px;
-  background: var(--bg);
+  /* Transparent, so the note is edited where it sits rather than replaced by
+     a white box the same shape. The painted text is hidden underneath while
+     the editor is open, so nothing shows through and doubles. */
+  background: transparent;
   color: var(--text);
   font-family: var(--sans);
   resize: none;
@@ -1700,6 +1970,8 @@
   padding: 0 var(--sp-2);
   border: var(--bw-strong) solid var(--accent);
   border-radius: var(--r-sm);
+  /* The label plate it covers is a tinted pill, so this keeps a surface of
+     its own; unlike a note, there is no plain canvas to blend into. */
   background: var(--surface);
   color: var(--text);
   font-family: var(--sans);

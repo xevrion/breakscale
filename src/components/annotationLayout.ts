@@ -7,7 +7,7 @@
  * DOM. Canvas.tsx consumes these; it does not restate them.
  */
 
-import { baselineIn, measureText } from './textMetrics';
+import { baselineIn, descentBelow, measureText } from './textMetrics';
 import type { TextStyle } from './textMetrics';
 import type { AnnotationFont, Note } from '../sim/annotations';
 
@@ -39,6 +39,9 @@ export interface NoteSizeSpec {
   weight: number;
 }
 
+/** The weight a bolded note takes, whatever its size sets otherwise. */
+export const NOTE_BOLD_WEIGHT = 700;
+
 export const NOTE_SIZES: Record<Note['size'], NoteSizeSpec> = {
   sm: { font: 12, line: 17, weight: 450 },
   md: { font: 16, line: 22, weight: 450 },
@@ -53,9 +56,19 @@ export const NOTE_SIZES: Record<Note['size'], NoteSizeSpec> = {
  * per character than the UI sans, so measuring in sans and painting in hand
  * overruns the note's stored width.
  */
-export function noteStyle(size: Note['size'], font?: AnnotationFont): TextStyle {
+export function noteStyle(
+  size: Note['size'],
+  font?: AnnotationFont,
+  bold?: boolean,
+): TextStyle {
   const spec = NOTE_SIZES[size];
-  return { size: spec.font, weight: spec.weight, family: font ?? 'sans' };
+  // Bold measures wider, so it has to reach the measurement and not only the
+  // paint: wrapping a bold note at the regular width overruns its own box.
+  return {
+    size: spec.font,
+    weight: bold ? NOTE_BOLD_WEIGHT : spec.weight,
+    family: font ?? 'sans',
+  };
 }
 
 /**
@@ -122,21 +135,31 @@ export function layoutNote(
   width: number,
   size: Note['size'],
   font?: AnnotationFont,
+  bold?: boolean,
 ): NoteLayout {
   const spec = NOTE_SIZES[size];
-  const style = noteStyle(size, font);
+  const style = noteStyle(size, font, bold);
   const lines = wrapText(text, width, style);
+  const baseline = baselineIn(spec.line, style);
   return {
     lines,
     font: spec.font,
     lineH: spec.line,
-    weight: spec.weight,
-    height: Math.max(spec.line, lines.length * spec.line),
+    weight: style.weight,
+    // The box has to hold the LAST line's descender, not just its line box.
+    // A face whose baseline sits low in the box (Caveat's does) paints past
+    // lines * lineH, which left the selection ring cutting through the final
+    // row of text. Take whichever is taller.
+    height: Math.max(
+      spec.line,
+      (lines.length - 1) * spec.line + baseline + descentBelow(style),
+      lines.length * spec.line,
+    ),
     // Centre the glyphs in their line box the way CSS line-height does, from
     // the face's OWN measured ascent and descent. A fixed 0.8em was close
     // enough while every note was set in the UI sans; Caveat's box is a tenth
     // of an em shallower, which is a visible drop at the `lg` size.
-    baseline: baselineIn(spec.line, style),
+    baseline,
   };
 }
 

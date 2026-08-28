@@ -77,11 +77,12 @@ import type { ResizeDir } from './annotationLayout';
 import {
   SECTION_MIN_HEIGHT,
   SECTION_MIN_WIDTH,
+  ANNOTATION_FONTS,
   SECTION_TONE_COUNT,
   isNote,
   isSection,
 } from '../sim/annotations';
-import type { Annotation, Note, Section } from '../sim/annotations';
+import type { Annotation, AnnotationFont, Note, Section } from '../sim/annotations';
 import './Canvas.css';
 
 /* ------------------------------------------------------------------ *
@@ -409,6 +410,15 @@ export interface CanvasProps {
   onSetNoteSize?: (id: string, size: Note['size']) => void;
   /** Recolour a section. `tone` is a palette index, never a colour. */
   onSetSectionTone?: (id: string, tone: number) => void;
+  /**
+   * Restyle a note. Every field is optional so one handler serves the whole
+   * toolbar; `tone: null` clears the colour, and bold toggles rather than
+   * being set, because the button reports a press, not a target state.
+   */
+  onSetNoteStyle?: (
+    id: string,
+    change: { font?: AnnotationFont; tone?: number | null; bold?: 'toggle' },
+  ) => void;
   /** Optional: per-node sparkline history. Omitted -> no sparklines. */
   spark?: SparkData;
   /**
@@ -1799,6 +1809,14 @@ const EdgeView = memo(function EdgeView({
  * ------------------------------------------------------------------ */
 
 /** Label plate metrics, shared by the SVG label and its hit target. */
+/** Names for the face buttons, which all read "Aa" in their own face. */
+const FONT_LABEL: Record<AnnotationFont, string> = {
+  sans: 'Interface',
+  hand: 'Handwritten',
+  serif: 'Serif',
+  mono: 'Monospace',
+};
+
 const SEC_LABEL_STYLE: TextStyle = { size: 12, weight: 550, family: 'sans' };
 const SEC_LABEL_PAD_X = 10;
 const SEC_LABEL_H = 24;
@@ -1960,13 +1978,16 @@ interface NoteViewProps {
  */
 const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewProps) {
   const layout = useMemo(
-    () => layoutNote(note.text, note.width, note.size, note.font),
-    [note.text, note.width, note.size, note.font],
+    () => layoutNote(note.text, note.width, note.size, note.font, note.bold),
+    [note.text, note.width, note.size, note.font, note.bold],
   );
   return (
     <g
-      className={`cv-note is-${note.size}${selected ? ' is-selected' : ''}`}
+      className={`cv-note is-${note.size}${selected ? ' is-selected' : ''}${
+        note.bold ? ' is-bold' : ''
+      }`}
       data-font={note.font ?? 'sans'}
+      data-tone={note.tone ?? undefined}
       // A note with no colour inherits the theme's ink; one with a colour has
       // been given it deliberately and overrides. The value is validated in
       // sanitizeAnnotations, which is the only way one can arrive untrusted.
@@ -2095,13 +2116,15 @@ function SectionChrome({
  */
 function NoteChrome({ note, ui }: { note: Note; ui: number }) {
   const layout = useMemo(
-    () => layoutNote(note.text, note.width, note.size),
-    [note.text, note.width, note.size],
+    () => layoutNote(note.text, note.width, note.size, note.font, note.bold),
+    [note.text, note.width, note.size, note.font, note.bold],
   );
-  const bw = 26 * ui;
-  const bh = 22 * ui;
-  const gap = 4 * ui;
-  const y = note.y - 4 - bh - 8 * ui;
+  // Selection ring only. Everything that STYLES the note lives in the
+  // floating bar above the charts strip: a toolbar anchored to the note is
+  // wider than a default note, so it clipped against the viewport edge, and
+  // it moved under the reader's hand on every pan. `ui` is still taken so
+  // the ring can be inset in screen-constant units.
+  void ui;
   return (
     <g className="cv-ann-sel">
       <rect
@@ -2112,34 +2135,6 @@ function NoteChrome({ note, ui }: { note: Note; ui: number }) {
         height={layout.height + 8}
         rx={4}
       />
-      <g className="cv-note-size">
-        {(['sm', 'md', 'lg'] as const).map((size, i) => (
-          <g
-            key={size}
-            className={note.size === size ? 'is-active' : undefined}
-            data-hit="note-size"
-            data-id={note.id}
-            data-size={size}
-            role="button"
-            aria-label={`Note size ${size}`}
-          >
-            <rect
-              x={note.x - 6 + i * (bw + gap)}
-              y={y}
-              width={bw}
-              height={bh}
-              rx={4 * ui}
-            />
-            <text
-              x={note.x - 6 + i * (bw + gap) + bw / 2}
-              y={y + bh / 2}
-              style={{ fontSize: 11 * ui }}
-            >
-              {size === 'sm' ? 'S' : size === 'md' ? 'M' : 'L'}
-            </text>
-          </g>
-        ))}
-      </g>
     </g>
   );
 }
@@ -3004,6 +2999,9 @@ type HitKind =
   | 'section'
   | 'section-resize'
   | 'note-size'
+  | 'note-bold'
+  | 'note-font'
+  | 'note-tone'
   | 'section-tone';
 
 interface Hit {
@@ -3013,8 +3011,10 @@ interface Hit {
   dir: string | null;
   /** Requested size, for 'note-size' hits. */
   size: string | null;
-  /** Requested shade index, for 'section-tone' hits. */
+  /** Requested shade index, for 'section-tone' and 'note-tone' hits. */
   tone: string | null;
+  /** Requested face, for 'note-font' hits. */
+  fontName: string | null;
 }
 
 const BACKGROUND_HIT: Hit = {
@@ -3023,6 +3023,7 @@ const BACKGROUND_HIT: Hit = {
   dir: null,
   size: null,
   tone: null,
+  fontName: null,
 };
 
 interface Pending {
@@ -3111,6 +3112,7 @@ export default function Canvas({
   onEditSectionLabel,
   onSetNoteSize,
   onSetSectionTone,
+  onSetNoteStyle,
   spark,
   viewCenterRef,
   armToolRef,
@@ -3511,6 +3513,7 @@ export default function Canvas({
       dir: found.getAttribute('data-dir'),
       size: found.getAttribute('data-size'),
       tone: found.getAttribute('data-tone'),
+      fontName: found.getAttribute('data-font-name'),
     };
   }, []);
 
@@ -3678,7 +3681,14 @@ export default function Canvas({
             const dup = onDuplicateForDrag(id);
             if (dup) {
               const cw = toWorld(clientX, clientY);
-              p.hit = { kind: 'node', id: dup.id, dir: null, size: null, tone: null };
+              p.hit = {
+                kind: 'node',
+                id: dup.id,
+                dir: null,
+                size: null,
+                tone: null,
+                fontName: null,
+              };
               p.worldX = cw.x;
               p.worldY = cw.y;
               p.grabDx = node.x - cw.x;
@@ -3803,9 +3813,12 @@ export default function Canvas({
         }
 
         case 'note-size':
+        case 'note-bold':
+        case 'note-font':
+        case 'note-tone':
         case 'section-tone':
-          // Dragging a size button or a swatch means nothing; the click path
-          // handles both.
+          // Dragging a toolbar button or a swatch means nothing; the click
+          // path handles all of them.
           p.mode = 'pan';
           break;
 
@@ -4179,6 +4192,31 @@ export default function Canvas({
             break;
           }
 
+          case 'note-bold':
+            if (p.hit.id) onSetNoteStyle?.(p.hit.id, { bold: 'toggle' });
+            break;
+
+          case 'note-font': {
+            const f = p.hit.fontName;
+            if (p.hit.id && f && (ANNOTATION_FONTS as readonly string[]).includes(f)) {
+              onSetNoteStyle?.(p.hit.id, { font: f as AnnotationFont });
+            }
+            break;
+          }
+
+          case 'note-tone': {
+            if (!p.hit.id) break;
+            // "none" is a real choice, not a missing value: it puts the note
+            // back to the body text colour, which no swatch can express.
+            if (p.hit.tone === 'none') {
+              onSetNoteStyle?.(p.hit.id, { tone: null });
+              break;
+            }
+            const t = Number(p.hit.tone);
+            if (Number.isInteger(t)) onSetNoteStyle?.(p.hit.id, { tone: t });
+            break;
+          }
+
           default:
             if (!additive) clearSelection();
             break;
@@ -4261,6 +4299,7 @@ export default function Canvas({
       onCreateSection,
       onSetNoteSize,
       onSetSectionTone,
+      onSetNoteStyle,
       clearSelection,
       selectOne,
       setSelection,
@@ -4828,6 +4867,20 @@ export default function Canvas({
     },
     [visibleRect],
   );
+
+  /**
+   * The one selected note, or null.
+   *
+   * Null for a multi-selection on purpose: the bar shows state (which size,
+   * which face, which colour), and with two notes selected any answer it
+   * gave would be wrong about one of them.
+   */
+  const formatNote = useMemo(() => {
+    if (selectedIds.size !== 1) return null;
+    const [id] = selectedIds;
+    const ann = (topology.annotations ?? []).find((a) => a.id === id);
+    return ann && isNote(ann) ? ann : null;
+  }, [selectedIds, topology.annotations]);
 
   const fitToContent = useCallback(
     () => fitTo(topology.nodes),
@@ -5434,6 +5487,9 @@ export default function Canvas({
             // The window-level shortcut handlers already ignore text fields;
             // stopping propagation is belt and braces on top of that.
             e.stopPropagation();
+            // An IME candidate window takes Enter and Escape to choose a
+            // character, so acting on them ends the rename mid-word.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === 'Enter') {
               e.preventDefault();
               commitRename();
@@ -5451,9 +5507,9 @@ export default function Canvas({
 
       {/*
         In-place note editor: a real focused textarea positioned and scaled
-        over the note it edits, with the note's exact font metrics, so what
-        is typed is what will paint. Enter is a newline (native textarea
-        behaviour, deliberately unhandled), Escape cancels, blur commits.
+        over the note it edits, in the note's own face and metrics, so what
+        is typed wraps exactly where the painted text will. Enter is a
+        newline, Ctrl+Enter and Escape commit, blur commits, Tab indents.
       */}
       {editNote && noteEdit && (
         <textarea
@@ -5568,11 +5624,18 @@ export default function Canvas({
           onBlur={commitLabelEdit}
           onKeyDown={(e) => {
             e.stopPropagation();
+            // An IME candidate window takes Enter and Escape to choose a
+            // character. Acting on them here ends the edit mid-word.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === 'Enter') {
               e.preventDefault();
               commitLabelEdit();
             } else if (e.key === 'Escape') {
               e.preventDefault();
+              // A label is one line typed in one go, so Escape reverts here
+              // where it commits for a note: there is nothing to lose but
+              // the word in progress, and abandoning a rename is the common
+              // intent. Enter is the commit.
               cancelLabelEdit();
             }
           }}
@@ -5660,6 +5723,91 @@ export default function Canvas({
             )}
           </div>
         )}
+
+      {/*
+        The note format bar. Chrome pinned to the bottom of the canvas, not
+        drawn beside the note it edits: a toolbar anchored to a note is wider
+        than a default note, so it clipped against the right edge of the
+        viewport, and it slid under the reader's hand on every pan. A fixed
+        position can do neither, which is why every editor with a rich text
+        object puts one here.
+
+        Only for a single selected note. With two selected, a control that
+        showed one note's state would be lying about the other.
+      */}
+      {formatNote && (
+        <div className="cv-format" data-chrome="format">
+          <div className="cv-format-group" role="group" aria-label="Text size">
+            {(['sm', 'md', 'lg'] as const).map((size) => (
+              <button
+                key={size}
+                type="button"
+                className={`btn btn-ghost cv-format-btn${
+                  formatNote.size === size ? ' is-active' : ''
+                }`}
+                aria-pressed={formatNote.size === size}
+                title={`Size ${size}`}
+                onClick={() => onSetNoteSize?.(formatNote.id, size)}
+              >
+                {size === 'sm' ? 'S' : size === 'md' ? 'M' : 'L'}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`btn btn-ghost cv-format-btn cv-format-bold${
+                formatNote.bold ? ' is-active' : ''
+              }`}
+              aria-pressed={formatNote.bold === true}
+              title="Bold"
+              onClick={() => onSetNoteStyle?.(formatNote.id, { bold: 'toggle' })}
+            >
+              B
+            </button>
+          </div>
+
+          <div className="cv-format-group" role="group" aria-label="Typeface">
+            {ANNOTATION_FONTS.map((f) => (
+              <button
+                key={f}
+                type="button"
+                className={`btn btn-ghost cv-format-btn${
+                  (formatNote.font ?? 'sans') === f ? ' is-active' : ''
+                }`}
+                data-font-name={f}
+                aria-pressed={(formatNote.font ?? 'sans') === f}
+                title={FONT_LABEL[f]}
+                onClick={() => onSetNoteStyle?.(formatNote.id, { font: f })}
+              >
+                Aa
+              </button>
+            ))}
+          </div>
+
+          <div className="cv-format-group" role="group" aria-label="Text colour">
+            {Array.from({ length: SECTION_TONE_COUNT }, (_, i) => (
+              <button
+                key={i}
+                type="button"
+                className={`cv-format-tone${formatNote.tone === i ? ' is-active' : ''}`}
+                data-tone={i}
+                aria-pressed={formatNote.tone === i}
+                aria-label={`Colour ${i + 1}`}
+                onClick={() => onSetNoteStyle?.(formatNote.id, { tone: i })}
+              />
+            ))}
+            <button
+              type="button"
+              className={`cv-format-tone cv-format-tone-none${
+                formatNote.tone === undefined ? ' is-active' : ''
+              }`}
+              aria-pressed={formatNote.tone === undefined}
+              aria-label="Default colour"
+              title="Follow the text colour"
+              onClick={() => onSetNoteStyle?.(formatNote.id, { tone: null })}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="cv-zoom" data-chrome="zoom">
         <button

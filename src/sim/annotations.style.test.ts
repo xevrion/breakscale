@@ -83,11 +83,15 @@ describe('annotation colour', () => {
 });
 
 describe('annotation font', () => {
-  it.each(['sans', 'hand', 'marker', 'serif', 'mono'])('accepts %s', (f) => {
+  it.each(['sans', 'hand', 'serif', 'mono'])('accepts %s', (f) => {
     expect(firstNote(noteWith({ font: f }))).toMatchObject({ font: f });
   });
 
   it('drops a family we have no measurable stack for', () => {
+    // "marker" was offered once and removed: it resolved to the same face as
+    // serif on a typical machine, so the picker showed two identical
+    // buttons. A design saved while it existed must not resurrect it.
+    expect(firstNote(noteWith({ font: 'marker' }))).not.toHaveProperty('font');
     // Painting in a face we cannot measure wraps the note to the wrong width.
     expect(firstNote(noteWith({ font: 'Papyrus' }))).not.toHaveProperty('font');
     expect(firstNote(noteWith({ font: 42 }))).not.toHaveProperty('font');

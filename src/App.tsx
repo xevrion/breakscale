@@ -35,7 +35,7 @@ import {
   isSection,
   sanitizeAnnotations,
 } from './sim/annotations';
-import type { Annotation, Note } from './sim/annotations';
+import type { Annotation, AnnotationFont, Note } from './sim/annotations';
 import { NEW_NOTE_TEXT } from './components/annotationLayout';
 import type { AnnotationTool } from './components/Palette';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
@@ -962,6 +962,36 @@ export default function App() {
       if (!cur || cur.kind !== 'note' || cur.size === size) return;
       history.commit('note size', snapRef.current);
       setAnnotations(anns.map((a) => (a.id === id ? { ...a, size } : a)));
+    },
+    [history, setAnnotations],
+  );
+
+  const handleSetNoteStyle = useCallback(
+    (
+      id: string,
+      change: { font?: AnnotationFont; tone?: number | null; bold?: 'toggle' },
+    ) => {
+      const anns = topoLiveRef.current.annotations ?? [];
+      const cur = anns.find((a) => a.id === id);
+      if (!cur || cur.kind !== 'note') return;
+
+      const next: Note = { ...cur };
+      if (change.font) next.font = change.font;
+      if (change.bold === 'toggle') {
+        // Absent rather than false, so a note that was never bolded stores
+        // nothing and a share link stays as short as it can be.
+        if (cur.bold) delete next.bold;
+        else next.bold = true;
+      }
+      if (change.tone !== undefined) {
+        if (change.tone === null) delete next.tone;
+        else
+          next.tone =
+            ((Math.floor(change.tone) % SECTION_TONE_COUNT) + SECTION_TONE_COUNT) %
+            SECTION_TONE_COUNT;
+      }
+      history.commit('note style', snapRef.current);
+      setAnnotations(anns.map((a) => (a.id === id ? next : a)));
     },
     [history, setAnnotations],
   );
@@ -1982,6 +2012,7 @@ export default function App() {
               onEditSectionLabel={handleEditSectionLabel}
               onSetNoteSize={handleSetNoteSize}
               onSetSectionTone={handleSetSectionTone}
+              onSetNoteStyle={handleSetNoteStyle}
               spark={spark}
               viewCenterRef={viewCenterRef}
               armToolRef={armToolRef}

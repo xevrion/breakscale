@@ -46,8 +46,15 @@ export interface Note {
    * Optional on purpose. A note with no colour follows the theme, so it stays
    * readable when the palette changes; one with a colour is a deliberate
    * choice by whoever wrote it and is honoured exactly.
+   *
+   * `tone` below is the one the interface offers, because it is theme-safe;
+   * this stays for a design that arrives carrying an explicit colour.
    */
   color?: string;
+  /** Palette index for the text colour. See NoteTone. */
+  tone?: number;
+  /** Heavier weight, on top of whatever the size already sets. */
+  bold?: boolean;
 }
 
 /**
@@ -81,6 +88,16 @@ export interface Section {
 }
 
 /**
+ * The shades a note's text can take.
+ *
+ * Same indices the sections use, for the same reason: an index resolves per
+ * theme, so a note coloured in the light theme is still readable in the dark
+ * one. `tone` is absent on a note that has never been coloured, which means
+ * "follow the body text" rather than "shade 0".
+ */
+export type NoteTone = number;
+
+/**
  * The faces a note can be set in.
  *
  * Deliberately a short closed list rather than a free-text family name. Every
@@ -88,7 +105,14 @@ export interface Section {
  * textMetrics, which is what keeps the wrap honest; an arbitrary family would
  * be measured against a fallback and wrap wrongly.
  */
-export const ANNOTATION_FONTS = ['sans', 'hand', 'marker', 'serif', 'mono'] as const;
+/**
+ * Four, not five. A "marker" face was offered and dropped: no marker font is
+ * installed on a typical Linux or Windows box, so its stack fell through to
+ * the same serif the serif button selects, and the picker showed two buttons
+ * that were visibly identical and did the same thing. A choice the reader
+ * cannot see is not a choice.
+ */
+export const ANNOTATION_FONTS = ['sans', 'hand', 'serif', 'mono'] as const;
 
 export type AnnotationFont = (typeof ANNOTATION_FONTS)[number];
 
@@ -192,6 +216,8 @@ export function sanitizeAnnotations(input: unknown): Annotation[] {
         size: a.size === 'sm' || a.size === 'lg' ? a.size : 'md',
         ...font(a.font),
         ...colour(a.color),
+        ...noteTone(a.tone),
+        ...(a.bold === true ? { bold: true } : {}),
       });
       seen.add(id);
     } else if (a.kind === 'section') {
@@ -250,6 +276,21 @@ function colour(v: unknown): { color?: string } {
   const c = v.trim();
   if (!c || c.length > 72 || !COLOUR_RE.test(c)) return {};
   return { color: c };
+}
+
+/**
+ * A note's shade index, or nothing.
+ *
+ * Absent is meaningful here in a way it is not for a section: a note with no
+ * tone follows the body text colour, which is the right default and not the
+ * same as shade 0.
+ */
+function noteTone(v: unknown): { tone?: number } {
+  const n = num(v);
+  if (n === null) return {};
+  const i =
+    ((Math.floor(n) % SECTION_TONE_COUNT) + SECTION_TONE_COUNT) % SECTION_TONE_COUNT;
+  return { tone: i };
 }
 
 function num(v: unknown): number | null {

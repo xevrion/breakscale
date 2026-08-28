@@ -415,6 +415,12 @@
   bottom: calc(var(--strip-h) + var(--sp-3));
 }
 
+/* The format bar rides the same lift, one row higher so it clears the
+   ledger and the zoom cluster it shares the foot of the canvas with. */
+.app-body.has-metrics .cv-format {
+  bottom: calc(var(--strip-h) + var(--sp-3) + 32px + var(--sp-3));
+}
+
 .app-body.has-inspector .cv-zoom {
   right: calc(var(--ins-w) + var(--sp-3));
 }

@@ -74,7 +74,6 @@ const STACKS = {
   sans: { prop: '--sans', fallback: 'system-ui, sans-serif' },
   mono: { prop: '--mono', fallback: 'ui-monospace, monospace' },
   hand: { prop: '--hand', fallback: 'Comic Sans MS, cursive' },
-  marker: { prop: '--marker', fallback: 'Comic Sans MS, cursive' },
   serif: { prop: '--serif', fallback: 'Georgia, serif' },
 } as const;
 
@@ -166,6 +165,26 @@ export function baselineIn(lineH: number, style: TextStyle): number {
   const v = usable
     ? (lineH - (asc + desc)) / 2 + asc
     : (lineH - style.size) / 2 + style.size * 0.8;
+  cache.set(key, v);
+  return v;
+}
+
+/**
+ * How far glyphs descend below the baseline, in CSS px.
+ *
+ * Needed because a text box is not `lines * lineHeight`: the last line's
+ * descender paints below its own baseline, and a face that sits low in its
+ * box (a handwriting face typically does) overflows a box measured that way.
+ */
+export function descentBelow(style: TextStyle): number {
+  const c = context();
+  if (!c) return style.size * 0.2;
+  const key = `dc|${style.size}|${style.weight}|${style.family}`;
+  const hit = cache.get(key);
+  if (hit !== undefined) return hit;
+  c.font = `${style.weight} ${style.size}px ${stack(style.family)}`;
+  const d = c.measureText('Hxgpqy').fontBoundingBoxDescent;
+  const v = Number.isFinite(d) && d > 0 ? d : style.size * 0.2;
   cache.set(key, v);
   return v;
 }
