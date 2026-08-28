@@ -53,6 +53,9 @@ import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
 import { usePreference } from './content/preferences';
 import { Settings } from './components/Settings';
 import { MainMenu } from './components/MainMenu';
+import { Designs } from './components/Designs';
+import { getDesign, saveDesign } from './savedDesigns';
+import { downloadBackup, restoreBackup } from './backup';
 import { PanelResizer } from './components/PanelResizer';
 import { applyTheme } from './theme/applyTheme';
 import { usePresence } from './components/presence';
@@ -463,6 +466,8 @@ export default function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [designsOpen, setDesignsOpen] = useState(false);
+  const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const [examplesOpen, setExamplesOpen] = useState(false);
 
@@ -575,6 +580,11 @@ export default function App() {
    */
   const menuItems = useMemo(
     () => [
+      {
+        label: 'Your designs',
+        icon: 'M4 4a2 2 0 0 1 2-2h7l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM13 2v5h5M9 13h6M9 17h6',
+        onSelect: () => setDesignsOpen(true),
+      },
       {
         label: 'Examples',
         icon: 'M3 4a1 1 0 0 1 1-1h6v7H3zM14 3h6a1 1 0 0 1 1 1v5h-7zM3 13h7v8H4a1 1 0 0 1-1-1zM14 13h7v7a1 1 0 0 1-1 1h-6z',
@@ -1611,6 +1621,95 @@ export default function App() {
     [engine, history, resetLostRate],
   );
 
+  /**
+   * Open a saved design.
+   *
+   * Through replaceDesign, so it lands with the same single history entry a
+   * preset load or a file import does: a student who opens the wrong one can
+   * undo straight back to what they had.
+   */
+  const handleOpenSaved = useCallback(
+    (id: string) => {
+      const saved = getDesign(id);
+      if (!saved) {
+        toastSeq.current += 1;
+        setToast({ text: 'That design is no longer saved.', id: toastSeq.current });
+        return;
+      }
+      replaceDesign(structuredClone(saved.topology), null, 'open design');
+      toastSeq.current += 1;
+      setToast({ text: `Opened ${saved.name}`, id: toastSeq.current });
+    },
+    [replaceDesign],
+  );
+
+  const handleBackup = useCallback(() => {
+    downloadBackup();
+    toastSeq.current += 1;
+    setToast({ text: 'Downloaded everything', id: toastSeq.current });
+  }, []);
+
+  /**
+   * Restore replaces what this browser holds, so it asks first.
+   *
+   * A confirm() rather than a bespoke dialog: this is destructive and rare,
+   * the browser's own prompt is the one a reader already trusts for exactly
+   * this, and a custom modal here would be new furniture for a question
+   * asked once.
+   */
+  const handleRestorePick = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Cleared so choosing the SAME file twice fires again.
+    e.target.value = '';
+    if (!file) return;
+
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      toastSeq.current += 1;
+      setToast({ text: 'That file could not be read.', id: toastSeq.current });
+      return;
+    }
+
+    if (
+      !window.confirm(
+        'Restoring replaces every saved design and setting in this browser with the ones in the file. Continue?',
+      )
+    ) {
+      return;
+    }
+
+    const result = restoreBackup(text);
+    toastSeq.current += 1;
+    if (!result.ok) {
+      setToast({ text: result.error, id: toastSeq.current });
+      return;
+    }
+    // Reloaded rather than patched into the running app: preferences, the
+    // layout and the session are all read once at boot, so the only
+    // honest way to apply a wholesale replacement is to start again.
+    setToast({ text: 'Restored. Reloading...', id: toastSeq.current });
+    window.setTimeout(() => window.location.reload(), 400);
+  }, []);
+
+  const handleSaveNamed = useCallback((name: string) => {
+    const result = saveDesign(name, topoLiveRef.current);
+    toastSeq.current += 1;
+    if (!result.ok) {
+      setToast({ text: result.error, id: toastSeq.current });
+      return;
+    }
+    // The eviction is said out loud. A shelf that silently drops the
+    // oldest thing on it is a shelf that loses work.
+    setToast({
+      text: result.evicted
+        ? `Saved ${name}. Removed the oldest, ${result.evicted}.`
+        : `Saved ${name}`,
+      id: toastSeq.current,
+    });
+  }, []);
+
   const handleLoadPreset = useCallback(
     (preset: Preset) => {
       // Deep copy: presets are module-level constants and must never be
@@ -2449,6 +2548,24 @@ export default function App() {
         aria-hidden="true"
         onChange={handleImportPick}
       />
+      <input
+        ref={backupInputRef}
+        type="file"
+        className="app-file-input"
+        accept=".json,application/json"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={handleRestorePick}
+      />
+      <Designs
+        open={designsOpen}
+        onClose={() => setDesignsOpen(false)}
+        onOpen={handleOpenSaved}
+        onSave={handleSaveNamed}
+        suggestedName={
+          presetId ? (PRESETS.find((p) => p.id === presetId)?.name ?? '') : ''
+        }
+      />
       <Settings
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -2456,6 +2573,8 @@ export default function App() {
         onImport={() => fileInputRef.current?.click()}
         onCopyLink={handleCopyLink}
         onExportImage={handleExportImage}
+        onBackup={handleBackup}
+        onRestore={() => backupInputRef.current?.click()}
       />
 
       <Examples

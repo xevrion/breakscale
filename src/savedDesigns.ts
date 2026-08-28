@@ -1,0 +1,225 @@
+import { isTopology } from './clipboard';
+import { sanitizeAnnotations } from './sim/annotations';
+import type { Topology } from './sim/types';
+
+/* ------------------------------------------------------------------ *
+ * Named saves.
+ *
+ * The autosaved session answers "where was I", and a file answers "keep
+ * this forever". Neither answers "let me try a second idea without losing
+ * the first", which is the thing a student actually does: build a design,
+ * wonder what a cache would do, and want both afterwards.
+ *
+ * Kept in localStorage beside the session rather than in a file, because
+ * the whole point is that it costs one click and no dialog. Files remain
+ * the way to move a design between machines; this is the way to keep
+ * several on one.
+ *
+ * Everything read back crosses a trust boundary. Storage can be edited by
+ * hand, half-written when a tab is killed, or left over from an older
+ * version of the format, so nothing here trusts its own shelf.
+ * ------------------------------------------------------------------ */
+
+const STORAGE_KEY = 'breakscale.designs.v1';
+
+/**
+ * How many designs are kept.
+ *
+ * A cap rather than unlimited: localStorage is a shared 5MB budget per
+ * origin, and a large topology serialises to tens of kilobytes. Twenty is
+ * comfortably inside that and far more than the number of ideas anyone
+ * juggles at once. The oldest is dropped when a new save would exceed it,
+ * which is announced rather than silent.
+ */
+export const MAX_SAVED = 20;
+
+/** Longest name kept. Anything past this is a paragraph, not a name. */
+export const MAX_NAME = 60;
+
+export interface SavedDesign {
+  /** Stable id, so a rename never orphans the entry. */
+  id: string;
+  name: string;
+  /** Milliseconds since the epoch, for ordering and for "saved 2 hours ago". */
+  savedAt: number;
+  topology: Topology;
+}
+
+/** What the interface shows in a list, without paying to parse every topology. */
+export interface SavedSummary {
+  id: string;
+  name: string;
+  savedAt: number;
+  nodeCount: number;
+}
+
+function newId(): string {
+  // crypto.randomUUID is absent in older Safari and in some test
+  // environments, so a timestamped random suffix stands in. Collisions do
+  // not matter here beyond one entry, and the timestamp makes them
+  // vanishingly unlikely anyway.
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Validate one stored entry.
+ *
+ * Returns null rather than throwing, so one corrupt design costs its own
+ * row and not the whole list.
+ */
+function parseEntry(raw: unknown): SavedDesign | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const e = raw as Record<string, unknown>;
+  if (typeof e.id !== 'string' || !e.id) return null;
+  if (!isTopology(e.topology)) return null;
+
+  const annotations = sanitizeAnnotations(
+    (e.topology as { annotations?: unknown }).annotations,
+  );
+  return {
+    id: e.id,
+    name:
+      typeof e.name === 'string' && e.name.trim()
+        ? e.name.slice(0, MAX_NAME)
+        : 'Untitled',
+    savedAt:
+      typeof e.savedAt === 'number' && Number.isFinite(e.savedAt) ? e.savedAt : 0,
+    // Rebuilt field by field, so nothing the entry carried beyond these
+    // three reaches the engine.
+    topology: {
+      nodes: e.topology.nodes,
+      edges: e.topology.edges,
+      ...(annotations.length > 0 ? { annotations } : {}),
+    },
+  };
+}
+
+/** Everything on the shelf, newest first. */
+export function loadDesigns(): SavedDesign[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(parseEntry)
+      .filter((d): d is SavedDesign => d !== null)
+      .sort((a, b) => b.savedAt - a.savedAt);
+  } catch {
+    // Corrupt JSON or blocked storage. An empty shelf is a survivable
+    // outcome; a thrown error during boot is not.
+    return [];
+  }
+}
+
+/** The list the interface renders, without the topologies. */
+export function listDesigns(): SavedSummary[] {
+  return loadDesigns().map((d) => ({
+    id: d.id,
+    name: d.name,
+    savedAt: d.savedAt,
+    nodeCount: d.topology.nodes.length,
+  }));
+}
+
+function write(designs: SavedDesign[]): boolean {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(designs));
+    return true;
+  } catch {
+    // Quota exceeded, or storage disabled. Reported rather than swallowed:
+    // unlike the autosave, a save the student ASKED for must not appear to
+    // have worked when it did not.
+    return false;
+  }
+}
+
+export type SaveResult =
+  { ok: true; id: string; evicted: string | null } | { ok: false; error: string };
+
+/**
+ * Save the current design under a name.
+ *
+ * Saving over an existing NAME replaces that entry rather than adding a
+ * second one, which is what someone pressing save twice means. Everything
+ * else is an insert.
+ */
+export function saveDesign(name: string, topology: Topology): SaveResult {
+  const clean = name.trim().slice(0, MAX_NAME);
+  if (!clean) return { ok: false, error: 'Give the design a name first.' };
+
+  const designs = loadDesigns();
+  const existing = designs.findIndex(
+    (d) => d.name.toLowerCase() === clean.toLowerCase(),
+  );
+  const entry: SavedDesign = {
+    id: existing >= 0 ? designs[existing]!.id : newId(),
+    name: clean,
+    savedAt: Date.now(),
+    topology: structuredClone(topology),
+  };
+
+  const next = existing >= 0 ? designs.with(existing, entry) : [entry, ...designs];
+  next.sort((a, b) => b.savedAt - a.savedAt);
+
+  // The oldest goes when the shelf is full, and the caller is told which,
+  // so the interface can say so rather than letting work vanish quietly.
+  let evicted: string | null = null;
+  if (next.length > MAX_SAVED) {
+    evicted = next[next.length - 1]!.name;
+    next.length = MAX_SAVED;
+  }
+
+  if (!write(next)) {
+    return {
+      ok: false,
+      error: 'There is no room left in this browser to save another design.',
+    };
+  }
+  return { ok: true, id: entry.id, evicted };
+}
+
+/** One design, by id, or null if it is gone. */
+export function getDesign(id: string): SavedDesign | null {
+  return loadDesigns().find((d) => d.id === id) ?? null;
+}
+
+export function deleteDesign(id: string): void {
+  write(loadDesigns().filter((d) => d.id !== id));
+}
+
+/** Rename in place. Returns false when the name is empty or already taken. */
+export function renameDesign(id: string, name: string): boolean {
+  const clean = name.trim().slice(0, MAX_NAME);
+  if (!clean) return false;
+  const designs = loadDesigns();
+  if (
+    designs.some((d) => d.id !== id && d.name.toLowerCase() === clean.toLowerCase())
+  ) {
+    return false;
+  }
+  const i = designs.findIndex((d) => d.id === id);
+  if (i < 0) return false;
+  return write(designs.with(i, { ...designs[i]!, name: clean }));
+}
+
+/**
+ * "2 hours ago", for the list.
+ *
+ * Relative rather than a timestamp: what a student wants to know is which
+ * of two designs is the one they were just working on, and "14:32" only
+ * answers that if they remember what time it was.
+ */
+export function savedAgo(savedAt: number, now = Date.now()): string {
+  const s = Math.max(0, Math.round((now - savedAt) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const d = Math.round(h / 24);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}

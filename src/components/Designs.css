@@ -1,0 +1,245 @@
+/* ==========================================================================
+   Your designs.
+
+   Owns .dz-* only, and reuses .btn and the tokens from index.css. Structure
+   and motion mirror the settings and shortcuts cards, because it is the same
+   kind of object: something consulted between actions, not during one.
+   ========================================================================== */
+
+.dz-root {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+}
+
+.dz-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  cursor: default;
+  animation: dz-scrim-in var(--dur-slow) var(--ease-out);
+}
+
+.dz-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  max-height: min(640px, 100%);
+  min-height: 0;
+  background: var(--surface);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  outline: none;
+  animation: dz-card-in var(--dur-slow) var(--ease-out);
+}
+
+.dz-root.is-closing .dz-card {
+  animation: dz-card-out var(--dur-base) var(--ease) forwards;
+}
+
+.dz-root.is-closing .dz-scrim {
+  animation: dz-scrim-out var(--dur-base) var(--ease) forwards;
+}
+
+@keyframes dz-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dz-card-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes dz-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dz-scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.dz-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: var(--bw) solid var(--border);
+}
+
+.dz-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-med);
+  letter-spacing: var(--tr-base);
+  color: var(--text);
+}
+
+/* Save first, list second: the reader opened this to keep what is on the
+   canvas at least as often as to fetch something back. */
+.dz-save {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+}
+
+.dz-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-btn);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-base);
+}
+
+.dz-name::placeholder {
+  color: var(--text-faint);
+}
+
+.dz-name:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+.dz-error {
+  margin: 0;
+  padding: 0 var(--sp-5) var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
+
+.dz-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--sp-5) var(--sp-3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.dz-empty {
+  margin: 0;
+  padding: var(--sp-4) 0 var(--sp-5);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+.dz-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dz-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  border-radius: var(--r-btn);
+}
+
+.dz-item:hover {
+  background: var(--surface-2);
+}
+
+/* The whole row opens the design, so the name and its details are both part
+   of the target rather than decoration beside a small button. */
+.dz-open {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: var(--sp-2);
+  border: none;
+  border-radius: var(--r-btn);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dz-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.dz-item-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dz-item-meta {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+/* The row's own controls stay hidden until the row is under the pointer or
+   holds focus: twenty rows each showing Rename and Delete is a wall of
+   buttons over a list whose job is to be scanned. */
+.dz-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding-right: var(--sp-2);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.dz-item:hover .dz-actions,
+.dz-item:focus-within .dz-actions {
+  opacity: 1;
+}
+
+.dz-delete:hover {
+  color: var(--danger);
+}
+
+.dz-rename {
+  margin: var(--sp-1) 0 var(--sp-1) var(--sp-2);
+}
+
+.dz-foot {
+  padding: var(--sp-3) var(--sp-5) var(--sp-4);
+  border-top: var(--bw) solid var(--border);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}

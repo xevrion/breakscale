@@ -105,6 +105,9 @@ export interface SettingsProps {
   onImport?: () => void;
   onCopyLink?: () => void;
   onExportImage?: (format: 'svg' | 'png') => void;
+  /** Take everything this browser holds out as one file, and put it back. */
+  onBackup?: () => void;
+  onRestore?: () => void;
 }
 
 export function Settings({
@@ -114,6 +117,8 @@ export function Settings({
   onImport,
   onCopyLink,
   onExportImage,
+  onBackup,
+  onRestore,
 }: SettingsProps) {
   const { mounted, closing, unmount } = usePresence(open);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -289,6 +294,39 @@ export function Settings({
                       <span className="st-row-label">Open a file</span>
                       <span className="st-hint">
                         Or drop one straight onto the canvas.
+                      </span>
+                    </span>
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
+
+          {(onBackup || onRestore) && (
+            <section className="st-group">
+              <h3 className="st-group-title">This browser</h3>
+              <div className="st-actions">
+                {onBackup && (
+                  <button type="button" className="st-action" onClick={onBackup}>
+                    <Glyph d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                    <span className="st-action-text">
+                      <span className="st-row-label">Download everything</span>
+                      <span className="st-hint">
+                        One file with every saved design, your settings and the canvas
+                        you have open. This is how you move to another browser or
+                        machine.
+                      </span>
+                    </span>
+                  </button>
+                )}
+                {onRestore && (
+                  <button type="button" className="st-action" onClick={onRestore}>
+                    <Glyph d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                    <span className="st-action-text">
+                      <span className="st-row-label">Restore from a file</span>
+                      <span className="st-hint">
+                        Replaces what this browser holds with the contents of a
+                        downloaded file.
                       </span>
                     </span>
                   </button>

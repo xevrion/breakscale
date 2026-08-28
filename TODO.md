@@ -41,7 +41,7 @@
 - [x] Import from file, drag-and-drop onto the canvas
 - [x] Export as PNG / SVG
 - [x] Share link: topology encoded in the URL hash, read-only for the recipient
-- [ ] Named saves, a list of your own designs
+- [x] Named saves, a list of your own designs
 - [ ] Live collaboration (later, maybe)
 
 ## UI ideas (from a competitor's build, worth taking)
