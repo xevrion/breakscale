@@ -1304,14 +1304,19 @@
   --sec-ink: var(--ann-5-ink);
 }
 
-/* THE INTERIOR IS POINTER-TRANSPARENT. The tint and the visible border are
-   both inert; a press inside the frame falls through to the node, edge or
-   background beneath, so a section can never make its own contents
-   unclickable. The only grabbable perimeter is .cv-section-hit below. */
+/* THE INTERIOR IS GRABBABLE, BUT ONLY WHERE IT IS EMPTY.
+   Sections paint behind everything, so a node, edge or port sitting on top of
+   the frame receives the press first and a section can never make its own
+   contents unclickable. What is left is the empty space between them, and
+   that is exactly the region a person aims at when they mean "this group".
+   Requiring the 1.5px border made the whole frame feel unselectable.
+   The VISIBLE border stays inert; its hit target is .cv-section-hit below,
+   which is a fat invisible stroke reaching outside the frame as well as in. */
 .cv-section-fill {
   fill: var(--sec-fill, var(--surface-2));
   fill-opacity: 0.55;
-  pointer-events: none;
+  pointer-events: fill;
+  cursor: grab;
 }
 
 .cv-section-line {

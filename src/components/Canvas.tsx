@@ -1820,9 +1820,13 @@ const SectionView = memo(function SectionView({
         ((s.tone % SECTION_TONE_COUNT) + SECTION_TONE_COUNT) % SECTION_TONE_COUNT
       }
     >
-      {/* The tint. Inert by rule: see the layer comment above. */}
+      {/* The tint, and the section's main hit target. Sections paint behind
+          everything, so anything sitting on the frame takes the press first
+          and only genuinely empty space reaches this rect. */}
       <rect
         className="cv-section-fill"
+        data-hit="section"
+        data-id={s.id}
         x={s.x}
         y={s.y}
         width={s.width}
@@ -1849,22 +1853,28 @@ const SectionView = memo(function SectionView({
         height={s.height}
         rx={8}
       />
-      {/* Label plate, top-left. Grabbable: it is the section's handle for
-          anyone who finds a 1.5px border too precise a target. */}
+      {/* Label plate, sitting ABOVE the frame rather than inside its corner.
+          Inside, the plate's own rounded rect crossed the section's rounded
+          border and the two radii fought: the corner read as a graphical
+          mistake at every zoom. Above the top edge the border stays an
+          unbroken rectangle and the label reads as a tab on it, which is the
+          convention every diagramming tool settled on for the same reason.
+          Still grabbable: it is the section's handle for anyone who finds a
+          1.5px border too precise a target. */}
       <g className="cv-section-label" data-hit="section" data-id={s.id}>
         <rect
           className="cv-section-label-bg"
           x={s.x}
-          y={s.y}
+          y={s.y - SEC_LABEL_H - 4}
           width={Math.min(sectionLabelWidth(s.label), s.width)}
           height={SEC_LABEL_H}
-          rx={8}
+          rx={6}
         />
         {!editingLabel && s.label && (
           <text
             className="cv-section-label-text"
             x={s.x + SEC_LABEL_PAD_X}
-            y={s.y + SEC_LABEL_H / 2}
+            y={s.y - SEC_LABEL_H / 2 - 4}
           >
             {truncateToWidth(s.label, s.width - SEC_LABEL_PAD_X * 2, SEC_LABEL_STYLE)}
           </text>
@@ -3593,6 +3603,34 @@ export default function Canvas({
             }
           } else {
             selectOne(id, false);
+
+            /* Dragging a section carries what it contains.
+             *
+             * Membership stays SPATIAL, which is the model's whole point: no
+             * parent pointer is stored, nothing is reparented, and a node
+             * dragged out of a frame simply stops being inside it. The set is
+             * resolved once here, at grab time, from the geometry as it stands
+             * at that instant, so the frame cannot collect nodes it merely
+             * sweeps over on the way.
+             *
+             * A node counts as inside when its whole box is inside, not when
+             * it merely overlaps. Dragging a group is a deliberate act, and
+             * hauling along a node that happens to clip an edge of the frame
+             * is the kind of surprise that makes a person distrust the tool.
+             */
+            if (ann.kind === 'section') {
+              for (const n of topoRef.current.nodes) {
+                const inside =
+                  n.x >= ann.x &&
+                  n.y >= ann.y &&
+                  n.x + NODE_W <= ann.x + ann.width &&
+                  n.y + NODE_H <= ann.y + ann.height;
+                if (inside) {
+                  p.groupIds.push(n.id);
+                  p.groupOrigins.set(n.id, { x: n.x, y: n.y });
+                }
+              }
+            }
           }
           break;
         }

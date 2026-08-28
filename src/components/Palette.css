@@ -150,6 +150,27 @@
    caption reads as a heading for the words beneath it. Written as the sum it
    actually is — row padding + chip + gap — so it cannot drift out of
    alignment if any of the three changes. */
+/* The rail's one section header.
+   Sits on the same left axis as a row's icon, not the deeper axis the group
+   captions use, so the hierarchy reads top down: header, then caption, then
+   row. The count is pushed to the far edge rather than trailing the word,
+   which keeps it in a column of its own and stops the header looking like a
+   sentence that ran out. */
+.pal-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.pal-heading-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
 .pal-group-title {
   padding: var(--sp-2) var(--sp-4) var(--sp-1) calc(var(--sp-4) + 22px + var(--sp-3));
   color: var(--text-faint);
