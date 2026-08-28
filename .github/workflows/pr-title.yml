@@ -4,8 +4,8 @@ on:
   pull_request:
     types: [opened, edited, synchronize]
 
-permissions:
-  pull-requests: read
+# Nothing here writes to the repository, so start from zero and grant per job.
+permissions: {}
 
 # Titles follow conventional commits because we squash-merge, so the PR title
 # becomes the commit message and the changelog writes itself. Scopes are
@@ -13,8 +13,11 @@ permissions:
 jobs:
   semantic:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
     steps:
-      - uses: amannn/action-semantic-pull-request@e32d7e603df1aa1ba07e981f2a23455dee596825 # v5
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

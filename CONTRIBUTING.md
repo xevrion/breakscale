@@ -40,7 +40,7 @@ Useful commands:
 | ---------------- | ---------------------------------- |
 | `bun dev`        | Start the dev server               |
 | `bun run build`  | Typecheck and build for production |
-| `bun test`       | Run the test suite                 |
+| `bun run test`   | Run the test suite                 |
 | `bun run lint`   | Lint                               |
 | `bun run format` | Format with Prettier               |
 
@@ -144,7 +144,8 @@ generated rather than designed:
 - One logical change per pull request. If you find an unrelated bug, mention it in an issue.
 - Say what the change does and why. If it changes behaviour, include before and after numbers.
 - For anything visible, include a screenshot.
-- Run `bun run build` and `bun test` before opening.
+- Run `bun run build` and `bun run test` before opening. Use `bun run test`, not `bun test`: the
+  latter bypasses the jsdom setup and reports failures that are not real.
 
 For a new feature or anything touching the engine's architecture, open an issue first and describe
 the approach. It saves you writing something that then needs rewriting.

@@ -13,6 +13,8 @@ How you know it works. For engine changes, paste the measured before and after.
 For visual changes, include a screenshot.
 -->
 
+- [ ] `bun run test` passes. Note the `run`: plain `bun test` bypasses the jsdom setup and
+      reports failures that are not real
+- [ ] `bun run typecheck` and `bun run lint` pass
 - [ ] `bun run build` passes
-- [ ] `bun test` passes
 - [ ] Screenshot attached, if anything visual changed
