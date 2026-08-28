@@ -1036,6 +1036,43 @@
     display: none;
   }
 
+  /* The saved indicator holds its width even when it has faded to nothing,
+     which on a phone row reads as a hole between the wordmark and the undo
+     pair. It says the same thing the menu's own designs list does, so on
+     this width it goes rather than reserving space to say nothing. */
+  .app-saved {
+    display: none;
+  }
+
+  /* The two button clusters become one visual group.
+  
+     Undo and redo sat in the brand island while the source link and the menu
+     sat in another, so four buttons of the same size and weight appeared in
+     two boxes with a gap between them, for no reason a reader could see.
+     The brand island keeps the wordmark alone and the buttons gather on the
+     right where a thumb reaches. */
+  .app-island-brand {
+    gap: var(--sp-2);
+  }
+
+  .app-history {
+    margin-left: auto;
+    gap: var(--sp-2);
+  }
+
+  /* Undo and redo are ghost buttons, which on a desktop sit quietly inside a
+     busy bar. Beside the bordered source link and menu they read as a
+     different species of control, so on a phone they take the same outline
+     as their neighbours and the four become one row of peers. */
+  .app-history .btn {
+    border-color: var(--border-strong);
+    background: var(--surface);
+    box-shadow:
+      var(--shadow-sm),
+      inset 0 1px 0 var(--bevel),
+      inset 0 -1px 0 var(--bevel-under);
+  }
+
   .app-body {
     /* The bar is two rows on a phone (see App.css bar section), so the
        clearance it publishes has to grow with it. */

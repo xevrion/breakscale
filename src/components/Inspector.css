@@ -804,21 +804,22 @@
    -------------------------------------------------------------------------- */
 
 @media (max-width: 720px) {
-  /* The control stacks instead of sitting in a row.
-     
-     Beside each other on a 412px screen the track measured 42px wide: the
-     app's primary control, with a thumb 18px across, had almost no travel
-     at all. Stacked, the caption and figure take one line and the track
-     takes the full width of the row beneath, which is the only arrangement
-     that gives a thumb somewhere to go. */
+  /* The load control, rebuilt for one hand.
+
+     On a desktop this is a row: caption and figure, then the track beside
+     them, then the readouts and the transport. At 412px that row left the
+     track 42px wide, which is two thumb-widths of travel on the app's
+     primary control, and the pieces that survived were scattered across a
+     224px bar with dead space between them.
+
+     Here it is three deliberate rows instead. The figure sits WITH its
+     caption on the first, the track owns the second, and the effect and the
+     transport share the third. Nothing is centred by accident and nothing
+     is left hanging in a gap. */
   .traffic {
-    /* A wrapping ROW, not a column: the load control claims a full line for
-       itself, which pushes the readouts and the transport onto the next one
-       where they sit side by side. A column would give each of the three a
-       line of its own and the bar reached 29 percent of the screen. */
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--sp-2) var(--sp-3);
+    gap: var(--sp-3);
   }
 
   .traffic-spacer {
@@ -829,17 +830,44 @@
     flex: 1 1 100%;
     flex-wrap: wrap;
     min-width: 0;
-    gap: var(--sp-2) var(--sp-4);
+    gap: var(--sp-2) var(--sp-3);
   }
 
-  /* Caption and figure stay side by side on the first line; the track
-     breaks to its own. */
+  /* Caption on the left, figure and unit together on the right.
+  
+     Reading order matters here: "OFFERED LOAD" then "30 requests / sec" is
+     a caption and its value. Sitting the bare number between the caption and
+     its unit instead gave three competing pieces on one line with the
+     largest thing in the middle, which is why it read as debris rather than
+     as a measurement. */
   .traffic-load-head {
-    flex: 0 0 auto;
+    /* Spans the row so the value can be pushed to the far end. Shrink-wrapped
+       (flex: none) there is no free space for the readout's auto margin to
+       consume, and caption and value sit jammed together mid-row. */
+    flex: 1 1 100%;
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--sp-2);
   }
 
+  /* The unit comes back. A container query drops it at 560px because the
+     desktop row has no space; this row does, and "30" with no unit is a
+     number without a meaning. */
+  .traffic-load-unit {
+    display: inline;
+  }
+
+  /* The value and its unit are ONE thing and sit together, tight, with the
+     slack between them and the caption rather than inside them. Split by
+     the flex slack they read as three separate items on a line and the
+     number lost its unit again by distance instead of by display:none. */
   .traffic-load-readout {
-    flex: 0 0 auto;
+    display: flex;
+    flex: none;
+    align-items: baseline;
+    gap: var(--sp-1);
+    min-width: 0;
+    margin-left: auto;
   }
 
   .traffic-load-track {
@@ -847,42 +875,45 @@
     min-width: 0;
   }
 
-  /* The readouts sit under the slider as their own row, spread across the
-     width rather than crowded against it. */
-  .traffic-headline {
-    flex: 0 1 auto;
-    justify-content: space-between;
-    gap: var(--sp-4);
-  }
-
-  /* The hero p99 is 34px on a desktop, where it competes with a whole bar
-     for attention. Stacked on a phone it has a row to itself and does not
-     need the size, and the bar is spending height the canvas wants. */
-  .traffic-metric .num-hero {
-    font-size: var(--fs-xl);
-  }
-
-  .traffic-metric {
-    gap: 0;
-  }
-
-  /* Readouts and transport share one row.
-     
-     Stacking put the run controls on a fourth row of their own and the bar
-     reached 29 percent of the screen. Both are short, so the column wraps
-     and the two sit side by side: the numbers on the left, the buttons
-     right-aligned where a thumb on the right hand finds them.
-
-     `.traffic` is a wrap container for this reason, and the two rows above
-     take the full width so only these two ever share a line. */
+  /* The third row: p99 on the left reading as a normal label-and-value
+     pair, the transport right where a thumb rests. */
   .traffic-headline {
     flex: 1 1 auto;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--sp-4);
     min-width: 0;
+  }
+
+  /* Label beside value, not stacked and right-aligned: at this size the
+     stack put a small caption over an indented number and read as a
+     mistake. */
+  .traffic-metric {
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--sp-2);
+  }
+
+  .traffic-metric .num-hero {
+    font-size: var(--fs-xl);
   }
 
   .traffic-actions {
     flex: none;
     margin-left: auto;
+    /* The segmented block is a desktop affordance. Separated, each control
+       is its own 44px target and the group stops reading as one wide
+       button with three glyphs on it. */
+    gap: var(--sp-2);
+  }
+
+  .traffic-actions .btn {
+    border-radius: var(--r-btn);
+  }
+
+  .traffic-actions .btn + .btn {
+    border-left-width: var(--bw);
+    margin-left: 0;
   }
 }
 
