@@ -68,7 +68,9 @@ source order wins. Never declare `--k-*` in a class rule; fallbacks belong insid
 
 ## Testing
 
-- Run `bun test` after every change and fix what breaks.
+- Run `bun run test` after every change and fix what breaks. Not `bun test`:
+  that runs bun's own runner, which skips the vitest config and its jsdom
+  environment, and reports dozens of failures that are not real.
 - Test interaction with real `PointerEvent` sequences. `.click()` bypasses the layer that breaks.
 - Paced moves are not enough. A three-event flick found a race a 16ms-paced drag did not.
 - A backgrounded tab suspends `requestAnimationFrame`; the simulation reads zero and looks broken.
@@ -94,6 +96,13 @@ One lesson each. Stable at its default load, under 2 percent errors. Visibly deg
 the bottleneck being the lesson. No overlapping nodes. A node's ceiling is
 `capacity * instances * (1000 / serviceMs)` rps; do that arithmetic before tuning.
 
+Annotate it. Sections mark real architectural tiers and are named for what the tier does, never
+for what is inside it ("Starting a stream", not "Services"). One note must name the failure mode
+in terms the reader can act on: what to drag, and what happens. A three-box chain gets one note
+and no sections. Stacked tiers need `LROW(row, lane)`, because a section's label plate needs 28px
+of a 42px row gutter and two padded frames will not both fit. `presets.annotations.test.ts`
+asserts the geometry; run it rather than checking by eye, then load the example and look at it.
+
 ## Copy
 
 The reader is a first-year student who has not taken a queueing theory course.
@@ -108,7 +117,7 @@ The reader is a first-year student who has not taken a queueing theory course.
 ```bash
 bun dev            # dev server on :5173
 bun run build      # typecheck + build
-bun test
+bun run test       # vitest. NOT `bun test`, which bypasses the jsdom setup
 bun run lint
 bun run format
 ```
