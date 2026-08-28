@@ -47,8 +47,7 @@
 ## UI ideas (from a competitor's build, worth taking)
 
 - [x] Search box over the 33 components
-- [ ] Adjustable size for the rail, the inspector and the charts strip
-      (drag the edge to resize; remember it)
+- [x] Adjustable size for the rail, the inspector and the charts strip
 - [ ] Minimap for large diagrams
 - [ ] Name the design + a "saved" indicator, so people know work persists
 - [ ] Canvas toggles surfaced in the inspector: snap, grid, minimap, edge labels
