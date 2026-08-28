@@ -155,6 +155,12 @@
 .st-segmented {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+}
+
+/* Four choices rather than three. A modifier instead of a second component,
+   because the only difference is the column count. */
+.st-segmented-4 {
+  grid-template-columns: repeat(4, 1fr);
   gap: 2px;
   padding: 2px;
   background: var(--surface-2);

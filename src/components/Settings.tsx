@@ -8,6 +8,7 @@ import {
 } from '../content/preferences';
 import type { Preferences, ThemeChoice } from '../content/preferences';
 import { resolveSystemTheme } from '../theme/applyTheme';
+import { VENDORS } from '../content/vendors';
 import './Settings.css';
 
 /* ==========================================================================
@@ -30,7 +31,9 @@ import './Settings.css';
    ========================================================================== */
 
 interface ToggleRow {
-  key: keyof Omit<Preferences, 'theme'>;
+  /* Only the boolean preferences. Theme and vendor are choices among
+     several values and get their own controls below. */
+  key: keyof Omit<Preferences, 'theme' | 'vendor'>;
   label: string;
   /** What turning it on actually does, in the reader's terms. */
   hint: string;
@@ -334,6 +337,38 @@ export function Settings({
               </div>
             </section>
           )}
+
+          <section className="st-group">
+            <h3 className="st-group-title">Naming</h3>
+            <div
+              className="st-choices"
+              role="radiogroup"
+              aria-labelledby="st-vendor-label"
+            >
+              <span id="st-vendor-label" className="st-row-label">
+                Component names
+              </span>
+              <div className="st-segmented st-segmented-4">
+                {VENDORS.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={prefs.vendor === v.id}
+                    className={`st-seg${prefs.vendor === v.id ? ' is-active' : ''}`}
+                    onClick={() => setPreference('vendor', v.id)}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+              <p className="st-hint">
+                {prefs.vendor === 'generic'
+                  ? 'Components keep their plain names. Learn the idea first; the product names are easier afterwards.'
+                  : 'Components are named after this vendor’s products, and you can pick a real instance size. The published specs are cited; how they map to capacity is our own estimate.'}
+              </p>
+            </div>
+          </section>
 
           <section className="st-group">
             <h3 className="st-group-title">Canvas</h3>
