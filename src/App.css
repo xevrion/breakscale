@@ -489,34 +489,36 @@
   right: calc(var(--ins-w) + var(--sp-3) * 2);
 }
 
+/* Clears the rail plus BOTH gaps, like the other toggles: the rail is inset
+   from the window edge now, so a single gap leaves this touching it. */
 .app-body.has-library .stage-toggle-metrics {
-  left: calc(var(--rail-w) + var(--sp-3));
+  left: calc(var(--rail-w) + var(--sp-3) * 2);
 }
 
 .app-body.has-metrics .stage-toggle-metrics {
-  bottom: calc(var(--strip-h) + var(--sp-3));
+  bottom: calc(var(--strip-h) + var(--sp-3) * 2);
 }
 
 /* The ledger sits to the right of the metrics toggle (32px + two gaps, the
    same sum Canvas.css documents on .cv-ledger) and follows it past an open
    rail; both it and the zoom cluster ride up over the open strip. */
 .app-body.has-library .cv-ledger {
-  left: calc(var(--rail-w) + var(--sp-3) + 32px + var(--sp-3));
+  left: calc(var(--rail-w) + var(--sp-3) * 2 + 32px + var(--sp-3));
 }
 
 .app-body.has-metrics .cv-ledger,
 .app-body.has-metrics .cv-zoom {
-  bottom: calc(var(--strip-h) + var(--sp-3));
+  bottom: calc(var(--strip-h) + var(--sp-3) * 2);
 }
 
 /* The format bar rides the same lift, one row higher so it clears the
    ledger and the zoom cluster it shares the foot of the canvas with. */
 .app-body.has-metrics .cv-format {
-  bottom: calc(var(--strip-h) + var(--sp-3) + 32px + var(--sp-3));
+  bottom: calc(var(--strip-h) + var(--sp-3) * 2 + 32px + var(--sp-3));
 }
 
 .app-body.has-inspector .cv-zoom {
-  right: calc(var(--ins-w) + var(--sp-3));
+  right: calc(var(--ins-w) + var(--sp-3) * 2);
 }
 
 .cv-ledger,
@@ -599,16 +601,55 @@
   right: calc(var(--ins-w) + var(--sp-3) * 2);
 }
 
-.app-slot-bottom > .mx {
-  flex: 1 1 auto;
-  min-height: 0;
-  /* The fixed height can only be honoured if the strip is allowed to
-     scroll rather than spill its charts over the canvas above it. */
-  overflow-y: auto;
+/* The frame is on the SLOT and the scrolling is on the panel inside it.
+
+   Both on one element does not work: a scrollbar lives inside the padding
+   box, so an element that is both rounded and scrollable has its scrollbar
+   squaring off the two corners on that side. Splitting them lets the slot
+   clip the panel to the radius while the panel scrolls freely underneath. */
+.app-slot-bottom {
   border: var(--bw) solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-sm);
   background: var(--surface);
+  overflow: hidden;
+}
+
+.app-slot-bottom > .mx {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* The fixed height can only be honoured if the strip is allowed to
+     scroll rather than spill its charts over the canvas above it.
+
+     Styled through the shared .scroll primitive's tokens rather than left to
+     the browser: the default track is opaque grey, which drew a bar down the
+     strip's right edge and squared off the two corners the slot had just
+     rounded. */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  overscroll-behavior: contain;
+  background: var(--surface);
+}
+
+.app-slot-bottom > .mx::-webkit-scrollbar {
+  width: 12px;
+}
+
+.app-slot-bottom > .mx::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-slot-bottom > .mx::-webkit-scrollbar-thumb {
+  border: 4px solid transparent;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  background-clip: content-box;
+}
+
+.app-slot-bottom > .mx::-webkit-scrollbar-thumb:hover {
+  background: var(--line-2);
+  background-clip: content-box;
 }
 
 /* --------------------------------------------------------------------------
