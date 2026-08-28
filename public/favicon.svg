@@ -8,30 +8,33 @@
 >
   <title>Breakscale</title>
   <!--
-    Load rising until it breaks.
+    The knee: the shape of a latency curve as a system runs out of headroom.
 
-    Three bars climbing, then a fourth that has fractured and toppled: the
-    knee in a latency curve, drawn literally. Reads at 16px because it is four
-    solid shapes with no strokes, no gradients and no filters, and the break is
-    carried by the gap and the tilt rather than by detail that would vanish.
+    Flat while there is slack, then vertical once there is not. It is the one
+    picture this whole product exists to explain, and it is specific in a way
+    a bar chart is not: bars say "analytics", this says "it held, then it
+    did not".
 
-    Colours are the app's own: --ok, --warn and --danger for the escalation,
-    --accent for nothing, deliberately, since accent means "you did this" in
-    this product and a logo is not an action.
+    The curve is not drawn by eye. It is M/M/1 response time, T = 1/(mu -
+    lambda), sampled and fitted into the box, so the knee sits where the
+    theory puts it at about 73 percent utilisation rather than wherever
+    looked right.
+
+    The rule beneath is what makes the shape legible: without a baseline the
+    curve reads as a floating hook, and at 16px that is all it reads as. It
+    is drawn in the border colour so it stays a reference and never competes.
+
+    No gradients, no filters, no strokes finer than the grid: it has to
+    survive being scaled to 16px in a browser tab.
   -->
-  <rect x="3" y="20" width="5" height="9" rx="1.2" fill="#187a3b" />
-  <rect x="10.5" y="14" width="5" height="15" rx="1.2" fill="#187a3b" />
-  <rect x="18" y="8" width="5" height="21" rx="1.2" fill="#945500" />
-
-  <!-- The failed bar: base still standing, top sheared off and fallen. -->
-  <rect x="25.5" y="22" width="5" height="7" rx="1.2" fill="#c52b30" />
-  <rect
-    x="24.9"
-    y="4.2"
-    width="5"
-    height="11"
-    rx="1.2"
-    fill="#c52b30"
-    transform="rotate(24 27.4 9.7)"
+  <rect width="32" height="32" rx="7" fill="#1d1c22" />
+  <path d="M4.5 26.5 H27" stroke="#454350" stroke-width="1.6" stroke-linecap="round" />
+  <path
+    d="M4.5 24 L11 23.6 L16 22.8 L19.6 21.5 L22 19.7 L23.6 17.1 L24.8 12.3 L25.6 6"
+    fill="none"
+    stroke="#f0656a"
+    stroke-width="3.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
   />
 </svg>

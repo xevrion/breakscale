@@ -7,75 +7,80 @@
   aria-label="Breakscale: build a system, load it until it breaks, and watch why"
 >
   <title>Breakscale</title>
-
   <!--
-    Social card. 1200x630 is the size every scraper crops to, so nothing
-    important goes within 60px of an edge.
+    Social card. 1200x630 is what every scraper crops to, so nothing that
+    matters sits within 60px of an edge.
 
-    Same palette as the app so the card and the product look like one thing:
-    warm paper ground, the escalation colours on the bars, ink for the words.
-    No screenshot, deliberately, because a screenshot of a dense simulator
-    scaled to a timeline thumbnail is illegible; the mark plus one sentence
-    survives the crop.
+    The card is the KNEE: the curve a system traces as it runs out of
+    headroom, flat while there is slack and vertical once there is not. The
+    shape is not drawn by eye, it is M/M/1 response time, T = 1/(mu - lambda),
+    sampled across the box, so the card carries the curve the simulator
+    actually produces.
+
+    The four nodes sit ON the curve and take the app's own status colours,
+    green while the system copes, amber at the knee, red past it. That is what
+    turns a chart into this product: the reader sees components changing state
+    as load rises, which is the thing they will do on the canvas a minute
+    later.
+
+    No screenshot: a dense simulator scaled to a timeline thumbnail is
+    unreadable. No feature list either, it competes with the one idea.
   -->
-  <rect width="1200" height="630" fill="#faf7f3" />
+  <rect width="1200" height="630" fill="#151419" />
 
-  <!-- The faint grid the canvas itself uses, so the card reads as the app. -->
-  <g stroke="#efe9e1" stroke-width="1">
+  <!-- The canvas grid, at the app's spacing, kept near invisible. -->
+  <g stroke="#232128" stroke-width="1">
     <path d="M0 90.5h1200M0 180.5h1200M0 270.5h1200M0 360.5h1200M0 450.5h1200M0 540.5h1200" />
     <path
       d="M90.5 0v630M180.5 0v630M270.5 0v630M360.5 0v630M450.5 0v630M540.5 0v630M630.5 0v630M720.5 0v630M810.5 0v630M900.5 0v630M990.5 0v630M1080.5 0v630"
     />
   </g>
 
-  <!-- The mark, scaled up from the favicon. -->
-  <g transform="translate(96, 150) scale(3.2)">
-    <rect x="3" y="20" width="5" height="9" rx="1.2" fill="#187a3b" />
-    <rect x="10.5" y="14" width="5" height="15" rx="1.2" fill="#187a3b" />
-    <rect x="18" y="8" width="5" height="21" rx="1.2" fill="#945500" />
-    <rect x="25.5" y="22" width="5" height="7" rx="1.2" fill="#c52b30" />
-    <rect
-      x="24.9"
-      y="4.2"
-      width="5"
-      height="11"
-      rx="1.2"
-      fill="#c52b30"
-      transform="rotate(24 27.4 9.7)"
+  <g transform="translate(640, 250)">
+    <!-- The rule the curve departs from. Without it the curve is a hook. -->
+    <path d="M0 260.5 H500" stroke="#33313c" stroke-width="2" stroke-linecap="round" />
+    <path
+      d="M0.0 241.4 L80.0 238.0 L160.0 232.7 L220.0 226.8 L260.0 221.3 L300.0 213.5 L340.0 201.9 L360.0 193.7 L380.0 182.6 L400.0 167.1 L420.0 143.9 L440.0 105.2 L460.0 27.8 L468.0 4.0"
+      fill="none"
+      stroke="#f0656a"
+      stroke-width="9"
+      stroke-linecap="round"
+      stroke-linejoin="round"
     />
+    <!-- Components on the curve, escalating as headroom runs out. -->
+    <circle cx="80" cy="238.0" r="11" fill="#151419" stroke="#4ac06e" stroke-width="5" />
+    <circle cx="260" cy="221.3" r="11" fill="#151419" stroke="#4ac06e" stroke-width="5" />
+    <circle cx="380" cy="182.6" r="11" fill="#151419" stroke="#d79a2b" stroke-width="5" />
+    <circle cx="440" cy="105.2" r="11" fill="#151419" stroke="#f0656a" stroke-width="5" />
   </g>
 
   <text
     x="96"
-    y="360"
-    font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-    font-size="86"
-    font-weight="600"
-    fill="#1e242e"
-    letter-spacing="-2"
+    y="300"
+    font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace"
+    font-size="82"
+    font-weight="700"
+    letter-spacing="-1.8"
+    fill="#f3f1f5"
   >
     Breakscale
   </text>
-
   <text
-    x="96"
-    y="424"
+    x="98"
+    y="356"
     font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-    font-size="34"
-    font-weight="400"
-    fill="#525862"
+    font-size="32"
+    fill="#a5a1b0"
   >
-    Build a system, load it until it breaks, and watch why.
+    Build a system. Load it until it breaks.
   </text>
-
   <text
-    x="96"
-    y="510"
-    font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace"
-    font-size="24"
-    fill="#646972"
-    letter-spacing="1"
+    x="98"
+    y="400"
+    font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-size="32"
+    fill="#a5a1b0"
   >
-    33 components · 23 worked examples · real discrete-event simulation
+    Watch why.
   </text>
 </svg>

@@ -1,7 +1,5 @@
-<h1 align="center">Breakscale</h1>
-
 <p align="center">
-  Build a system, load it until it breaks, and watch why.
+  <img src="docs/banner.png" alt="Breakscale: build a system, load it until it breaks, watch why" width="100%" />
 </p>
 
 <p align="center">
