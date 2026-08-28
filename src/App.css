@@ -347,7 +347,13 @@
 
   /* How far down the canvas the floating bar reaches: its offset, its own
      height, and a gap below it. Everything that must clear the bar reads
-     this one number rather than restating the arithmetic. */
+     this one number rather than restating the arithmetic.
+
+     App.tsx MEASURES the bar and overwrites this inline. The constant is the
+     value used for the first paint, before the observer has run, and it is
+     the one-row desktop height. It stopped being correct on its own once the
+     bar could wrap: on a phone the bar stands over 200px tall and a constant
+     put the components toggle underneath it. */
   --bar-clear: 84px;
 
   --rail-w: 224px;
@@ -1073,12 +1079,6 @@
       inset 0 -1px 0 var(--bevel-under);
   }
 
-  .app-body {
-    /* The bar is two rows on a phone (see App.css bar section), so the
-       clearance it publishes has to grow with it. */
-    --bar-clear: 116px;
-  }
-
   /* Sheets: full width, bottom-anchored, capped so the canvas is always
      partly visible behind them. A sheet that covered the screen would hide
      the change it was made to explain. */
@@ -1153,6 +1153,15 @@
      is a 44px target sitting on top of content it cannot usefully resize. */
   .pr {
     display: none;
+  }
+
+  /* The stage toggles are 32px squares, which is under the touch floor and
+     the only way to reach the components rail or the charts on a phone.
+     The coarse-pointer rule in index.css raises .btn, but these carry their
+     own width, so they are raised here too. */
+  .stage-toggle {
+    width: 44px;
+    height: 44px;
   }
 }
 

@@ -87,6 +87,9 @@ const STORAGE_KEY = 'breakscale.session.v1';
 
 const LAYOUT_KEY = 'breakscale.layout.v1';
 
+/** The gap between the floating bar and whatever clears it, matching --sp-3. */
+const BAR_GAP_PX = 12;
+
 interface LayoutPrefs {
   /** The left component rail. */
   library: boolean;
@@ -536,6 +539,34 @@ export default function App() {
   const [layout, setLayout] = useState<LayoutPrefs>(loadLayout);
 
   const phone = useSyncExternalStore(subscribePhone, isPhone, isPhoneServer);
+
+  /**
+   * The bar's real height, so everything that must clear it can.
+   *
+   * `--bar-clear` was a constant (84px, 116px on a phone), which held while
+   * the bar was one row of a known height. It stopped holding the moment the
+   * bar could WRAP: at 412px it stands 223px tall and the constant put the
+   * components toggle underneath it. A number that has to be re-guessed
+   * every time the bar's contents change is a number that will be wrong
+   * again, so it is measured instead.
+   *
+   * Measured, not derived from the breakpoint: the bar's height depends on
+   * what wrapped, which depends on the text, the font and the width. Only
+   * the element knows.
+   */
+  const barRef = useRef<HTMLElement | null>(null);
+  const [barH, setBarH] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      setBarH(Math.round(el.getBoundingClientRect().height));
+    });
+    ro.observe(el);
+    setBarH(Math.round(el.getBoundingClientRect().height));
+    return () => ro.disconnect();
+  }, []);
 
   /* On a phone a panel is a sheet over the canvas, so opening one closes the
      other: two stacked sheets would cover the diagram they exist to explain,
@@ -2261,7 +2292,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="app-bar">
+      <header className="app-bar" ref={barRef}>
         <div className="app-island app-island-brand">
           {/* The wordmark is the one place the product speaks in its own
             voice. Two words, sentence case, no abbreviation — a student
@@ -2459,6 +2490,9 @@ export default function App() {
             '--rail-w': `${layout.railW}px`,
             '--ins-w': `${layout.insW}px`,
             '--strip-h': `${layout.stripH}px`,
+            /* The bar's own height plus the gap it floats in. Falls back to
+               the stylesheet's constant until the first measurement lands. */
+            ...(barH === null ? {} : { '--bar-clear': `${barH + BAR_GAP_PX}px` }),
           } as CSSProperties
         }
       >
