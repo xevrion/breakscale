@@ -38,6 +38,15 @@
 - [ ] Named saves, a list of your own designs
 - [ ] Live collaboration (later, maybe)
 
+## UI ideas (from a competitor's build, worth taking)
+
+- [ ] Search box over the 33 components
+- [ ] Minimap for large diagrams
+- [ ] Name the design + a "saved" indicator, so people know work persists
+- [ ] Canvas toggles surfaced in the inspector: snap, grid, minimap, edge labels
+- [ ] Component count by category ("3 network, 2 database")
+- [ ] Baseline rate x pattern multiplier, clearer than a raw slider
+
 ## Product
 
 - [ ] Cloud vendor mode: AWS / GCP / Azure / generic
