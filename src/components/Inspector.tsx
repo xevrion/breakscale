@@ -3071,7 +3071,7 @@ export function TrafficControl({
           /* No components: nothing to measure. One quiet sentence, in the
              same slot the numbers occupy, rather than a row of red zeroes. */
           <p className="traffic-empty">
-            Nothing to measure yet — add a component to get started.
+            Nothing to measure yet. Add a component to get started.
           </p>
         ) : (
           <>
