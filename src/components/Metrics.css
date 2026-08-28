@@ -23,7 +23,10 @@
 
 .mx {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Four now: three charts and the request trace. The trace is given the
+     same width as a chart rather than a narrow sidebar, because its rows are
+     the reading, not a legend beside one. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--sp-5);
   align-items: start;
   padding: var(--sp-4) var(--sp-5) var(--sp-5);

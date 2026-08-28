@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FailureReason, HistoryPoint, SimSnapshot } from '../sim/types';
 import {
   formatCompact,
@@ -9,6 +9,7 @@ import {
   type Health,
 } from './format';
 import { Term } from './Tooltip';
+import { Trace } from './Trace';
 import './Metrics.css';
 
 /* ------------------------------------------------------------------ *
@@ -987,6 +988,8 @@ const FailureChart = memo(function FailureChart({
 
 export interface MetricsProps {
   snapshot: SimSnapshot;
+  /** Node id to display name, for the trace panel. */
+  nodeNames?: Record<string, string>;
 }
 
 /* Derived from REASON_ORDER rather than written out, so adding a failure
@@ -995,8 +998,13 @@ const EMPTY_BY: Record<FailureReason, number> = Object.fromEntries(
   REASON_ORDER.map((r) => [r, 0]),
 ) as Record<FailureReason, number>;
 
-export function Metrics({ snapshot }: MetricsProps) {
+export function Metrics({ snapshot, nodeNames }: MetricsProps) {
   const { system, history, failuresByReason } = snapshot;
+
+  /* The trace names nodes by id; the reader knows them by the label on the
+     canvas. Falling back to the id keeps a node that was renamed or deleted
+     mid-trace readable rather than blank. */
+  const nameOf = useCallback((id: string) => nodeNames?.[id] ?? id, [nodeNames]);
 
   /* Lifetime failure COUNT, summed. Used only as a memo dependency that
      changes as the engine records failures — never rendered, and never
@@ -1152,6 +1160,7 @@ export function Metrics({ snapshot }: MetricsProps) {
         lost={lostRate}
       />
       <FailureChart samples={failSamples} failures={failuresNow} />
+      <Trace trace={snapshot.trace} nameOf={nameOf} />
     </div>
   );
 }

@@ -1,0 +1,108 @@
+/* ==========================================================================
+   Request trace.
+
+   Two colours carry the whole idea, so they must be tellable apart at a
+   glance and mean the same thing everywhere: WAITING is the warning ramp,
+   because time in a queue is the symptom of a system past its capacity, and
+   WORKING is the neutral accent, because service time is the system doing
+   its job. Reversing them would praise the wrong half.
+   ========================================================================== */
+
+.tr {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tr-empty,
+.tr-failed,
+.tr-verdict {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+.tr-failed {
+  margin-bottom: var(--sp-2);
+  color: var(--danger);
+}
+
+.tr-verdict {
+  margin-top: var(--sp-2);
+}
+
+.tr-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.tr-row {
+  display: grid;
+  /* Name, bar, number. The name is capped so one long component label cannot
+     squeeze every bar in the panel down to nothing. */
+  grid-template-columns: minmax(0, 8.5rem) 1fr auto;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.tr-name {
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tr-bar {
+  display: flex;
+  height: 12px;
+  min-width: 0;
+  background: var(--track);
+  border-radius: var(--r-mark);
+  overflow: hidden;
+}
+
+/* A hop that queued for zero still shows nothing, which is correct: an
+   empty left half IS the reading at low load, and inventing a minimum
+   width would draw a wait that never happened. */
+.tr-queued {
+  background: var(--warn-mark);
+}
+
+.tr-service {
+  background: var(--accent);
+}
+
+.tr-ms {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.tr-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+.tr-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.tr-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-mark);
+}

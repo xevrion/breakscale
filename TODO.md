@@ -63,7 +63,7 @@
   - [ ] Picker in preferences, generic stays the default
   - [ ] Vendor pricing, feeds the cost model below
 - [ ] Challenges ("5k rps under 200ms p99")
-- [ ] Request tracer (queued vs service time)
+- [x] Request tracer (queued vs service time)
 - [ ] Cost model
 - [ ] Traffic scenarios: ramp, spike, diurnal, thundering herd
 - [ ] Networking layer (bandwidth + loss; latency already works)

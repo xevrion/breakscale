@@ -1071,6 +1071,19 @@ export default function App() {
   const armToolRef = useRef<((tool: AnnotationTool) => void) | null>(null);
   const [armedTool, setArmedTool] = useState<AnnotationTool | null>(null);
 
+  /**
+   * Node id to display name, for the request trace.
+   *
+   * Keyed off the node list rather than the snapshot, because the strip
+   * re-renders ten times a second and these names change only when someone
+   * renames or deletes a component.
+   */
+  const nodeNames = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const n of topology.nodes) out[n.id] = n.label;
+    return out;
+  }, [topology.nodes]);
+
   /** Palette click (no drop point): place at the centre of the current view. */
   const handlePaletteAdd = useCallback(
     (kind: NodeKind) => {
@@ -2077,7 +2090,7 @@ export default function App() {
             </button>
           </div>
           <PanelSlot open={metricsVisible} edge="bottom">
-            {snapshot ? <Metrics snapshot={snapshot} /> : null}
+            {snapshot ? <Metrics snapshot={snapshot} nodeNames={nodeNames} /> : null}
             <PanelResizer
               edge="bottom"
               property="--strip-h"
