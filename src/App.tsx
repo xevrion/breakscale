@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import type {
   AnimationEvent,
@@ -132,6 +133,38 @@ const clampPanel = (key: PanelKey, v: unknown): number => {
  * carries p99, goodput, errors and dropped, so the strip is depth to be
  * opened when a headline number needs explaining, not a fixture.
  */
+/**
+ * Is the shell narrow enough that panels have to be sheets?
+ *
+ * Matches the 720px breakpoint in App.css, and is stated here as well
+ * because two things need it that CSS cannot do: panels must become
+ * MUTUALLY EXCLUSIVE (two stacked sheets would bury the canvas the sheets
+ * exist to explain), and the components rail must not boot open, which is a
+ * default rather than a style.
+ *
+ * A media query rather than a device or touch test. The question is how much
+ * room the shell has, and a small desktop window has exactly the same
+ * problem as a phone; a tablet in landscape has neither.
+ */
+const PHONE_QUERY = '(max-width: 720px)';
+
+function subscribePhone(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+  const mq = window.matchMedia(PHONE_QUERY);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
+}
+
+function isPhone(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia(PHONE_QUERY).matches;
+}
+
+/** Server snapshot: no window, so never the phone layout. */
+function isPhoneServer(): boolean {
+  return false;
+}
+
 const DEFAULT_LAYOUT: LayoutPrefs = {
   library: true,
   metrics: false,
@@ -141,22 +174,39 @@ const DEFAULT_LAYOUT: LayoutPrefs = {
 };
 
 function loadLayout(): LayoutPrefs {
+  /* The components rail opens on a desktop because a blank canvas with no
+     visible way to act on it is a dead end. On a phone the same default is
+     the opposite of helpful: the rail is a sheet, so it opens ON TOP of the
+     canvas and the first thing a reader sees is a list of components with a
+     sliver of diagram behind it. They arrive from a link to LOOK at
+     something, so the canvas gets the screen and the rail is a tap away. */
+  const base: LayoutPrefs = isPhone()
+    ? { ...DEFAULT_LAYOUT, library: false }
+    : DEFAULT_LAYOUT;
+
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
-    if (!raw) return DEFAULT_LAYOUT;
+    if (!raw) return base;
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return DEFAULT_LAYOUT;
+    if (typeof parsed !== 'object' || parsed === null) return base;
     const p = parsed as Partial<LayoutPrefs>;
     return {
-      library: typeof p.library === 'boolean' ? p.library : DEFAULT_LAYOUT.library,
-      metrics: typeof p.metrics === 'boolean' ? p.metrics : DEFAULT_LAYOUT.metrics,
+      /* A rail opened on a desktop must not reopen as a sheet on a phone:
+         the same person on the same account gets a covered canvas on the
+         device where it hurts most. */
+      library: isPhone()
+        ? false
+        : typeof p.library === 'boolean'
+          ? p.library
+          : base.library,
+      metrics: typeof p.metrics === 'boolean' ? p.metrics : base.metrics,
       railW: clampPanel('railW', p.railW),
       insW: clampPanel('insW', p.insW),
       stripH: clampPanel('stripH', p.stripH),
     };
   } catch {
     // Blocked or corrupt storage: the default layout, never a crash.
-    return DEFAULT_LAYOUT;
+    return base;
   }
 }
 
@@ -485,13 +535,29 @@ export default function App() {
 
   const [layout, setLayout] = useState<LayoutPrefs>(loadLayout);
 
+  const phone = useSyncExternalStore(subscribePhone, isPhone, isPhoneServer);
+
+  /* On a phone a panel is a sheet over the canvas, so opening one closes the
+     other: two stacked sheets would cover the diagram they exist to explain,
+     and the reader would have no way to see the effect of what they changed.
+     On a desktop the two are rails on opposite edges and coexist happily. */
   const toggleLibrary = useCallback(
-    () => setLayout((l) => ({ ...l, library: !l.library })),
-    [],
+    () =>
+      setLayout((l) => ({
+        ...l,
+        library: !l.library,
+        metrics: !l.library && phone ? false : l.metrics,
+      })),
+    [phone],
   );
   const toggleMetrics = useCallback(
-    () => setLayout((l) => ({ ...l, metrics: !l.metrics })),
-    [],
+    () =>
+      setLayout((l) => ({
+        ...l,
+        metrics: !l.metrics,
+        library: !l.metrics && phone ? false : l.library,
+      })),
+    [phone],
   );
 
   useEffect(() => {

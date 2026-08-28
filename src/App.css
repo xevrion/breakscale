@@ -971,3 +971,167 @@
     animation-duration: 0.01ms;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Phone.
+
+   Below this width the desktop shell stops being a layout and starts being
+   an obstruction: the rail is 224px and the inspector 320px, so on a 390px
+   screen the two panels alone want more room than the window has, and both
+   are absolutely positioned over the canvas. What a reader actually got was
+   a screen of components with a sliver of diagram behind it.
+
+   The fix is not narrower rails. A 200px inspector is unusable for a
+   different reason, and two panels sharing a phone screen leaves nothing
+   for the thing they describe. So on a phone the panels stop being rails
+   beside the canvas and become SHEETS over it: full width, anchored to the
+   bottom edge where a thumb reaches, one at a time. The canvas keeps the
+   whole window and stays the thing you are looking at.
+
+   720px rather than a device query: this is about how much room the shell
+   has, and a small window on a desktop has exactly the same problem. The
+   value is the point where 224 + 320 + four gutters stops leaving the
+   canvas a usable middle.
+
+   Anything reading --rail-w, --ins-w or --strip-h for clearance is
+   neutralised here, because a sheet is not something to sit beside.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  /* Two rows, because three islands cannot share 390px and stay legible.
+     Brand and menu ride the first row; the load control takes the whole of
+     the second, which is what it needs: the slider is the one control a
+     reader touches constantly and a thumb wants the full width for it. */
+  .app-bar {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+
+  .app-island {
+    min-height: 48px;
+    gap: var(--sp-2);
+  }
+
+  /* Order is explicit rather than source order: the load control must break
+     to its own row, and it sits AFTER the menu in the markup. */
+  .app-island-brand {
+    order: 1;
+    flex: 1 1 auto;
+  }
+
+  .app-island-menu {
+    order: 2;
+    margin-left: 0;
+  }
+
+  .app-island-load {
+    order: 3;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  /* The tagline is the first thing to go: the wordmark alone identifies the
+     app, and the row is competing for width with two buttons. */
+  .app-tagline {
+    display: none;
+  }
+
+  .app-body {
+    /* The bar is two rows on a phone (see App.css bar section), so the
+       clearance it publishes has to grow with it. */
+    --bar-clear: 116px;
+  }
+
+  /* Sheets: full width, bottom-anchored, capped so the canvas is always
+     partly visible behind them. A sheet that covered the screen would hide
+     the change it was made to explain. */
+  .app-slot-left,
+  .app-slot-right {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: min(68vh, 560px);
+  }
+
+  .app-slot-bottom {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: min(var(--strip-h), 46vh);
+  }
+
+  /* Square off the bottom corners: a sheet sits ON the window edge, and a
+     radius there reads as a panel that failed to reach it. */
+  .app-slot-left > .pal,
+  .app-slot-right > .ins,
+  .app-slot-bottom > .met {
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-bottom: 0;
+  }
+
+  /* Sheets rise from the bottom, whichever edge they belong to on desktop.
+     The keyframes stay named per edge so PanelSlot's animationend contract
+     is untouched; only the transform they interpolate changes. */
+  .app-slot-left.is-entering,
+  .app-slot-right.is-entering {
+    animation-name: app-sheet-in;
+  }
+
+  .app-slot-left.is-closing,
+  .app-slot-right.is-closing {
+    animation-name: app-sheet-out;
+  }
+
+  /* Nothing sits beside a sheet, so every clearance offset collapses back
+     to the canvas's own edge. Without these the zoom cluster, the ledger
+     and the toggles all jump 224 or 320px sideways to clear a panel that
+     is no longer there. */
+  .app-body.has-library .stage-toggle-library,
+  .app-body.has-library .stage-toggle-metrics,
+  .app-body.has-library .cv-ledger {
+    left: var(--sp-3);
+  }
+
+  .app-body.has-inspector .stage-toggle-inspector,
+  .app-body.has-inspector .cv-zoom,
+  .app-body.has-inspector .mm {
+    right: var(--sp-3);
+  }
+
+  /* An open sheet covers the foot of the canvas, so the chrome that lives
+     there lifts above it rather than hiding underneath. */
+  .app-body.has-metrics .stage-toggle-metrics,
+  .app-body.has-metrics .cv-ledger,
+  .app-body.has-metrics .cv-zoom {
+    bottom: calc(min(var(--strip-h), 46vh) + var(--sp-3));
+  }
+
+  .app-body.has-metrics .cv-format {
+    bottom: calc(min(var(--strip-h), 46vh) + var(--sp-3) + 32px + var(--sp-3));
+  }
+
+  /* Dragging a panel edge is a mouse affordance, and on a phone the handle
+     is a 44px target sitting on top of content it cannot usefully resize. */
+  .pr {
+    display: none;
+  }
+}
+
+/* Only `from` is declared, matching the slide keyframes above: the end state
+   is the slot's natural position, so a sheet left mid-animation by a
+   suspended tab still lands correctly once the animation is dropped. The
+   exits do state `to`, because .is-closing holds its end frame with
+   `forwards` while React unmounts the panel. */
+@keyframes app-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes app-sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}
