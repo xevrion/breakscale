@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { AnimationEvent, ReactNode } from 'react';
+import type { AnimationEvent, CSSProperties, ReactNode } from 'react';
 import type { NodeConfig, NodeKind, SimNode, SimSnapshot, Topology } from './sim/types';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
@@ -41,6 +41,7 @@ import type { AnnotationTool } from './components/Palette';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
 import { usePreference } from './content/preferences';
 import { Settings } from './components/Settings';
+import { PanelResizer } from './components/PanelResizer';
 import { applyTheme } from './theme/applyTheme';
 import { usePresence } from './components/presence';
 import { SessionHistory, syncEngine } from './history';
@@ -72,7 +73,39 @@ interface LayoutPrefs {
   library: boolean;
   /** The bottom charts strip. */
   metrics: boolean;
+  /**
+   * Panel sizes in px, dragged from the seam between a panel and the canvas.
+   *
+   * Stored because a student who widened the rail to read long component
+   * names meant it, and having to redo it every visit would teach them not
+   * to bother. Clamped on the way in as well as on the way out: a number
+   * that arrives out of range from edited storage would otherwise render a
+   * rail wider than the window with no way to grab its handle.
+   */
+  railW: number;
+  insW: number;
+  stripH: number;
 }
+
+/**
+ * Size limits, in px. The minimums are the point at which a panel stops
+ * being able to show its own content; the maximums stop a panel from taking
+ * the window and leaving no canvas to look at.
+ */
+export const PANEL_LIMITS = {
+  railW: { min: 180, max: 420, base: 224 },
+  insW: { min: 260, max: 520, base: 320 },
+  stripH: { min: 140, max: 420, base: 220 },
+} as const;
+
+export type PanelKey = keyof typeof PANEL_LIMITS;
+
+const clampPanel = (key: PanelKey, v: unknown): number => {
+  const { min, max, base } = PANEL_LIMITS[key];
+  return typeof v === 'number' && Number.isFinite(v)
+    ? Math.min(Math.max(Math.round(v), min), max)
+    : base;
+};
 
 /**
  * First run: the rail is open because it is the app's verbs — components
@@ -81,7 +114,13 @@ interface LayoutPrefs {
  * carries p99, goodput, errors and dropped, so the strip is depth to be
  * opened when a headline number needs explaining, not a fixture.
  */
-const DEFAULT_LAYOUT: LayoutPrefs = { library: true, metrics: false };
+const DEFAULT_LAYOUT: LayoutPrefs = {
+  library: true,
+  metrics: false,
+  railW: PANEL_LIMITS.railW.base,
+  insW: PANEL_LIMITS.insW.base,
+  stripH: PANEL_LIMITS.stripH.base,
+};
 
 function loadLayout(): LayoutPrefs {
   try {
@@ -93,6 +132,9 @@ function loadLayout(): LayoutPrefs {
     return {
       library: typeof p.library === 'boolean' ? p.library : DEFAULT_LAYOUT.library,
       metrics: typeof p.metrics === 'boolean' ? p.metrics : DEFAULT_LAYOUT.metrics,
+      railW: clampPanel('railW', p.railW),
+      insW: clampPanel('insW', p.insW),
+      stripH: clampPanel('stripH', p.stripH),
     };
   } catch {
     // Blocked or corrupt storage: the default layout, never a crash.
@@ -1874,12 +1916,33 @@ export default function App() {
           (inspectorVisible ? ' has-inspector' : '') +
           (metricsVisible ? ' has-metrics' : '')
         }
+        /* The three panel sizes, written here because .app-body is where the
+           slots and the strip's insets all read them from. A drag rewrites
+           these same properties directly on this element and only commits to
+           React at the end, so the canvas does not re-render per frame. */
+        style={
+          {
+            '--rail-w': `${layout.railW}px`,
+            '--ins-w': `${layout.insW}px`,
+            '--strip-h': `${layout.stripH}px`,
+          } as CSSProperties
+        }
       >
         <PanelSlot open={layout.library} edge="left">
           <Palette
             onAdd={handlePaletteAdd}
             onAddAnnotation={handlePaletteAnnotation}
             armedTool={armedTool}
+          />
+          <PanelResizer
+            edge="left"
+            property="--rail-w"
+            size={layout.railW}
+            min={PANEL_LIMITS.railW.min}
+            max={PANEL_LIMITS.railW.max}
+            onCommit={(railW) => setLayout((l) => ({ ...l, railW }))}
+            onReset={() => setLayout((l) => ({ ...l, railW: PANEL_LIMITS.railW.base }))}
+            label="Resize the components rail"
           />
         </PanelSlot>
 
@@ -1977,6 +2040,18 @@ export default function App() {
           </div>
           <PanelSlot open={metricsVisible} edge="bottom">
             {snapshot ? <Metrics snapshot={snapshot} /> : null}
+            <PanelResizer
+              edge="bottom"
+              property="--strip-h"
+              size={layout.stripH}
+              min={PANEL_LIMITS.stripH.min}
+              max={PANEL_LIMITS.stripH.max}
+              onCommit={(stripH) => setLayout((l) => ({ ...l, stripH }))}
+              onReset={() =>
+                setLayout((l) => ({ ...l, stripH: PANEL_LIMITS.stripH.base }))
+              }
+              label="Resize the charts strip"
+            />
           </PanelSlot>
         </main>
 
@@ -1991,6 +2066,16 @@ export default function App() {
             selectedEdgeCount={selectedEdgeCount}
             onChangeMany={handleConfigChangeMany}
             onDeleteMany={handleDeleteMany}
+          />
+          <PanelResizer
+            edge="right"
+            property="--ins-w"
+            size={layout.insW}
+            min={PANEL_LIMITS.insW.min}
+            max={PANEL_LIMITS.insW.max}
+            onCommit={(insW) => setLayout((l) => ({ ...l, insW }))}
+            onReset={() => setLayout((l) => ({ ...l, insW: PANEL_LIMITS.insW.base }))}
+            label="Resize the inspector"
           />
         </PanelSlot>
       </div>

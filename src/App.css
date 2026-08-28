@@ -596,9 +596,17 @@
    -------------------------------------------------------------------------- */
 
 @media (max-width: 1360px) {
-  .app-body {
-    --rail-w: 200px;
-    --ins-w: 288px;
+  /* A dragged size is written inline on .app-body, which outranks any rule
+     in this file, so these cannot simply restate a narrower number: a rail
+     dragged to 420px on a wide screen would keep all 420px here and leave
+     almost no canvas. The inline value is therefore a MAX rather than the
+     width itself, and the panel takes whichever is smaller. */
+  .app-slot-left {
+    width: min(var(--rail-w), 200px);
+  }
+
+  .app-slot-right {
+    width: min(var(--ins-w), 288px);
   }
 
   /* The bar's padding tightens with the rails. */
@@ -639,8 +647,10 @@
    -------------------------------------------------------------------------- */
 
 @media (max-height: 720px) {
-  .app-body {
-    --strip-h: clamp(150px, 24vh, 196px);
+  /* Same reasoning as the width override above: a MAX, not a replacement,
+     because the dragged value is inline and would otherwise win. */
+  .app-slot-bottom {
+    height: min(var(--strip-h), clamp(150px, 24vh, 196px));
   }
 }
 
