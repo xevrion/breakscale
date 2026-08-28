@@ -169,39 +169,67 @@
 }
 
 /* --------------------------------------------------------------------------
-   Body: palette | stage | inspector.
+   Body: the canvas is the whole area below the bar, and every panel FLOATS
+   over it.
 
-   Every panel is OPTIONAL — the shell mounts a panel only while it is open,
-   so the layout is flex rather than a fixed grid template: whatever is
-   absent simply is not there, and the stage takes its space with no
-   per-combination CSS.
+   The panels used to be flex SIBLINGS of the stage, so opening one resized
+   the canvas and every node visibly slid sideways. That is backwards: the
+   panels are chrome ABOVE the drawing, not walls beside it, which is the
+   same structure that makes Excalidraw feel like a canvas app. Here the
+   stage always spans the full body, the slots are absolutely positioned on
+   top of it, and toggling a panel therefore cannot change the canvas's
+   viewport rect at all. A node stays on the same screen pixel through any
+   panel toggle, including mid-drag.
 
-   The rails are FIXED width when present. They hold a grouped component
-   list and a config form; neither reads better wider, and letting them grow
-   is exactly what makes a large display feel empty. Every extra pixel goes
-   to the stage, which is the subject of the app.
+   The rails are FIXED width. They hold a grouped component list and a
+   config form; neither reads better wider, and a wide rail now costs canvas
+   the student can see, not just canvas the layout gives up.
+
+   The geometry lives in the three custom properties below, because FOUR
+   consumers must agree on it: the slot itself, the toggle button that must
+   clear it, the canvas corner chrome that must clear it, and the .stage-safe
+   sentinel the canvas measures for fit. One token each, no copies.
+
+   `has-library` / `has-inspector` / `has-metrics` are set by the shell and
+   mean "this panel is open". They flip at the START of a close (the slot is
+   still sliding out), which is deliberate: the chrome transitions back into
+   the reclaimed space over the same duration the panel takes to leave.
    -------------------------------------------------------------------------- */
 
 .app-body {
+  position: relative;
   display: flex;
   min-height: 0;
   overflow: hidden;
+
+  --rail-w: 224px;
+  --ins-w: 320px;
+  /* The strip's height is a FIXED clamp, not content-sized. As an overlay
+     its height is part of the shell's geometry contract (the sentinel, the
+     toggles and the ledger all need the same number), and its charts
+     already scroll internally when they want more. 26vh capped at 260px
+     keeps the diagram the dominant half of the screen at every window. */
+  --strip-h: clamp(196px, 26vh, 260px);
 }
 
 /* --------------------------------------------------------------------------
    Panel slots.
 
    Each collapsible panel sits inside a slot div owned by PanelSlot in
-   App.tsx. The SLOT is the flex item and owns the panel's layout size; the
-   panel fills it and paints its own surface. Motion is a TRANSFORM on the
-   slot, sliding it in from the edge it lives on, so the slide itself never
-   invalidates layout: the canvas beside it reflows exactly once per toggle
-   (when the slot mounts or unmounts), never once per animation frame. That
-   is what keeps a drag on the canvas from drifting while a panel moves.
+   App.tsx. The SLOT is absolutely positioned OVER the stage and owns the
+   panel's geometry; the panel fills it and paints its own OPAQUE surface
+   (no translucency: a panel is a place to read, not a window). Motion is a
+   TRANSFORM on the slot, sliding it in from the edge it lives on, so the
+   slide invalidates no layout, and because the slot is out of flow even its
+   mount and unmount leave the canvas's rect untouched.
 
-   A slot translated off its edge is clipped by .app-body / .app-stage
-   (both overflow: hidden), so no state of this animation can make the page
-   scrollable.
+   A slot translated off its edge is clipped by .app-body (overflow:
+   hidden), so no state of this animation can make the page scrollable.
+
+   z-index: the rails sit above the strip only as a tie-break; the strip is
+   inset past any open rail (below) so the three never actually overlap and
+   no chart is ever hidden behind a rail. All of it stays under the toast
+   (300) and the tooltip layer (400).
    -------------------------------------------------------------------------- */
 
 .app-slot {
@@ -211,11 +239,15 @@
 }
 
 /* Both rails scroll internally via the shared .scroll primitive and paint
-   their own surface. The body only supplies the separating hairline, so
-   the rule that draws it lives with the layout that needs it. */
+   their own surface. The slot only supplies geometry; the hairline that
+   separates a panel from the canvas is the panel's own border. */
 .app-slot-left {
-  flex: none;
-  width: 224px;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--rail-w);
+  z-index: 10;
 }
 
 .app-slot-left > .pal {
@@ -226,8 +258,12 @@
 }
 
 .app-slot-right {
-  flex: none;
-  width: 320px;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: var(--ins-w);
+  z-index: 10;
 }
 
 .app-slot-right > .ins {
@@ -236,25 +272,22 @@
 }
 
 /* --------------------------------------------------------------------------
-   Stage: canvas above, metrics strip pinned below.
+   Stage: the full-body canvas, with the metrics strip floating at its foot.
 
-   The strip spans only the canvas, not the inspector, so a selected node's
+   The stage is the only in-flow child of the body, so it takes the whole
+   area under the bar; the strip is absolute within it, pinned to the
+   bottom and inset past whichever rails are open, so a selected node's
    knobs and the system's charts stay legible side by side.
    -------------------------------------------------------------------------- */
 
 .app-stage {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  /* The strip reflows against THIS box, not the viewport. A viewport media
-     query cannot see that the stage is the viewport minus both rails, which
-     is why the old `@media (max-width: 1000px)` on .mx could never fire at
-     any width the app is actually used at. */
-  container-type: inline-size;
-  container-name: stage;
 }
 
 /* The canvas and the chrome that floats over it. A positioning root so the
@@ -285,6 +318,19 @@
   position: absolute;
   z-index: 5;
   color: var(--text-dim);
+  /* The offset properties ride the panel slide (--dur-base, same clock);
+     the rest restates .btn's own interactive transition, because a
+     shorthand here would otherwise erase it. The global reduced-motion
+     rule in index.css shortens all of these to nothing. */
+  transition:
+    left var(--dur-base) var(--ease),
+    right var(--dur-base) var(--ease),
+    bottom var(--dur-base) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
 .stage-toggle:hover:not(:disabled) {
@@ -308,30 +354,136 @@
   left: var(--sp-3);
 }
 
-/* The strip gets a floor AND a ceiling.
+/* --------------------------------------------------------------------------
+   Chrome vs. floating panels.
 
-   min-height keeps the charts from being crushed when the window is short.
-   max-height is the part that was missing: `min-height` alone is only a
-   floor, so a content-sized strip still grows to whatever the charts want,
-   and a two-row chart reflow made the strip 521px against a 172px canvas.
-   The canvas must always be the bigger half of the stage.
+   With the panels overlaying the canvas, anything pinned to a canvas edge
+   would land UNDER an open panel. Each piece of edge chrome therefore
+   shifts past the panel on its edge, keyed off the same has-* classes and
+   width tokens the slots use, so the two can never disagree about where a
+   panel ends. The toggles keep their rule of living where their panel
+   lives, in both states: the button that closed a panel is the button that
+   reopens it, now sitting flush against the panel's edge.
 
-   40vh is deliberately below half the stage's height at every window size
-   the app is used at, so the diagram always dominates. */
+   The .cv-ledger / .cv-zoom overrides reach into the canvas's chrome from
+   here on purpose: only the shell knows the panel state, and the offsets
+   are the shell's own geometry tokens. Canvas.css still owns their look.
+   -------------------------------------------------------------------------- */
+
+.app-body.has-library .stage-toggle-library {
+  left: calc(var(--rail-w) + var(--sp-3));
+}
+
+.app-body.has-inspector .stage-toggle-inspector {
+  right: calc(var(--ins-w) + var(--sp-3));
+}
+
+.app-body.has-library .stage-toggle-metrics {
+  left: calc(var(--rail-w) + var(--sp-3));
+}
+
+.app-body.has-metrics .stage-toggle-metrics {
+  bottom: calc(var(--strip-h) + var(--sp-3));
+}
+
+/* The ledger sits to the right of the metrics toggle (32px + two gaps, the
+   same sum Canvas.css documents on .cv-ledger) and follows it past an open
+   rail; both it and the zoom cluster ride up over the open strip. */
+.app-body.has-library .cv-ledger {
+  left: calc(var(--rail-w) + var(--sp-3) + 32px + var(--sp-3));
+}
+
+.app-body.has-metrics .cv-ledger,
+.app-body.has-metrics .cv-zoom {
+  bottom: calc(var(--strip-h) + var(--sp-3));
+}
+
+.app-body.has-inspector .cv-zoom {
+  right: calc(var(--ins-w) + var(--sp-3));
+}
+
+.cv-ledger,
+.cv-zoom {
+  transition:
+    left var(--dur-base) var(--ease),
+    right var(--dur-base) var(--ease),
+    bottom var(--dur-base) var(--ease);
+}
+
+/* --------------------------------------------------------------------------
+   The uncovered-canvas sentinel.
+
+   THE ANSWER TO "part of the diagram is underneath a panel". The canvas
+   spans the whole stage, so with panels open some of it is covered; a
+   student must still always be able to reach every node. This invisible,
+   inert div is kept inset to exactly the UNCOVERED area, and the canvas
+   measures it (Canvas's visibleRef) whenever it aims the camera: zoom-to-
+   fit frames content inside this rect, palette clicks and off-pointer
+   pastes land at its centre, and keyboard zoom pivots on it. Content
+   therefore never STARTS under a panel, and anything dragged or panned
+   under one is one fit press (Shift+1) or a short pan from reachable,
+   with panning itself unlimited.
+
+   It is measured, never subscribed to: toggling a panel changes this rect
+   but triggers no camera move, which is precisely the point.
+
+   visibility: hidden and pointer-events: none, and it sits OUTSIDE
+   .cv-surface, so the canvas gesture router can never see it.
+   -------------------------------------------------------------------------- */
+
+.stage-safe {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.app-body.has-library .stage-safe {
+  left: var(--rail-w);
+}
+
+.app-body.has-inspector .stage-safe {
+  right: var(--ins-w);
+}
+
+.app-body.has-metrics .stage-safe {
+  bottom: var(--strip-h);
+}
+
+/* The strip: pinned to the stage's foot, --strip-h tall (rationale on the
+   token), and inset past any OPEN rail so the three panels tile instead of
+   stacking: a rail over the strip's end would hide live charts behind an
+   opaque surface, and z-order cannot fix what tiling prevents outright. */
 .app-slot-bottom {
-  /* Sized by its own content between the floor and ceiling below; the
-     canvas flexes, the strip does not. */
-  flex: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--strip-h);
   flex-direction: column;
-  min-height: clamp(196px, 26vh, 260px);
-  max-height: 40vh;
+  z-index: 9;
+  /* The charts reflow against the STRIP's own width, which is the stage
+     minus whichever rails are open; a viewport media query cannot see
+     that, and since the strip became an overlay neither can a query on
+     the stage (always full width now). Metrics.css @container rules
+     resolve against this box. */
+  container-type: inline-size;
+  container-name: stage;
+}
+
+.app-body.has-library .app-slot-bottom {
+  left: var(--rail-w);
+}
+
+.app-body.has-inspector .app-slot-bottom {
+  right: var(--ins-w);
 }
 
 .app-slot-bottom > .mx {
   flex: 1 1 auto;
   min-height: 0;
-  /* The cap can only be honoured if the strip is allowed to scroll rather
-     than spill its charts over the canvas above it. */
+  /* The fixed height can only be honoured if the strip is allowed to
+     scroll rather than spill its charts over the canvas above it. */
   overflow-y: auto;
   border-top: var(--bw) solid var(--border);
   background: var(--surface);
@@ -420,19 +572,17 @@
 /* --------------------------------------------------------------------------
    The single layout media query.
 
-   Below this the rails narrow so the stage keeps enough width for three
-   charts. The strip then reflows on its own through container queries in
-   Metrics.css. Three unrelated breakpoints (1180 / 1100 / 1000) collapsed
-   to this one plus those two container queries.
+   Below this the rails narrow, so the strip and the safe area they inset
+   keep enough width for three charts. The strip then reflows on its own
+   through container queries in Metrics.css. Three unrelated breakpoints
+   (1180 / 1100 / 1000) collapsed to this one plus those two container
+   queries.
    -------------------------------------------------------------------------- */
 
 @media (max-width: 1360px) {
-  .app-slot-left {
-    width: 200px;
-  }
-
-  .app-slot-right {
-    width: 288px;
+  .app-body {
+    --rail-w: 200px;
+    --ins-w: 288px;
   }
 
   /* The bar's padding tightens with the rails. */

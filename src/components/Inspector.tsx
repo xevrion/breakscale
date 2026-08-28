@@ -1,5 +1,12 @@
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+/*
+ * Transport glyphs. The top-level entry, not the per-icon deep paths the
+ * canvas uses: here the React component wrapper is exactly what we want
+ * (each button holds one <svg> of its own), and the package is marked
+ * side-effect-free so the build keeps only these four.
+ */
+import { Pause, Play, RotateCcw, StepForward } from 'lucide-react';
 import type {
   NodeConfig,
   NodeKind,
@@ -3094,21 +3101,71 @@ export function TrafficControl({
         )}
       </div>
 
-      <div className="traffic-actions">
-        <button type="button" className="btn btn-primary" onClick={onToggleRun}>
+      {/*
+        The transport. Icon-only, which is the settled convention for these
+        three actions everywhere from video players to debuggers; the words
+        move into aria-label and the title, where the shortcut is printed
+        beside the action the same way the undo pair prints Ctrl+Z.
+
+        role="group" with a name, so a screen reader announces "Simulation
+        transport" once and then three short labels, instead of three
+        orphaned buttons.
+      */}
+      <div className="traffic-actions" role="group" aria-label="Simulation transport">
+        <button
+          type="button"
+          className="btn btn-icon transport-toggle"
+          onClick={onToggleRun}
+          aria-label={running ? 'Pause' : 'Play'}
+          title={running ? 'Pause (Space)' : 'Play (Space)'}
+        >
           {/* No aria-pressed. The label itself flips Pause <-> Play, so the
               button already states its effect; adding a pressed state made a
               running simulation announce "Pause, pressed", which reads as
-              ALREADY paused — the opposite of the truth. */}
-          {running ? 'Pause' : 'Play'}
+              ALREADY paused, the opposite of the truth.
+
+              ONE button, two glyphs, in a fixed-width .btn-icon box: the
+              old text label resized the button every time the state
+              flipped. Both glyphs are drawn filled because that is how a
+              transport control states "this is the go/stop switch", and
+              the fill is what marks it primary now that the accent surface
+              is gone (an icon in a coloured box is on the ban list). */}
+          {running ? (
+            <Pause size={18} strokeWidth={1.5} fill="currentColor" aria-hidden="true" />
+          ) : (
+            <Play
+              size={18}
+              strokeWidth={1.5}
+              fill="currentColor"
+              aria-hidden="true"
+              /* A triangle's visual mass sits left of its bounding-box
+                 centre; the class nudges it right so play and pause land
+                 on the same optical centre and the swap does not flicker. */
+              className="transport-play"
+            />
+          )}
         </button>
         {/* Stepping is only meaningful against a stopped clock, and it
-            pauses on its own, so the control states what it will do. */}
-        <button type="button" className="btn" onClick={onStep}>
-          Step
+            pauses on its own, so the tooltip states what it will do. */}
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={onStep}
+          aria-label="Step one tick"
+          title="Step one tick (S)"
+        >
+          <StepForward size={16} aria-hidden="true" />
         </button>
-        <button type="button" className="btn" onClick={onReset}>
-          Reset
+        {/* No shortcut: reset throws away the run's numbers, and an action
+            with a cost is exactly the one that should require the pointer. */}
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={onReset}
+          aria-label="Reset simulation"
+          title="Reset simulation"
+        >
+          <RotateCcw size={16} aria-hidden="true" />
         </button>
       </div>
     </div>

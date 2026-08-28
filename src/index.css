@@ -1601,6 +1601,12 @@ input[type='radio'] {
   min-height: 0;
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
+  /* Scrolling stops here rather than chaining to an ancestor. Two things
+     depend on it: a wheel gesture that reaches the end of this panel must not
+     start moving whatever is behind it, and full-page capture extensions walk
+     every scroll container they find, so an unbounded one makes them scroll
+     the app instead of photographing it. */
+  overscroll-behavior: contain;
 }
 
 .scroll::-webkit-scrollbar {

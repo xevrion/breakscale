@@ -1,0 +1,247 @@
+/* ==========================================================================
+   The examples gallery.
+
+   Same dialog shell as the shortcuts card, deliberately: a student who has
+   opened one reference already knows how this one behaves. It is wider,
+   because a grid of cards needs the room and the whole reason this left the
+   sidebar is that a rail row could not show what an example teaches.
+   ========================================================================== */
+
+.ex-root {
+  position: fixed;
+  inset: 0;
+  /* Level with the other dialogs, above the tooltip layer at 400 so a tooltip
+     can never float over the card covering its trigger. */
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+}
+
+.ex-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  cursor: default;
+  animation: ex-scrim-in var(--dur-slow) var(--ease-out);
+}
+
+.ex-root.is-closing .ex-scrim {
+  animation: ex-scrim-out var(--dur-base) var(--ease) forwards;
+}
+
+.ex-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  /* Wider than the shortcuts card: three columns of prose need it, and the
+     cap keeps the measure readable on a very wide monitor. */
+  width: min(980px, 100%);
+  max-height: min(720px, 100%);
+  min-height: 0;
+  padding: var(--sp-5);
+  background: var(--surface);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  outline: none;
+  animation: ex-card-in var(--dur-slow) var(--ease-out);
+}
+
+.ex-root.is-closing .ex-card {
+  animation: ex-card-out var(--dur-base) var(--ease) forwards;
+}
+
+/* --------------------------------------------------------------------------
+   Header
+   -------------------------------------------------------------------------- */
+
+.ex-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.ex-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+.ex-sub {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+.ex-search {
+  flex: 0 0 auto;
+}
+
+/* --------------------------------------------------------------------------
+   The grid
+
+   auto-fill rather than auto-fit: with a search filtered down to one result,
+   auto-fit would stretch that single card the full width of the dialog, which
+   reads as a layout accident. auto-fill keeps every card the same size no
+   matter how many survive the filter.
+   -------------------------------------------------------------------------- */
+
+.ex-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0 var(--sp-1) var(--sp-1) 0;
+  list-style: none;
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  overscroll-behavior: contain;
+}
+
+.ex-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-3);
+  text-align: left;
+  background: var(--surface-2);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.ex-item:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.ex-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The loaded example is marked by its border and a word, not by a filled
+   background: a solid accent block behind body text is the one thing that
+   would make the description in this card unreadable. */
+.ex-item[data-active] {
+  border-color: var(--accent);
+}
+
+.ex-item-name {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-med);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+.ex-item-tagline {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+/* The part a rail row had no room for, and the reason this is a gallery. */
+.ex-item-desc {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-body);
+  line-height: var(--lh-prose);
+  color: var(--text-faint);
+  text-wrap: pretty;
+}
+
+.ex-item-active {
+  margin-top: auto;
+  padding-top: var(--sp-2);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-med);
+  letter-spacing: var(--tr-label);
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+
+.ex-empty {
+  margin: 0;
+  padding: var(--sp-5) 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-prose);
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   Motion
+   -------------------------------------------------------------------------- */
+
+@keyframes ex-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ex-card-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes ex-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ex-scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Durations collapse rather than `animation: none`, because unmount rides
+   animationend and removing the animation outright would strand the dialog
+   mounted forever. */
+@media (prefers-reduced-motion: reduce) {
+  .ex-card,
+  .ex-scrim,
+  .ex-root.is-closing .ex-card,
+  .ex-root.is-closing .ex-scrim {
+    animation-duration: 0.01ms;
+  }
+
+  .ex-item {
+    transition: none;
+  }
+}

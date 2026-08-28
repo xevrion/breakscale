@@ -12,6 +12,7 @@ import type {
   CSSProperties,
   MutableRefObject,
   PointerEvent as ReactPointerEvent,
+  RefObject,
 } from 'react';
 import type {
   EdgeState,
@@ -363,6 +364,16 @@ export interface CanvasProps {
    * bump it, so add/delete/undo keep the camera still. See the fit effect.
    */
   fitSignal?: number;
+  /**
+   * Optional: an element whose bounding rect is the part of the canvas NOT
+   * covered by the shell's floating panels (the .stage-safe sentinel). The
+   * canvas MEASURES it whenever it aims the camera itself: zoom-to-fit
+   * frames content inside this rect, palette clicks and off-pointer pastes
+   * land at its centre, keyboard zoom pivots on it. It is never subscribed
+   * to: a panel toggle changes the rect but must not move the camera.
+   * Omitted, the whole surface is treated as visible.
+   */
+  visibleRef?: RefObject<HTMLElement | null>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -2609,6 +2620,7 @@ export default function Canvas({
   spark,
   viewCenterRef,
   fitSignal = 0,
+  visibleRef,
 }: CanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -2692,22 +2704,46 @@ export default function Canvas({
   }, []);
 
   /**
+   * The two rects every camera-aiming decision reads: the surface (what the
+   * view transform is relative to) and the VISIBLE part of it (the shell's
+   * uncovered-area sentinel, when provided). The panels float over the
+   * canvas, so "centre of the canvas" and "centre of what the student can
+   * see" are different points whenever a panel is open; fit, palette
+   * placement, paste and keyboard zoom all want the second one. Measured at
+   * call time, never subscribed to, so a panel toggle changes future aims
+   * without ever moving the camera by itself.
+   */
+  const visibleRect = useCallback(() => {
+    const el = surfaceRef.current;
+    if (!el) return null;
+    const surface = el.getBoundingClientRect();
+    const v = visibleRef?.current?.getBoundingClientRect();
+    // A degenerate sentinel (absent, or crushed to nothing by a tiny
+    // window) falls back to the whole surface rather than to NaN maths.
+    const view = v && v.width > 0 && v.height > 0 ? v : surface;
+    return { surface, view };
+  }, [visibleRef]);
+
+  /**
    * Publish the view-centre getter for the shell's palette-click placement.
-   * Reads surfaceRef and viewRef through toWorld, so the value is always
-   * current without this effect ever re-running per pan/zoom frame.
+   * Reads the refs through visibleRect/toWorld, so the value is always
+   * current without this effect ever re-running per pan/zoom frame. The
+   * centre is the centre of the UNCOVERED area: a palette click happens
+   * with the rail open by definition, and a node placed at the centre of
+   * the full surface would land offset toward, or under, that very rail.
    */
   useEffect(() => {
     if (!viewCenterRef) return;
     viewCenterRef.current = () => {
-      const el = surfaceRef.current;
-      if (!el) return { x: 0, y: 0 };
-      const r = el.getBoundingClientRect();
-      return toWorld(r.left + r.width / 2, r.top + r.height / 2);
+      const rects = visibleRect();
+      if (!rects) return { x: 0, y: 0 };
+      const { view } = rects;
+      return toWorld(view.left + view.width / 2, view.top + view.height / 2);
     };
     return () => {
       viewCenterRef.current = null;
     };
-  }, [viewCenterRef, toWorld]);
+  }, [viewCenterRef, toWorld, visibleRect]);
 
   /* ---------------- selection helpers ---------------- */
 
@@ -3305,15 +3341,20 @@ export default function Canvas({
     });
   }, []);
 
-  /** Zoom about the viewport centre: the keyboard and button path. */
+  /**
+   * Zoom about the visible centre: the keyboard and button path. The pivot
+   * is the centre of the UNCOVERED area, not of the surface, so repeated
+   * zooming with a panel open does not walk the content toward (and then
+   * under) that panel.
+   */
   const zoomCentered = useCallback(
     (next: (k: number) => number) => {
-      const el = surfaceRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      zoomAt(r.width / 2, r.height / 2, next);
+      const rects = visibleRect();
+      if (!rects) return;
+      const { surface: r, view: vr } = rects;
+      zoomAt(vr.left - r.left + vr.width / 2, vr.top - r.top + vr.height / 2, next);
     },
-    [zoomAt],
+    [zoomAt, visibleRect],
   );
 
   useEffect(() => {
@@ -3554,16 +3595,21 @@ export default function Canvas({
       const sub = parseClipboardText(text);
       if (!sub) return;
       e.preventDefault();
-      // At the pointer when it is over the canvas; at the viewport centre
-      // when it is not (a paste right after switching windows, say).
+      // At the pointer when it is over the canvas; at the centre of the
+      // VISIBLE (panel-free) area when it is not (a paste right after
+      // switching windows, say), so the paste never lands under a panel.
       const last = lastClientRef.current;
       let at: { x: number; y: number };
       if (last) {
         at = toWorld(last.x, last.y);
       } else {
-        const el = surfaceRef.current;
-        const r = el?.getBoundingClientRect();
-        at = r ? toWorld(r.left + r.width / 2, r.top + r.height / 2) : { x: 0, y: 0 };
+        const rects = visibleRect();
+        at = rects
+          ? toWorld(
+              rects.view.left + rects.view.width / 2,
+              rects.view.top + rects.view.height / 2,
+            )
+          : { x: 0, y: 0 };
       }
       onPaste(sub, at);
     };
@@ -3576,7 +3622,7 @@ export default function Canvas({
       document.removeEventListener('cut', onCut);
       document.removeEventListener('paste', onPasteEvent);
     };
-  }, [onDeleteSelection, clearSelection, onPaste, toWorld]);
+  }, [onDeleteSelection, clearSelection, onPaste, toWorld, visibleRect]);
 
   /* ---------------- palette drops ---------------- */
 
@@ -3614,38 +3660,47 @@ export default function Canvas({
    * same rounding zoomAt applies, so a fit and a keyboard zoom can never
    * report two spellings of the same percentage.
    */
-  const fitTo = useCallback((nodes: readonly SimNode[]) => {
-    const el = surfaceRef.current;
-    if (!el || nodes.length === 0) return;
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) return;
+  const fitTo = useCallback(
+    (nodes: readonly SimNode[]) => {
+      const rects = visibleRect();
+      if (!rects || nodes.length === 0) return;
+      // Scale and centring both use the VISIBLE rect, so a fit with panels
+      // open frames the diagram inside the uncovered area and never parks a
+      // node under an opaque panel. The view offset is still expressed
+      // relative to the surface, which is what the transform is anchored to.
+      const { surface: r, view: vr } = rects;
+      if (vr.width === 0 || vr.height === 0) return;
 
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const n of nodes) {
-      if (n.x < minX) minX = n.x;
-      if (n.y < minY) minY = n.y;
-      if (n.x + NODE_W > maxX) maxX = n.x + NODE_W;
-      if (n.y + NODE_H > maxY) maxY = n.y + NODE_H;
-    }
-    const bw = Math.max(1, maxX - minX);
-    const bh = Math.max(1, maxY - minY);
-    const k = clamp(
-      Math.round(
-        Math.min((r.width - FIT_MARGIN * 2) / bw, (r.height - FIT_MARGIN * 2) / bh) *
-          1000,
-      ) / 1000,
-      FIT_MIN,
-      FIT_MAX,
-    );
-    setView({
-      k,
-      x: (r.width - bw * k) / 2 - minX * k,
-      y: (r.height - bh * k) / 2 - minY * k,
-    });
-  }, []);
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const n of nodes) {
+        if (n.x < minX) minX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.x + NODE_W > maxX) maxX = n.x + NODE_W;
+        if (n.y + NODE_H > maxY) maxY = n.y + NODE_H;
+      }
+      const bw = Math.max(1, maxX - minX);
+      const bh = Math.max(1, maxY - minY);
+      const k = clamp(
+        Math.round(
+          Math.min(
+            (vr.width - FIT_MARGIN * 2) / bw,
+            (vr.height - FIT_MARGIN * 2) / bh,
+          ) * 1000,
+        ) / 1000,
+        FIT_MIN,
+        FIT_MAX,
+      );
+      setView({
+        k,
+        x: vr.left - r.left + (vr.width - bw * k) / 2 - minX * k,
+        y: vr.top - r.top + (vr.height - bh * k) / 2 - minY * k,
+      });
+    },
+    [visibleRect],
+  );
 
   const fitToContent = useCallback(
     () => fitTo(topology.nodes),

@@ -1,7 +1,6 @@
 import { createElement, useCallback, useMemo, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import type { NodeKind } from '../sim/types';
-import type { Preset } from '../sim/presets';
 import {
   ICON_BOX,
   ICON_STROKE,
@@ -246,9 +245,6 @@ function Section({
 export interface PaletteProps {
   /** Add a node of `kind` to the canvas at a default position. */
   onAdd: (kind: NodeKind) => void;
-  presets: Preset[];
-  activePresetId: string | null;
-  onLoadPreset: (preset: Preset) => void;
 }
 
 function handleDragStart(event: DragEvent<HTMLButtonElement>, kind: NodeKind) {
@@ -258,12 +254,7 @@ function handleDragStart(event: DragEvent<HTMLButtonElement>, kind: NodeKind) {
   dt.effectAllowed = 'copy';
 }
 
-export function Palette({
-  onAdd,
-  presets,
-  activePresetId,
-  onLoadPreset,
-}: PaletteProps) {
+export function Palette({ onAdd }: PaletteProps) {
   /**
    * Whether the hover explanations are on. With them OFF (the default) the
    * per-row "?" mark is not rendered at all: <Term> degrades to its bare
@@ -319,43 +310,6 @@ export function Palette({
   return (
     <nav className="pal" aria-label="Components and examples">
       <div className="pal-scroll scroll">
-        <Section
-          id="examples"
-          title="Examples"
-          count={presets.length}
-          open={!closed.has('examples')}
-          onToggle={() => toggle('examples')}
-        >
-          <ul className="pal-list">
-            {presets.map((preset) => {
-              const active = preset.id === activePresetId;
-              return (
-                <li key={preset.id}>
-                  <button
-                    type="button"
-                    className="pal-row pal-row-preset"
-                    data-active={active || undefined}
-                    aria-current={active ? 'true' : undefined}
-                    onClick={() => onLoadPreset(preset)}
-                    title={preset.description}
-                  >
-                    {/* The active marker is a glyph slot, not a border on
-                        the row: a coloured edge plus a radius is the shape
-                        the design rules forbid, and the slot also keeps
-                        every preset name on one left axis whether or not
-                        it is the active one. */}
-                    <span className="pal-mark" aria-hidden="true" />
-                    <span className="pal-preset-text">
-                      <span className="pal-name">{preset.name}</span>
-                      <span className="pal-note">{preset.tagline}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </Section>
-
         <Section
           id="components"
           title="Components"

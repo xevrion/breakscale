@@ -24,6 +24,7 @@ import { Metrics } from './components/Metrics';
 import { Palette } from './components/Palette';
 import { Glossary } from './components/Glossary';
 import { Shortcuts } from './components/Shortcuts';
+import { Examples } from './components/Examples';
 import { cloneSubgraph, isTopology, selectionSubgraph } from './clipboard';
 import type { ClipboardSubgraph } from './clipboard';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
@@ -131,11 +132,11 @@ function PanelGlyph({ edge }: { edge: 'left' | 'right' | 'bottom' }) {
  * Why transform, not an animated width or grid track: the canvas's
  * world-to-screen maths reads its viewport rect, so a layout that changes on
  * every animation frame would make an in-progress node drag drift and force
- * a re-fit per frame. With this design the slot's layout size changes in ONE
- * step per toggle (on open it appears at full size and the panel slides into
- * it; on close the panel slides out first and the slot collapses at
- * animationend), so the canvas reflows exactly once, never per frame, and a
- * transform invalidates no layout at all.
+ * a re-fit per frame. The slots are absolutely positioned OVER the stage
+ * (App.css), so in fact no state of this animation, and not even the slot's
+ * mount or unmount, can change the canvas's rect: the diagram holds the same
+ * screen pixels through any toggle, including one mid-drag, and the slide is
+ * a pure transform that invalidates no layout at all.
  *
  * While closing the slot is `inert`: the leaving panel cannot take focus and
  * is invisible to a screen reader, and at animationend it unmounts outright,
@@ -345,6 +346,7 @@ export default function App() {
 
   /** The keyboard shortcuts dialog. Ctrl+/ and the top-bar button. */
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [examplesOpen, setExamplesOpen] = useState(false);
 
   /* ---------------- panel layout ---------------- */
 
@@ -384,6 +386,15 @@ export default function App() {
 
   const hasSelection = selectedIds.size > 0;
   const inspectorVisible = hasSelection && !inspectorHidden;
+
+  /**
+   * The uncovered-canvas sentinel (see .stage-safe in App.css): an inert div
+   * the shell keeps inset to the part of the canvas no floating panel
+   * covers. The canvas measures it when aiming the camera (fit, palette
+   * placement, paste, keyboard zoom), so content is always framed into the
+   * visible area; it never triggers a camera move by changing.
+   */
+  const stageSafeRef = useRef<HTMLDivElement | null>(null);
 
   const openGlossary = useCallback((id?: string) => {
     setGlossaryFocusId(id);
@@ -1317,6 +1328,13 @@ export default function App() {
 
   const simTimeMs = snapshot?.system.timeMs ?? 0;
 
+  /**
+   * One definition of "the strip is open", shared by the slot and the
+   * has-metrics class so the panel and the geometry that clears it (chrome
+   * offsets, the safe-area sentinel) can never disagree.
+   */
+  const metricsVisible = layout.metrics && snapshot !== null;
+
   useEffect(() => {
     if (!Number.isFinite(simTimeMs)) return;
     const prev = lostPrevRef.current;
@@ -1488,6 +1506,42 @@ export default function App() {
           exactly the person an icon-only affordance would lose. The printed
           chord makes the binding learnable from the button itself.
         */}
+        {/*
+          Examples opens a gallery rather than living in the components rail.
+          A rail row is something you drag ONTO the canvas; an example is a
+          whole system you load, which is a different act, and the rail had no
+          room to say what any of them teaches. It also means the empty
+          canvas's "open Examples" instruction points at something that is
+          always reachable, which was not true while the rail could be
+          collapsed.
+        */}
+        <button
+          type="button"
+          className="btn app-glossary"
+          aria-haspopup="dialog"
+          aria-expanded={examplesOpen}
+          title="Load a worked example"
+          onClick={() => setExamplesOpen((o) => !o)}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+          Examples
+        </button>
+
         <button
           type="button"
           className="btn app-glossary"
@@ -1546,14 +1600,23 @@ export default function App() {
         </button>
       </header>
 
-      <div className="app-body">
+      {/*
+        The has-* classes drive every piece of geometry that must clear an
+        open panel: the strip's side insets, the toggle and canvas-chrome
+        offsets, and the .stage-safe sentinel (all in App.css). They flip at
+        toggle time, while a closing panel is still sliding out, so the
+        chrome and the panel move on the same clock.
+      */}
+      <div
+        className={
+          'app-body' +
+          (layout.library ? ' has-library' : '') +
+          (inspectorVisible ? ' has-inspector' : '') +
+          (metricsVisible ? ' has-metrics' : '')
+        }
+      >
         <PanelSlot open={layout.library} edge="left">
-          <Palette
-            onAdd={handlePaletteAdd}
-            presets={PRESETS}
-            activePresetId={presetId}
-            onLoadPreset={handleLoadPreset}
-          />
+          <Palette onAdd={handlePaletteAdd} />
         </PanelSlot>
 
         <main className="app-stage">
@@ -1587,7 +1650,14 @@ export default function App() {
               spark={spark}
               viewCenterRef={viewCenterRef}
               fitSignal={fitNonce}
+              visibleRef={stageSafeRef}
             />
+            {/*
+              The uncovered-canvas sentinel. Inert and invisible; a sibling
+              of the Canvas, outside .cv-surface, so the gesture router can
+              never see it. Its rect is the canvas minus every open panel.
+            */}
+            <div ref={stageSafeRef} className="stage-safe" aria-hidden="true" />
             <button
               type="button"
               className="btn btn-sm btn-icon stage-toggle stage-toggle-library"
@@ -1631,7 +1701,7 @@ export default function App() {
               <PanelGlyph edge="bottom" />
             </button>
           </div>
-          <PanelSlot open={layout.metrics && snapshot !== null} edge="bottom">
+          <PanelSlot open={metricsVisible} edge="bottom">
             {snapshot ? <Metrics snapshot={snapshot} /> : null}
           </PanelSlot>
         </main>
@@ -1673,6 +1743,14 @@ export default function App() {
       <TooltipLayer />
       <Glossary open={glossaryOpen} onClose={closeGlossary} focusId={glossaryFocusId} />
       <Shortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+      <Examples
+        open={examplesOpen}
+        onClose={() => setExamplesOpen(false)}
+        presets={PRESETS}
+        activePresetId={presetId}
+        onLoad={handleLoadPreset}
+      />
     </div>
   );
 }

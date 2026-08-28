@@ -638,24 +638,64 @@
   gap: var(--sp-5);
 }
 
+/* The transport, as ONE segmented cluster.
+
+   Three flush buttons sharing hairlines, not three outlined boxes in a row:
+   the shared edge is what makes play/step/reset read as a single control the
+   way a media player's transport does. The negative margin collapses each
+   pair of 1px borders into one, and the radius survives only on the
+   cluster's outer corners. */
 .traffic-actions {
   display: flex;
   flex: none;
   align-items: center;
-  gap: var(--sp-2);
 }
 
-/* One width for the three transport controls.
-
-   Their labels are 4-6 characters, so intrinsic sizing gave 66.8 / 55.1 /
-   62.3px — a ragged group that reads as three unrelated buttons rather than
-   one control cluster. 68px fits the longest label ("Pause") at its 650
-   weight with the button's own padding intact, so nothing is squeezed.
-
-   Not a `width`: a min-width still lets a translated label grow rather than
-   clipping it. */
 .traffic-actions .btn {
-  min-width: 68px;
+  border-radius: 0;
+}
+
+.traffic-actions .btn + .btn {
+  margin-left: calc(-1 * var(--bw));
+}
+
+.traffic-actions .btn:first-child {
+  border-top-left-radius: var(--r-btn);
+  border-bottom-left-radius: var(--r-btn);
+}
+
+.traffic-actions .btn:last-child {
+  border-top-right-radius: var(--r-btn);
+  border-bottom-right-radius: var(--r-btn);
+}
+
+/* Collapsed borders are shared borders, so the hovered or focused button
+   must climb above its neighbours or its highlighted edge and focus ring
+   would be half-eaten by the button drawn after it. */
+.traffic-actions .btn:hover,
+.traffic-actions .btn:active,
+.traffic-actions .btn:focus-visible {
+  position: relative;
+  z-index: 1;
+}
+
+/* Play/pause is the primary action, and it says so by size and by ink:
+   a wider box than its siblings and the accent on the glyph itself
+   (5.78:1 on this surface, well past the 3:1 non-text minimum). NOT by a
+   filled accent box: an icon in a coloured rounded square is on the ban
+   list, and the fill would also fight p99's claim to be the loudest thing
+   in the bar.
+
+   A width, not a min-width: the box must hold still while the glyph inside
+   it swaps between play and pause. That stillness is the whole point. */
+.traffic-actions .transport-toggle {
+  width: 48px;
+  color: var(--accent);
+}
+
+/* The optical-centre nudge for the play triangle (see the JSX comment). */
+.transport-play {
+  transform: translateX(1px);
 }
 
 /* --------------------------------------------------------------------------
