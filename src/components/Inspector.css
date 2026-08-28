@@ -574,6 +574,20 @@
   pointer-events: none;
 }
 
+/* Stands in for the scale row when there is no traffic source. Same slot,
+   same height, so the control does not change size as a client is added or
+   removed. */
+.traffic-scale-note {
+  position: absolute;
+  inset: auto 0 0;
+  height: 12px;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 12px;
+  white-space: nowrap;
+}
+
 .traffic-scale-mark {
   position: absolute;
   top: 0;

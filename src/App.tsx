@@ -2296,6 +2296,7 @@ export default function App() {
             system={snapshot?.system ?? EMPTY_SYSTEM}
             lost={lostRps}
             empty={topology.nodes.length === 0}
+            noTrafficSource={offeredRps === 0 && findClients(topology).length === 0}
           />
         </div>
 

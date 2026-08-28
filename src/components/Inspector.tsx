@@ -2965,6 +2965,16 @@ export interface TrafficControlProps {
    * faked: there is nothing to measure yet, so the bar says that instead.
    */
   empty: boolean;
+  /**
+   * No client on the canvas, so nothing is offering load.
+   *
+   * Separate from `empty`: a design can hold a database and a cache and still
+   * have no traffic source, and the slider is just as inert there as on a
+   * blank canvas. It writes `rps` onto client nodes, so with none to write to
+   * it silently snapped back to where it started, which reads as a broken
+   * control rather than an inapplicable one.
+   */
+  noTrafficSource: boolean;
 }
 
 export function TrafficControl({
@@ -2977,6 +2987,7 @@ export function TrafficControl({
   system,
   lost,
   empty,
+  noTrafficSource,
 }: TrafficControlProps) {
   const sliderId = useId();
 
@@ -3039,20 +3050,32 @@ export function TrafficControl({
                 '--fill-pct': fillPct(rpsToPosition(rps), 0, SLIDER_STEPS),
               } as React.CSSProperties
             }
-            aria-valuetext={`${Math.round(rps)} request${Math.round(rps) === 1 ? '' : 's'} per second`}
+            disabled={noTrafficSource}
+            aria-valuetext={
+              noTrafficSource
+                ? 'No traffic source on the canvas'
+                : `${Math.round(rps)} request${Math.round(rps) === 1 ? '' : 's'} per second`
+            }
             onChange={(e) => onRpsChange(positionToRps(Number(e.currentTarget.value)))}
           />
-          <div className="traffic-scale" aria-hidden="true">
-            {SCALE_MARKS.map((m) => (
-              <span
-                key={m}
-                className="num traffic-scale-mark"
-                style={{ left: `${(rpsToPosition(m) / SLIDER_STEPS) * 100}%` }}
-              >
-                {m >= 1000 ? `${m / 1000}k` : m}
-              </span>
-            ))}
-          </div>
+          {noTrafficSource ? (
+            /* The scale describes a range the slider cannot reach, so it is
+               replaced by the reason rather than sitting under a dead
+               control. Says what to do, not what went wrong. */
+            <p className="traffic-scale-note">Add a client to send traffic.</p>
+          ) : (
+            <div className="traffic-scale" aria-hidden="true">
+              {SCALE_MARKS.map((m) => (
+                <span
+                  key={m}
+                  className="num traffic-scale-mark"
+                  style={{ left: `${(rpsToPosition(m) / SLIDER_STEPS) * 100}%` }}
+                >
+                  {m >= 1000 ? `${m / 1000}k` : m}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
