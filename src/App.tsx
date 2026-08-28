@@ -27,6 +27,17 @@ import { Shortcuts } from './components/Shortcuts';
 import { Examples } from './components/Examples';
 import { cloneSubgraph, isTopology, selectionSubgraph } from './clipboard';
 import type { ClipboardSubgraph } from './clipboard';
+import {
+  NOTE_DEFAULT_WIDTH,
+  SECTION_MIN_HEIGHT,
+  SECTION_MIN_WIDTH,
+  SECTION_TONE_COUNT,
+  isSection,
+  sanitizeAnnotations,
+} from './sim/annotations';
+import type { Annotation, Note } from './sim/annotations';
+import { NEW_NOTE_TEXT } from './components/annotationLayout';
+import type { AnnotationTool } from './components/Palette';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
 import { togglePreference, usePreference } from './content/preferences';
 import { usePresence } from './components/presence';
@@ -267,8 +278,19 @@ function loadSession(): Session {
     const s = parsed as Partial<Session>;
     if (!isTopology(s.topology)) return fallback;
     const rps = Number.isFinite(s.rps) ? (s.rps as number) : clientRps(s.topology);
+    // isTopology validates what the ENGINE dereferences; annotations are
+    // presentation data it never sees, so they cross the trust boundary
+    // through their own sanitizer. Anything malformed is dropped entry by
+    // entry rather than costing the student the whole restored session.
+    const annotations = sanitizeAnnotations(
+      (s.topology as { annotations?: unknown }).annotations,
+    );
     return {
-      topology: s.topology,
+      topology: {
+        nodes: s.topology.nodes,
+        edges: s.topology.edges,
+        ...(annotations.length > 0 ? { annotations } : {}),
+      },
       rps: Math.min(5000, Math.max(0, rps)),
       presetId: typeof s.presetId === 'string' ? s.presetId : null,
     };
@@ -384,7 +406,34 @@ export default function App() {
 
   const toggleInspector = useCallback(() => setInspectorHidden((h) => !h), []);
 
-  const hasSelection = selectedIds.size > 0;
+  /**
+   * The selection, split into the three things it can hold. Node ids and
+   * edge ids share `selectedIds` with annotation ids; nodes and annotations
+   * are identified by lookup and whatever remains is an edge. Kept in ONE
+   * memo so the Inspector can never be handed a node list and an edge count
+   * computed from different renders.
+   */
+  const { selectedNodes, selectedEdgeCount } = useMemo(() => {
+    if (selectedIds.size === 0) {
+      return { selectedNodes: EMPTY_NODES, selectedEdgeCount: 0, selectedAnnCount: 0 };
+    }
+    const nodes = topology.nodes.filter((n) => selectedIds.has(n.id));
+    const anns = (topology.annotations ?? []).filter((a) => selectedIds.has(a.id));
+    return {
+      selectedNodes: nodes,
+      // Whatever in the set is neither a node nor an annotation is an edge.
+      selectedEdgeCount: selectedIds.size - nodes.length - anns.length,
+      selectedAnnCount: anns.length,
+    };
+  }, [topology.nodes, topology.annotations, selectedIds]);
+
+  /**
+   * "Something the INSPECTOR can talk about is selected." Annotations are
+   * deliberately excluded: a selected note has nothing to configure, and
+   * opening an empty inspector for it would teach that selection sometimes
+   * produces a blank panel.
+   */
+  const hasSelection = selectedNodes.length + selectedEdgeCount > 0;
   const inspectorVisible = hasSelection && !inspectorHidden;
 
   /**
@@ -690,10 +739,15 @@ export default function App() {
     [history],
   );
 
-  /** One drag is ONE history entry: baseline at promotion, commit at end. */
-  const handleMoveStart = useCallback(() => {
-    history.beginGesture('move', snapRef.current);
-  }, [history]);
+  /** One drag is ONE history entry: baseline at promotion, commit at end.
+   *  The canvas names the gesture ('move', 'resize') so the undo toast can
+   *  say what it undid; unnamed callers stay a 'move'. */
+  const handleMoveStart = useCallback(
+    (label?: string) => {
+      history.beginGesture(label ?? 'move', snapRef.current);
+    },
+    [history],
+  );
 
   const handleMoveEnd = useCallback(() => {
     // The topology from the live mirror, never from snapRef alone: a flick's
@@ -701,6 +755,181 @@ export default function App() {
     // fed the stale mirror would drop the entry as a no-op (see topoLiveRef).
     history.endGesture({ ...snapRef.current, topology: topoLiveRef.current });
   }, [history]);
+
+  /* ---------------- annotations: notes and sections ----------------
+   *
+   * PRESENTATION ONLY. Every writer here goes through setAnnotations, which
+   * updates React state and the live mirror and NOTHING else: the engine is
+   * never told (it has no field to be told in), the snapshot is not
+   * refreshed, and the active preset badge survives, exactly as it does for
+   * a node move. History granularity matches nodes 1:1 — one drag or resize
+   * is one entry at the gesture boundary, a creation or text edit is one
+   * discrete commit.
+   */
+
+  const setAnnotations = useCallback((next: Annotation[]) => {
+    const t = topoLiveRef.current;
+    const nt: Topology = { ...t, annotations: next };
+    topoLiveRef.current = nt;
+    setTopology(nt);
+  }, []);
+
+  /** `kind-N` ids of the same shape freshId in clipboard.ts mints, scanned
+   *  against the live list because a restored session's ids predate this
+   *  tab's counters. */
+  const freshAnnId = useCallback((prefix: 'note' | 'section'): string => {
+    const used = new Set((topoLiveRef.current.annotations ?? []).map((a) => a.id));
+    let n = 1;
+    while (used.has(`${prefix}-${n}`)) n += 1;
+    return `${prefix}-${n}`;
+  }, []);
+
+  const handleMoveAnnotation = useCallback(
+    (id: string, x: number, y: number) => {
+      // Same shape as handleMoveNode: inside a pointer drag the baseline
+      // was captured at promotion; a move arriving outside a gesture is a
+      // future streamed path and takes the debounced entry.
+      if (!history.inGesture) history.touch('move', snapRef.current);
+      setAnnotations(
+        (topoLiveRef.current.annotations ?? []).map((a) =>
+          a.id === id ? { ...a, x, y } : a,
+        ),
+      );
+    },
+    [history, setAnnotations],
+  );
+
+  const handleResizeSection = useCallback(
+    (id: string, x: number, y: number, w: number, h: number) => {
+      if (!history.inGesture) history.touch('resize', snapRef.current);
+      setAnnotations(
+        (topoLiveRef.current.annotations ?? []).map((a) =>
+          a.id === id && isSection(a)
+            ? {
+                ...a,
+                x,
+                y,
+                width: Math.max(w, SECTION_MIN_WIDTH),
+                height: Math.max(h, SECTION_MIN_HEIGHT),
+              }
+            : a,
+        ),
+      );
+    },
+    [history, setAnnotations],
+  );
+
+  const handleCreateNote = useCallback(
+    (x: number, y: number): string => {
+      const anns = topoLiveRef.current.annotations ?? [];
+      const id = freshAnnId('note');
+      history.commit('add note', snapRef.current);
+      setAnnotations([
+        ...anns,
+        {
+          id,
+          kind: 'note',
+          text: NEW_NOTE_TEXT,
+          x,
+          y,
+          width: NOTE_DEFAULT_WIDTH,
+          size: 'md',
+        },
+      ]);
+      setSelectedIds(new Set([id]));
+      return id;
+    },
+    [freshAnnId, history, setAnnotations],
+  );
+
+  const handleCreateSection = useCallback(
+    (x: number, y: number, w: number, h: number) => {
+      const anns = topoLiveRef.current.annotations ?? [];
+      const id = freshAnnId('section');
+      history.commit('add section', snapRef.current);
+      setAnnotations([
+        ...anns,
+        {
+          id,
+          kind: 'section',
+          label: 'Section',
+          x,
+          y,
+          width: Math.max(w, SECTION_MIN_WIDTH),
+          height: Math.max(h, SECTION_MIN_HEIGHT),
+          // Rotate through the palette so adjacent frames differ by default.
+          tone: anns.filter(isSection).length % SECTION_TONE_COUNT,
+        },
+      ]);
+      setSelectedIds(new Set([id]));
+    },
+    [freshAnnId, history, setAnnotations],
+  );
+
+  const handleEditNote = useCallback(
+    (id: string, text: string) => {
+      const anns = topoLiveRef.current.annotations ?? [];
+      const cur = anns.find((a) => a.id === id);
+      if (!cur || cur.kind !== 'note') return;
+      const next = text.slice(0, 2000);
+      if (!next.trim()) {
+        // An emptied note is removed outright: invisible and unselectable,
+        // it would otherwise be litter the reader cannot find to delete.
+        history.commit('delete', snapRef.current);
+        setAnnotations(anns.filter((a) => a.id !== id));
+        setSelectedIds((sel) => {
+          if (!sel.has(id)) return sel;
+          const out = new Set(sel);
+          out.delete(id);
+          return out;
+        });
+        return;
+      }
+      if (next === cur.text) return;
+      history.commit('note edit', snapRef.current);
+      setAnnotations(anns.map((a) => (a.id === id ? { ...a, text: next } : a)));
+    },
+    [history, setAnnotations],
+  );
+
+  const handleEditSectionLabel = useCallback(
+    (id: string, label: string) => {
+      const anns = topoLiveRef.current.annotations ?? [];
+      const cur = anns.find((a) => a.id === id);
+      if (!cur || cur.kind !== 'section') return;
+      const next = label.slice(0, 200);
+      if (next === cur.label) return;
+      history.commit('label edit', snapRef.current);
+      setAnnotations(anns.map((a) => (a.id === id ? { ...a, label: next } : a)));
+    },
+    [history, setAnnotations],
+  );
+
+  const handleSetNoteSize = useCallback(
+    (id: string, size: Note['size']) => {
+      const anns = topoLiveRef.current.annotations ?? [];
+      const cur = anns.find((a) => a.id === id);
+      if (!cur || cur.kind !== 'note' || cur.size === size) return;
+      history.commit('note size', snapRef.current);
+      setAnnotations(anns.map((a) => (a.id === id ? { ...a, size } : a)));
+    },
+    [history, setAnnotations],
+  );
+
+  /** Palette click (no drop point): place at the centre of the current
+   *  view, the same aim handlePaletteAdd uses for components. */
+  const handlePaletteAnnotation = useCallback(
+    (tool: AnnotationTool) => {
+      const centre = viewCenterRef.current?.() ?? { x: 240, y: 200 };
+      const gx = (v: number) => Math.round(v / GRID) * GRID;
+      if (tool === 'note') {
+        handleCreateNote(gx(centre.x - NOTE_DEFAULT_WIDTH / 2), gx(centre.y));
+      } else {
+        handleCreateSection(gx(centre.x - 160), gx(centre.y - 112), 320, 224);
+      }
+    },
+    [handleCreateNote, handleCreateSection],
+  );
 
   const handleAddNode = useCallback(
     (kind: NodeKind, x: number, y: number) => {
@@ -787,30 +1016,52 @@ export default function App() {
    * up front and filtering once is both correct and cheaper.
    */
   const handleDeleteSelection = useCallback(
-    (nodeIds: readonly string[], edgeIds: readonly string[]) => {
-      if (nodeIds.length === 0 && edgeIds.length === 0) return;
+    (
+      nodeIds: readonly string[],
+      edgeIds: readonly string[],
+      annotationIds: readonly string[] = [],
+    ) => {
+      if (nodeIds.length === 0 && edgeIds.length === 0 && annotationIds.length === 0) {
+        return;
+      }
       const dropNodes = new Set(nodeIds);
       const dropEdges = new Set(edgeIds);
+      const dropAnns = new Set(annotationIds);
       // ONE entry for the whole selection, orphaned edges included: the
       // filter below is a single topology edit, so its baseline is too.
       history.commit('delete', snapRef.current);
-      applyTopology({
-        nodes: topology.nodes.filter((n) => !dropNodes.has(n.id)),
-        edges: topology.edges.filter(
-          (e) =>
-            // Explicitly deleted, or orphaned by a node that just went away.
-            !dropEdges.has(e.id) && !dropNodes.has(e.from) && !dropNodes.has(e.to),
-        ),
-      });
+
+      // An annotation-only delete stays a presentation edit: the engine is
+      // not disturbed and the preset badge survives, matching every other
+      // annotation path. Anything structural goes through applyTopology.
+      if (nodeIds.length === 0 && edgeIds.length === 0) {
+        setAnnotations((topology.annotations ?? []).filter((a) => !dropAnns.has(a.id)));
+      } else {
+        applyTopology({
+          ...topology,
+          nodes: topology.nodes.filter((n) => !dropNodes.has(n.id)),
+          edges: topology.edges.filter(
+            (e) =>
+              // Explicitly deleted, or orphaned by a node that just went away.
+              !dropEdges.has(e.id) && !dropNodes.has(e.from) && !dropNodes.has(e.to),
+          ),
+          ...(topology.annotations
+            ? {
+                annotations: topology.annotations.filter((a) => !dropAnns.has(a.id)),
+              }
+            : {}),
+        });
+      }
       setSelectedIds((cur) => {
         if (cur.size === 0) return cur;
         const next = new Set(cur);
         for (const id of dropNodes) next.delete(id);
         for (const id of dropEdges) next.delete(id);
+        for (const id of dropAnns) next.delete(id);
         return next;
       });
     },
-    [applyTopology, topology, history],
+    [applyTopology, setAnnotations, topology, history],
   );
 
   /** The Inspector's single-node delete routes through the same path. */
@@ -839,6 +1090,7 @@ export default function App() {
   const appendClones = useCallback(
     (clones: ClipboardSubgraph) => {
       applyTopology({
+        ...topology,
         nodes: [...topology.nodes, ...clones.nodes],
         edges: [...topology.edges, ...clones.edges],
       });
@@ -1253,28 +1505,6 @@ export default function App() {
   /* ---------------- derived ---------------- */
 
   /**
-   * The selection, split into the two things the Inspector understands.
-   *
-   * Node ids and edge ids share `selectedIds`, so the split is simply "is
-   * there a node with this id". Anything left over is an edge — the canvas
-   * only ever puts those two kinds of id in the set.
-   *
-   * Kept in ONE memo rather than three so the panel can never be handed a
-   * node list and an edge count computed from different renders.
-   */
-  const { selectedNodes, selectedEdgeCount } = useMemo(() => {
-    if (selectedIds.size === 0) {
-      return { selectedNodes: EMPTY_NODES, selectedEdgeCount: 0 };
-    }
-    const nodes = topology.nodes.filter((n) => selectedIds.has(n.id));
-    return {
-      selectedNodes: nodes,
-      // Whatever in the set is not a node id is an edge id.
-      selectedEdgeCount: selectedIds.size - nodes.length,
-    };
-  }, [topology.nodes, selectedIds]);
-
-  /**
    * The single-node subject. Still resolved separately because the Inspector's
    * `node` prop drives the whole single-node view; `selectedNodes` only takes
    * over when it holds two or more.
@@ -1617,7 +1847,7 @@ export default function App() {
         }
       >
         <PanelSlot open={layout.library} edge="left">
-          <Palette onAdd={handlePaletteAdd} />
+          <Palette onAdd={handlePaletteAdd} onAddAnnotation={handlePaletteAnnotation} />
         </PanelSlot>
 
         <main className="app-stage">
@@ -1648,6 +1878,13 @@ export default function App() {
               onRename={handleRename}
               onDuplicateForDrag={handleDuplicateForDrag}
               onPaste={handlePaste}
+              onMoveAnnotation={handleMoveAnnotation}
+              onResizeSection={handleResizeSection}
+              onCreateNote={handleCreateNote}
+              onCreateSection={handleCreateSection}
+              onEditNote={handleEditNote}
+              onEditSectionLabel={handleEditSectionLabel}
+              onSetNoteSize={handleSetNoteSize}
               spark={spark}
               viewCenterRef={viewCenterRef}
               fitSignal={fitNonce}

@@ -598,6 +598,14 @@ export interface SimEdge {
 export interface Topology {
   nodes: SimNode[];
   edges: SimEdge[];
+  /**
+   * Canvas notes and sections. Documentation only: the engine never reads
+   * this field, annotations carry no traffic and affect no metric. Optional
+   * so every existing topology and saved design stays valid unchanged. The
+   * shape lives in annotations.ts, which is where the engine-free reasoning
+   * for it belongs.
+   */
+  annotations?: import('./annotations').Annotation[];
 }
 
 /** Rolling stats for one node over the last window. */

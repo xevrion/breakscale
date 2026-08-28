@@ -61,6 +61,26 @@ import {
   pressAction,
 } from './pointerInput';
 import type { PinchState, TouchMap } from './pointerInput';
+import {
+  ANN_DND_MIME,
+  NEW_NOTE_TEXT,
+  NEW_SECTION_H,
+  NEW_SECTION_W,
+  NOTE_SIZES,
+  RESIZE_DIRS,
+  handleAnchor,
+  layoutNote,
+  resizeRect,
+} from './annotationLayout';
+import type { ResizeDir } from './annotationLayout';
+import {
+  SECTION_MIN_HEIGHT,
+  SECTION_MIN_WIDTH,
+  SECTION_TONE_COUNT,
+  isNote,
+  isSection,
+} from '../sim/annotations';
+import type { Annotation, Note, Section } from '../sim/annotations';
 import './Canvas.css';
 
 /* ------------------------------------------------------------------ *
@@ -321,16 +341,20 @@ export interface CanvasProps {
    * carries no boundary information on purpose; the shell must not have to
    * infer "the drag is over" from a gap in the stream.
    */
-  onMoveStart?: () => void;
+  onMoveStart?: (label?: string) => void;
   onMoveEnd?: () => void;
   onConnect: (fromId: string, toId: string) => void;
   /**
    * Delete everything in one gesture. The canvas partitions the selection
-   * into node ids and edge ids and passes both, so the shell can apply a
-   * single topology edit instead of N sequential ones (which would make each
-   * delete race the previous state).
+   * into node ids, edge ids and annotation ids and passes all three, so the
+   * shell can apply a single topology edit instead of N sequential ones
+   * (which would make each delete race the previous state).
    */
-  onDeleteSelection: (nodeIds: readonly string[], edgeIds: readonly string[]) => void;
+  onDeleteSelection: (
+    nodeIds: readonly string[],
+    edgeIds: readonly string[],
+    annotationIds?: readonly string[],
+  ) => void;
   onDropNode: (kind: NodeKind, x: number, y: number) => void;
   /**
    * Commit a rename typed into the double-click editor. Called ONCE, with
@@ -357,6 +381,31 @@ export interface CanvasProps {
    * and must be remapped by the receiver, never trusted to be free.
    */
   onPaste?: (sub: ClipboardSubgraph, at: { x: number; y: number }) => void;
+  /* ---- annotations: notes and sections ----
+   *
+   * Per-frame move/resize streams mirror onMoveNode: no boundary information
+   * on purpose, with onMoveStart/onMoveEnd marking the gesture edges so the
+   * shell's history sees exactly one entry per drag. Creation and text edits
+   * are single discrete calls. All optional: a shell that wires none of them
+   * simply has no annotation editing, never a crash.
+   */
+  /** One frame of an annotation drag, already grid-snapped. */
+  onMoveAnnotation?: (id: string, x: number, y: number) => void;
+  /** One frame of a section resize, minimums already enforced. */
+  onResizeSection?: (id: string, x: number, y: number, w: number, h: number) => void;
+  /**
+   * Create a note at a world point. Returns the new note's id (so the canvas
+   * can open its editor over it immediately) or null if the shell declined.
+   */
+  onCreateNote?: (x: number, y: number) => string | null;
+  onCreateSection?: (x: number, y: number, w: number, h: number) => void;
+  /**
+   * Commit a note text edit. Called ONCE when the editor closes; the shell
+   * removes the note outright when the text is emptied.
+   */
+  onEditNote?: (id: string, text: string) => void;
+  onEditSectionLabel?: (id: string, label: string) => void;
+  onSetNoteSize?: (id: string, size: Note['size']) => void;
   /** Optional: per-node sparkline history. Omitted -> no sparklines. */
   spark?: SparkData;
   /**
@@ -1712,6 +1761,274 @@ const EdgeView = memo(function EdgeView({
   );
 });
 
+/* ------------------------------------------------------------------ *
+ * Annotations: sections and notes
+ *
+ * PAINT ORDER IS THE CONTRACT. Sections render in their own group BEFORE
+ * the edges, so a section is always behind every wire and every node it
+ * frames; notes render AFTER the nodes, so a note is never hidden by the
+ * diagram it comments on. Selection chrome for both (rings, resize handles,
+ * the note size switch) lives in a final top group, because a handle drawn
+ * in the section's own back layer would be buried under any node sitting on
+ * the border.
+ *
+ * A SECTION'S INTERIOR IS POINTER-TRANSPARENT. The tinted fill is
+ * pointer-events:none, so a press inside the frame falls through to the
+ * node, edge or background beneath it exactly as if the section were not
+ * there. Only three things about a section are grabbable: the border (a fat
+ * invisible stroke with pointer-events:stroke), the label plate, and the
+ * resize handles while selected. Getting this wrong makes every node inside
+ * a section unusable, which is why the transparency is structural (what
+ * elements exist) rather than a conditional in a handler.
+ * ------------------------------------------------------------------ */
+
+/** Label plate metrics, shared by the SVG label and its hit target. */
+const SEC_LABEL_STYLE: TextStyle = { size: 12, weight: 550, family: 'sans' };
+const SEC_LABEL_PAD_X = 10;
+const SEC_LABEL_H = 24;
+/** Minimum plate width, so an empty label still leaves a grab tab. */
+const SEC_LABEL_MIN_W = 28;
+
+function sectionLabelWidth(label: string): number {
+  return Math.max(
+    SEC_LABEL_MIN_W,
+    measureText(label, SEC_LABEL_STYLE) + SEC_LABEL_PAD_X * 2,
+  );
+}
+
+interface SectionViewProps {
+  section: Section;
+  selected: boolean;
+  /** Hide the SVG label while the in-place editor floats over it. */
+  editingLabel: boolean;
+}
+
+/**
+ * The back-layer body of one section. Memoised: its props only change when
+ * the section itself is edited or its selection flips, so the 10Hz snapshot
+ * renders skip this subtree entirely.
+ */
+const SectionView = memo(function SectionView({
+  section: s,
+  selected,
+  editingLabel,
+}: SectionViewProps) {
+  return (
+    <g
+      className={`cv-section${selected ? ' is-selected' : ''}`}
+      data-tone={
+        ((s.tone % SECTION_TONE_COUNT) + SECTION_TONE_COUNT) % SECTION_TONE_COUNT
+      }
+    >
+      {/* The tint. Inert by rule: see the layer comment above. */}
+      <rect
+        className="cv-section-fill"
+        x={s.x}
+        y={s.y}
+        width={s.width}
+        height={s.height}
+        rx={8}
+      />
+      {/* The visible border, also inert; the invisible fat stroke below it
+          is the ONLY part of the perimeter that takes the pointer. */}
+      <rect
+        className="cv-section-line"
+        x={s.x}
+        y={s.y}
+        width={s.width}
+        height={s.height}
+        rx={8}
+      />
+      <rect
+        className="cv-section-hit"
+        data-hit="section"
+        data-id={s.id}
+        x={s.x}
+        y={s.y}
+        width={s.width}
+        height={s.height}
+        rx={8}
+      />
+      {/* Label plate, top-left. Grabbable: it is the section's handle for
+          anyone who finds a 1.5px border too precise a target. */}
+      <g className="cv-section-label" data-hit="section" data-id={s.id}>
+        <rect
+          className="cv-section-label-bg"
+          x={s.x}
+          y={s.y}
+          width={Math.min(sectionLabelWidth(s.label), s.width)}
+          height={SEC_LABEL_H}
+          rx={8}
+        />
+        {!editingLabel && s.label && (
+          <text
+            className="cv-section-label-text"
+            x={s.x + SEC_LABEL_PAD_X}
+            y={s.y + SEC_LABEL_H / 2}
+          >
+            {truncateToWidth(s.label, s.width - SEC_LABEL_PAD_X * 2, SEC_LABEL_STYLE)}
+          </text>
+        )}
+      </g>
+    </g>
+  );
+});
+
+interface NoteViewProps {
+  note: Note;
+  selected: boolean;
+  /** Hide the SVG text while the in-place textarea floats over it. */
+  editing: boolean;
+}
+
+/**
+ * One note: wrapped text with a full-bounds hit rect. Height is derived
+ * from the text on every layout, never stored (see annotations.ts). The
+ * layout is memoised on exactly the fields it reads, so a note re-wraps
+ * only when its own text, width or size changes.
+ */
+const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewProps) {
+  const layout = useMemo(
+    () => layoutNote(note.text, note.width, note.size),
+    [note.text, note.width, note.size],
+  );
+  return (
+    <g
+      className={`cv-note is-${note.size}${selected ? ' is-selected' : ''}`}
+      transform={`translate(${note.x},${note.y})`}
+    >
+      <rect
+        className="cv-note-hit"
+        data-hit="note"
+        data-id={note.id}
+        x={-6}
+        y={-4}
+        width={note.width + 12}
+        height={layout.height + 8}
+      />
+      {!editing && (
+        <text className="cv-note-text" x={0} y={0}>
+          {layout.lines.map((line, i) => (
+            <tspan key={i} x={0} y={layout.baseline + i * layout.lineH}>
+              {line === '' ? ' ' : line}
+            </tspan>
+          ))}
+        </text>
+      )}
+    </g>
+  );
+});
+
+/**
+ * Selection chrome for one section: the ring and the eight resize handles.
+ * Drawn in the TOP layer, so a node sitting on the border can never bury a
+ * handle. `ui` is 1/zoom: handle geometry is specified in screen px and
+ * divided back into world units, so a handle is the same size under the
+ * finger at every zoom instead of shrinking into an untouchable speck.
+ */
+function SectionChrome({ section: s, ui }: { section: Section; ui: number }) {
+  const rect = { x: s.x, y: s.y, w: s.width, h: s.height };
+  const hs = 9 * ui;
+  const hit = 36 * ui;
+  return (
+    <g className="cv-ann-sel">
+      <rect
+        className="cv-ann-ring"
+        x={s.x - 3 * ui}
+        y={s.y - 3 * ui}
+        width={s.width + 6 * ui}
+        height={s.height + 6 * ui}
+        rx={8 + 3 * ui}
+      />
+      {RESIZE_DIRS.map((dir) => {
+        const a = handleAnchor(rect, dir);
+        return (
+          <g key={dir}>
+            <rect
+              className="cv-handle"
+              x={a.x - hs / 2}
+              y={a.y - hs / 2}
+              width={hs}
+              height={hs}
+              rx={2 * ui}
+            />
+            {/* The generous invisible target, ON TOP of the visible square
+                (paint order = hit order), sized for a fingertip. */}
+            <rect
+              className="cv-handle-hit"
+              data-hit="section-resize"
+              data-id={s.id}
+              data-dir={dir}
+              x={a.x - hit / 2}
+              y={a.y - hit / 2}
+              width={hit}
+              height={hit}
+            />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+/**
+ * Selection chrome for one note: the ring plus the S/M/L size switch. The
+ * switch floats above the note's top-left in screen-constant units, the
+ * same reasoning as the section handles.
+ */
+function NoteChrome({ note, ui }: { note: Note; ui: number }) {
+  const layout = useMemo(
+    () => layoutNote(note.text, note.width, note.size),
+    [note.text, note.width, note.size],
+  );
+  const bw = 26 * ui;
+  const bh = 22 * ui;
+  const gap = 4 * ui;
+  const y = note.y - 4 - bh - 8 * ui;
+  return (
+    <g className="cv-ann-sel">
+      <rect
+        className="cv-ann-ring"
+        x={note.x - 6}
+        y={note.y - 4}
+        width={note.width + 12}
+        height={layout.height + 8}
+        rx={4}
+      />
+      <g className="cv-note-size">
+        {(['sm', 'md', 'lg'] as const).map((size, i) => (
+          <g
+            key={size}
+            className={note.size === size ? 'is-active' : undefined}
+            data-hit="note-size"
+            data-id={note.id}
+            data-size={size}
+            role="button"
+            aria-label={`Note size ${size}`}
+          >
+            <rect
+              x={note.x - 6 + i * (bw + gap)}
+              y={y}
+              width={bw}
+              height={bh}
+              rx={4 * ui}
+            />
+            <text
+              x={note.x - 6 + i * (bw + gap) + bw / 2}
+              y={y + bh / 2}
+              style={{ fontSize: 11 * ui }}
+            >
+              {size === 'sm' ? 'S' : size === 'md' ? 'M' : 'L'}
+            </text>
+          </g>
+        ))}
+      </g>
+    </g>
+  );
+}
+
+const EMPTY_ANNOTATIONS: readonly Annotation[] = [];
+
 /* ================================================================== *
  * What a node is MADE OF
  *
@@ -2559,12 +2876,28 @@ const NodeView = memo(function NodeView({
  * ------------------------------------------------------------------ */
 
 /** What a pointerdown landed on, resolved once at press time. */
-type HitKind = 'node' | 'port-in' | 'port-out' | 'edge' | 'edge-delete' | 'background';
+type HitKind =
+  | 'node'
+  | 'port-in'
+  | 'port-out'
+  | 'edge'
+  | 'edge-delete'
+  | 'background'
+  | 'note'
+  | 'section'
+  | 'section-resize'
+  | 'note-size';
 
 interface Hit {
   kind: HitKind;
   id: string | null;
+  /** Resize handle direction, for 'section-resize' hits. */
+  dir: string | null;
+  /** Requested size, for 'note-size' hits. */
+  size: string | null;
 }
+
+const BACKGROUND_HIT: Hit = { kind: 'background', id: null, dir: null, size: null };
 
 interface Pending {
   pointerId: number;
@@ -2590,7 +2923,8 @@ interface Pending {
   /** True once promoted past the threshold. */
   active: boolean;
   /** Which drag it was promoted to. Only meaningful when active. */
-  mode: 'pan' | 'node' | 'link' | 'marquee' | null;
+  mode:
+    'pan' | 'node' | 'link' | 'marquee' | 'ann' | 'ann-resize' | 'draw-section' | null;
   /** Grab offset for a node drag, in world units. Set at promotion. */
   grabDx: number;
   grabDy: number;
@@ -2598,6 +2932,13 @@ interface Pending {
   groupIds: string[];
   /** Origin of each grouped node at promotion, so moves stay relative. */
   groupOrigins: Map<string, { x: number; y: number }>;
+  /** Annotation ids riding along with a multi-selection drag. */
+  groupAnnIds: string[];
+  groupAnnOrigins: Map<string, { x: number; y: number }>;
+  /** Section rect at promotion, for an 'ann-resize' drag. */
+  annRect: { x: number; y: number; w: number; h: number } | null;
+  /** The armed annotation tool latched at press time, if any. */
+  tool: 'note' | 'section' | null;
 }
 
 /** Live marquee rectangle, in world units. */
@@ -2636,6 +2977,13 @@ export default function Canvas({
   onRename,
   onDuplicateForDrag,
   onPaste,
+  onMoveAnnotation,
+  onResizeSection,
+  onCreateNote,
+  onCreateSection,
+  onEditNote,
+  onEditSectionLabel,
+  onSetNoteSize,
   spark,
   viewCenterRef,
   fitSignal = 0,
@@ -2694,6 +3042,35 @@ export default function Canvas({
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const [dropHint, setDropHint] = useState(false);
+
+  /* ---------------- annotation tools & editors ---------------- */
+
+  /**
+   * The armed annotation tool. Press N to arm the note tool (the next click
+   * drops a note), B to arm the section tool (the next drag draws a frame,
+   * a click drops a default one). Modeless in the same way pendingLink is:
+   * it survives across gestures until spent or Escaped.
+   */
+  const [tool, setTool] = useState<'note' | 'section' | null>(null);
+  const toolRef = useRef(tool);
+  useLayoutEffect(() => {
+    toolRef.current = tool;
+  }, [tool]);
+
+  /** Live section-draw preview rect, world units. */
+  const [draft, setDraft] = useState<Marquee | null>(null);
+
+  /** In-place note text editor: which note, and the live draft. */
+  const [noteEdit, setNoteEdit] = useState<{ id: string; draft: string } | null>(null);
+  const noteEditDoneRef = useRef(false);
+  /** In-place section label editor. */
+  const [labelEdit, setLabelEdit] = useState<{ id: string; draft: string } | null>(
+    null,
+  );
+  const labelEditDoneRef = useRef(false);
+
+  const annotations = topology.annotations ?? EMPTY_ANNOTATIONS;
+  const annIdSet = useMemo(() => new Set(annotations.map((a) => a.id)), [annotations]);
 
   /* ---------------- live mirrors for pointer handlers ---------------- */
 
@@ -2934,11 +3311,19 @@ export default function Canvas({
       // path, pointercancel, Escape, and the buttons===0 stale-gesture
       // guard. Announcing the boundary in this ONE place means the shell's
       // history sees exactly one end per begin, whichever exit fired.
-      if (p.active && p.mode === 'node') onMoveEnd?.();
+      // Annotation drags share the node drag's history contract: one end
+      // per begin, through this single funnel, whichever exit fired.
+      if (
+        p.active &&
+        (p.mode === 'node' || p.mode === 'ann' || p.mode === 'ann-resize')
+      ) {
+        onMoveEnd?.();
+      }
     }
     pendingRef.current = null;
     setLink(null);
     setMarquee(null);
+    setDraft(null);
     setCursor(spaceRef.current ? 'grab' : 'default');
   }, [onMoveEnd]);
 
@@ -2953,13 +3338,18 @@ export default function Canvas({
   const hitTest = useCallback((target: EventTarget | null): Hit => {
     const el = target as Element | null;
     if (!el || typeof el.closest !== 'function') {
-      return { kind: 'background', id: null };
+      return BACKGROUND_HIT;
     }
     const found = el.closest('[data-hit]');
-    if (!found) return { kind: 'background', id: null };
+    if (!found) return BACKGROUND_HIT;
     const kind = found.getAttribute('data-hit') as HitKind | null;
-    if (!kind) return { kind: 'background', id: null };
-    return { kind, id: found.getAttribute('data-id') };
+    if (!kind) return BACKGROUND_HIT;
+    return {
+      kind,
+      id: found.getAttribute('data-id'),
+      dir: found.getAttribute('data-dir'),
+      size: found.getAttribute('data-size'),
+    };
   }, []);
 
   const onSurfaceDown = useCallback(
@@ -3023,11 +3413,15 @@ export default function Canvas({
         }
       }
 
-      const hit = middle
-        ? ({ kind: 'background', id: null } as Hit)
-        : hitTest(e.target);
+      const hit = middle ? BACKGROUND_HIT : hitTest(e.target);
       const w = toWorld(e.clientX, e.clientY);
       const v = viewRef.current;
+
+      // An armed annotation tool claims the press whatever is under it: the
+      // student asked to place something, so the next gesture is placement,
+      // not selection. Space-held and middle-drag still win, because "get me
+      // out of here" must always work.
+      const armedTool = spaceRef.current || middle ? null : toolRef.current;
 
       pendingRef.current = {
         pointerId: e.pointerId,
@@ -3035,7 +3429,7 @@ export default function Canvas({
         // Space-held or middle-drag forces a pan regardless of what is under
         // the pointer, which is the documented escape hatch for panning while
         // the viewport is full of nodes.
-        hit: spaceRef.current || middle ? { kind: 'background', id: null } : hit,
+        hit: spaceRef.current || middle || armedTool ? BACKGROUND_HIT : hit,
         screenX: e.clientX,
         screenY: e.clientY,
         worldX: w.x,
@@ -3051,6 +3445,10 @@ export default function Canvas({
         grabDy: 0,
         groupIds: [],
         groupOrigins: new Map(),
+        groupAnnIds: [],
+        groupAnnOrigins: new Map(),
+        annRect: null,
+        tool: armedTool,
       };
 
       // (B) NO setPointerCapture here. That single line was the whole bug:
@@ -3068,6 +3466,32 @@ export default function Canvas({
   const promote = useCallback(
     (p: Pending, clientX: number, clientY: number) => {
       p.active = true;
+
+      // An armed tool owns the whole gesture. The section tool draws its
+      // frame; the note tool is a click gesture, so a drag under it degrades
+      // to a pan rather than placing a note somewhere the pointer no longer
+      // is.
+      if (p.tool === 'section') {
+        p.mode = 'draw-section';
+        setDraft({ x: snap(p.worldX), y: snap(p.worldY), w: 0, h: 0 });
+        setCursor('crosshair');
+        try {
+          surfaceRef.current?.setPointerCapture(p.pointerId);
+        } catch {
+          // See the capture note below: optional, never a precondition.
+        }
+        return;
+      }
+      if (p.tool === 'note') {
+        p.mode = 'pan';
+        setCursor('grabbing');
+        try {
+          surfaceRef.current?.setPointerCapture(p.pointerId);
+        } catch {
+          // Ditto.
+        }
+        return;
+      }
 
       switch (p.hit.kind) {
         case 'node': {
@@ -3092,7 +3516,7 @@ export default function Canvas({
             const dup = onDuplicateForDrag(id);
             if (dup) {
               const cw = toWorld(clientX, clientY);
-              p.hit = { kind: 'node', id: dup.id };
+              p.hit = { kind: 'node', id: dup.id, dir: null, size: null };
               p.worldX = cw.x;
               p.worldY = cw.y;
               p.grabDx = node.x - cw.x;
@@ -3123,11 +3547,75 @@ export default function Canvas({
                 p.groupOrigins.set(other.id, { x: other.x, y: other.y });
               }
             }
+            // Selected annotations ride along, so a marqueed cluster moves
+            // as one object whichever member was grabbed.
+            for (const a of topoRef.current.annotations ?? []) {
+              if (sel.has(a.id)) {
+                p.groupAnnIds.push(a.id);
+                p.groupAnnOrigins.set(a.id, { x: a.x, y: a.y });
+              }
+            }
           } else {
             selectOne(id, false);
           }
           break;
         }
+
+        case 'note':
+        case 'section': {
+          const id = p.hit.id;
+          const ann = id
+            ? (topoRef.current.annotations ?? []).find((a) => a.id === id)
+            : undefined;
+          if (!ann || !id) {
+            p.mode = 'pan';
+            break;
+          }
+          p.mode = 'ann';
+          // Same contract as a node drag: the baseline goes to the shell
+          // BEFORE promotion selects the grabbed annotation.
+          onMoveStart?.('move');
+          p.grabDx = ann.x - p.worldX;
+          p.grabDy = ann.y - p.worldY;
+          const sel = selRef.current;
+          if (sel.has(id) && sel.size > 1) {
+            for (const other of topoRef.current.nodes) {
+              if (sel.has(other.id)) {
+                p.groupIds.push(other.id);
+                p.groupOrigins.set(other.id, { x: other.x, y: other.y });
+              }
+            }
+            for (const a of topoRef.current.annotations ?? []) {
+              if (a.id !== id && sel.has(a.id)) {
+                p.groupAnnIds.push(a.id);
+                p.groupAnnOrigins.set(a.id, { x: a.x, y: a.y });
+              }
+            }
+          } else {
+            selectOne(id, false);
+          }
+          break;
+        }
+
+        case 'section-resize': {
+          const id = p.hit.id;
+          const ann = id
+            ? (topoRef.current.annotations ?? []).find((a) => a.id === id)
+            : undefined;
+          if (!ann || !id || !isSection(ann) || !p.hit.dir) {
+            p.mode = 'pan';
+            break;
+          }
+          p.mode = 'ann-resize';
+          onMoveStart?.('resize');
+          p.annRect = { x: ann.x, y: ann.y, w: ann.width, h: ann.height };
+          break;
+        }
+
+        case 'note-size':
+          // Dragging a size button means nothing; the click path handles it.
+          p.mode = 'pan';
+          break;
 
         case 'port-out':
           p.mode = 'link';
@@ -3269,22 +3757,70 @@ export default function Canvas({
         const nx = place(w.x + p.grabDx);
         const ny = place(w.y + p.grabDy);
         onMoveNode(id, nx, ny);
-        // Grouped nodes translate by the same snapped delta, so the shape of
-        // a multi-selection is preserved exactly rather than each member
+        // Grouped members translate by the same snapped delta, so the shape
+        // of a multi-selection is preserved exactly rather than each member
         // being snapped independently.
-        if (p.groupIds.length > 0) {
-          const node = topoRef.current.nodes.find((n) => n.id === id);
-          if (node) {
-            const baseX = place(p.worldX + p.grabDx);
-            const baseY = place(p.worldY + p.grabDy);
-            const mdx = nx - baseX;
-            const mdy = ny - baseY;
-            for (const other of p.groupIds) {
-              const o = p.groupOrigins.get(other);
-              if (o) onMoveNode(other, o.x + mdx, o.y + mdy);
-            }
+        if (p.groupIds.length > 0 || p.groupAnnIds.length > 0) {
+          const mdx = nx - place(p.worldX + p.grabDx);
+          const mdy = ny - place(p.worldY + p.grabDy);
+          for (const other of p.groupIds) {
+            const o = p.groupOrigins.get(other);
+            if (o) onMoveNode(other, o.x + mdx, o.y + mdy);
+          }
+          for (const other of p.groupAnnIds) {
+            const o = p.groupAnnOrigins.get(other);
+            if (o) onMoveAnnotation?.(other, o.x + mdx, o.y + mdy);
           }
         }
+        return;
+      }
+
+      if (p.mode === 'ann') {
+        const id = p.hit.id!;
+        // The same live snap-bypass a node drag honours.
+        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
+        const nx = place(w.x + p.grabDx);
+        const ny = place(w.y + p.grabDy);
+        onMoveAnnotation?.(id, nx, ny);
+        if (p.groupIds.length > 0 || p.groupAnnIds.length > 0) {
+          const mdx = nx - place(p.worldX + p.grabDx);
+          const mdy = ny - place(p.worldY + p.grabDy);
+          for (const other of p.groupIds) {
+            const o = p.groupOrigins.get(other);
+            if (o) onMoveNode(other, o.x + mdx, o.y + mdy);
+          }
+          for (const other of p.groupAnnIds) {
+            const o = p.groupAnnOrigins.get(other);
+            if (o) onMoveAnnotation?.(other, o.x + mdx, o.y + mdy);
+          }
+        }
+        return;
+      }
+
+      if (p.mode === 'ann-resize' && p.annRect) {
+        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
+        const r = resizeRect(
+          p.annRect,
+          p.hit.dir as ResizeDir,
+          w.x - p.worldX,
+          w.y - p.worldY,
+          place,
+          SECTION_MIN_WIDTH,
+          SECTION_MIN_HEIGHT,
+        );
+        onResizeSection?.(p.hit.id!, r.x, r.y, r.w, r.h);
+        return;
+      }
+
+      if (p.mode === 'draw-section') {
+        const x0 = snap(Math.min(p.worldX, w.x));
+        const y0 = snap(Math.min(p.worldY, w.y));
+        setDraft({
+          x: x0,
+          y: y0,
+          w: snap(Math.max(p.worldX, w.x)) - x0,
+          h: snap(Math.max(p.worldY, w.y)) - y0,
+        });
         return;
       }
 
@@ -3306,7 +3842,16 @@ export default function Canvas({
         });
       }
     },
-    [promote, toWorld, onMoveNode, nodeAt, cancelGesture, zoomAt],
+    [
+      promote,
+      toWorld,
+      onMoveNode,
+      onMoveAnnotation,
+      onResizeSection,
+      nodeAt,
+      cancelGesture,
+      zoomAt,
+    ],
   );
 
   /* ---------------- pointerup: click, or finish the drag ---------------- */
@@ -3334,6 +3879,31 @@ export default function Canvas({
       if (!p.active) {
         /* ---- CLICK ---- */
         const additive = p.shift || p.ctrl;
+
+        // An armed annotation tool spends itself on this click: the note
+        // lands under the pointer with its editor already open, the section
+        // lands centred on the point at its default size. Either way the
+        // tool disarms, so a second placement is a deliberate second arm.
+        if (p.tool) {
+          if (p.tool === 'note') {
+            const id = onCreateNote?.(snap(p.worldX), snap(p.worldY)) ?? null;
+            setTool(null);
+            if (id) {
+              noteEditDoneRef.current = false;
+              setNoteEdit({ id, draft: NEW_NOTE_TEXT });
+            }
+          } else {
+            onCreateSection?.(
+              snap(p.worldX - NEW_SECTION_W / 2),
+              snap(p.worldY - NEW_SECTION_H / 2),
+              NEW_SECTION_W,
+              NEW_SECTION_H,
+            );
+            setTool(null);
+          }
+          cancelGesture();
+          return;
+        }
 
         // A click while a click-link is armed always tries to complete it,
         // whatever it landed on. That is what makes two-click linking feel
@@ -3388,6 +3958,22 @@ export default function Canvas({
             if (p.hit.id) selectOne(p.hit.id, additive);
             break;
 
+          case 'note':
+          case 'section':
+          case 'section-resize':
+            // A handle click without a drag is a click on its section.
+            if (p.hit.id) selectOne(p.hit.id, additive);
+            break;
+
+          case 'note-size':
+            if (
+              p.hit.id &&
+              (p.hit.size === 'sm' || p.hit.size === 'md' || p.hit.size === 'lg')
+            ) {
+              onSetNoteSize?.(p.hit.id, p.hit.size);
+            }
+            break;
+
           default:
             if (!additive) clearSelection();
             break;
@@ -3421,7 +4007,41 @@ export default function Canvas({
             next.add(n.id);
           }
         }
+        for (const a of topoRef.current.annotations ?? []) {
+          if (isSection(a)) {
+            // CONTAINMENT for sections, deliberately breaking the
+            // intersection rule above: a section frames the very nodes a
+            // marquee inside it sweeps up, so intersection would make it
+            // impossible to box-select a section's contents without also
+            // grabbing (and then dragging, or deleting) the frame itself.
+            // A marquee that swallows the whole frame plainly means it.
+            if (a.x >= x0 && a.x + a.width <= x1 && a.y >= y0 && a.y + a.height <= y1) {
+              next.add(a.id);
+            }
+          } else {
+            const h = layoutNote(a.text, a.width, a.size).height;
+            if (a.x <= x1 && a.x + a.width >= x0 && a.y <= y1 && a.y + h >= y0) {
+              next.add(a.id);
+            }
+          }
+        }
         setSelection(next);
+      } else if (p.mode === 'draw-section') {
+        const w = toWorld(e.clientX, e.clientY);
+        const x0 = snap(Math.min(p.worldX, w.x));
+        const y0 = snap(Math.min(p.worldY, w.y));
+        const dw = snap(Math.max(p.worldX, w.x)) - x0;
+        const dh = snap(Math.max(p.worldY, w.y)) - y0;
+        // The minimums also rescue an accidental micro-drag: whatever was
+        // drawn, a real section appears where the gesture happened.
+        onCreateSection?.(
+          x0,
+          y0,
+          Math.max(dw, SECTION_MIN_WIDTH),
+          Math.max(dh, SECTION_MIN_HEIGHT),
+        );
+        setDraft(null);
+        setTool(null);
       }
 
       cancelGesture();
@@ -3432,6 +4052,9 @@ export default function Canvas({
       canLink,
       onConnect,
       onDeleteSelection,
+      onCreateNote,
+      onCreateSection,
+      onSetNoteSize,
       clearSelection,
       selectOne,
       setSelection,
@@ -3578,13 +4201,39 @@ export default function Canvas({
       if (e.key === 'Escape') {
         // Escape unwinds one layer at a time is tempting, but a beginner
         // pressing Escape means "get me out of whatever this is". So it
-        // cancels the in-flight gesture, the armed link AND the selection.
+        // cancels the in-flight gesture, the armed link, the armed
+        // annotation tool AND the selection.
         if (pendingRef.current) cancelGesture();
         setPendingLink(null);
         setLink(null);
         setMarquee(null);
+        setTool(null);
         clearSelection();
         return;
+      }
+
+      /*
+       * Annotation tools. N arms the note tool, B (a "block" of nodes) the
+       * section tool; pressing the same key again disarms, so a mistaken
+       * arm costs one keystroke. Modifiers are required absent so the
+       * chords cannot shadow Ctrl+N / Ctrl+B in the browser, matching the
+       * shell's single-letter panel toggles. Arming clears a pending
+       * click-link: two armed "the next click does something" modes at once
+       * would make the next click ambiguous.
+       */
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === 'n' || e.key === 'N') {
+          e.preventDefault();
+          setPendingLink(null);
+          setTool((t) => (t === 'note' ? null : 'note'));
+          return;
+        }
+        if (e.key === 'b' || e.key === 'B') {
+          e.preventDefault();
+          setPendingLink(null);
+          setTool((t) => (t === 'section' ? null : 'section'));
+          return;
+        }
       }
 
       if ((e.key === 'a' || e.key === 'A') && (e.ctrlKey || e.metaKey)) {
@@ -3592,6 +4241,7 @@ export default function Canvas({
         const all = new Set<string>();
         for (const n of topology.nodes) all.add(n.id);
         for (const ed of topology.edges) all.add(ed.id);
+        for (const a of annotations) all.add(a.id);
         setSelection(all);
         return;
       }
@@ -3601,11 +4251,13 @@ export default function Canvas({
         e.preventDefault();
         const nodes: string[] = [];
         const edges: string[] = [];
+        const anns: string[] = [];
         for (const id of selectedIds) {
           if (nodeIdSet.has(id)) nodes.push(id);
+          else if (annIdSet.has(id)) anns.push(id);
           else edges.push(id);
         }
-        onDeleteSelection(nodes, edges);
+        onDeleteSelection(nodes, edges, anns);
         clearSelection();
       }
     };
@@ -3614,8 +4266,10 @@ export default function Canvas({
   }, [
     selectedIds,
     nodeIdSet,
+    annIdSet,
     topology.nodes,
     topology.edges,
+    annotations,
     onDeleteSelection,
     clearSelection,
     setSelection,
@@ -3670,7 +4324,29 @@ export default function Canvas({
       const el = e.target as Element | null;
       if (el?.closest?.('button, input, select, textarea, a, [data-chrome]')) return;
       const hit = hitTest(e.target);
-      if (hit.kind !== 'node' || !hit.id) return;
+      if (!hit.id) return;
+
+      // Double-click a note: edit its text in place. Double-click a section
+      // border, label or handle: edit its label. Same editor contract as the
+      // node rename: Enter/blur commits, Escape cancels.
+      if (hit.kind === 'note') {
+        const ann = (topoRef.current.annotations ?? []).find((a) => a.id === hit.id);
+        if (!ann || !isNote(ann)) return;
+        e.preventDefault();
+        noteEditDoneRef.current = false;
+        setNoteEdit({ id: ann.id, draft: ann.text });
+        return;
+      }
+      if (hit.kind === 'section' || hit.kind === 'section-resize') {
+        const ann = (topoRef.current.annotations ?? []).find((a) => a.id === hit.id);
+        if (!ann || !isSection(ann)) return;
+        e.preventDefault();
+        labelEditDoneRef.current = false;
+        setLabelEdit({ id: ann.id, draft: ann.label });
+        return;
+      }
+
+      if (hit.kind !== 'node') return;
       const node = topoRef.current.nodes.find((n) => n.id === hit.id);
       if (!node) return;
       e.preventDefault();
@@ -3698,6 +4374,50 @@ export default function Canvas({
   const cancelRename = useCallback(() => {
     renameDoneRef.current = true;
     setRenaming(null);
+  }, []);
+
+  /* ---------------- annotation editors ----------------
+   *
+   * The note editor is a real focused TEXTAREA, so Enter inserts a newline
+   * natively; commit is blur (clicking away) with Escape as the cancel, and
+   * the shell removes a note whose committed text is empty. The label editor
+   * is a single-line input with the rename editor's exact contract. Both are
+   * siblings of the surface, so the pointer router never sees them.
+   */
+
+  const commitNoteEdit = useCallback(() => {
+    if (noteEditDoneRef.current) return;
+    noteEditDoneRef.current = true;
+    const edit = noteEdit;
+    setNoteEdit(null);
+    if (!edit || !onEditNote) return;
+    const ann = (topoRef.current.annotations ?? []).find((a) => a.id === edit.id);
+    if (!ann || !isNote(ann)) return;
+    if (edit.draft === ann.text) return;
+    onEditNote(edit.id, edit.draft);
+  }, [noteEdit, onEditNote]);
+
+  const cancelNoteEdit = useCallback(() => {
+    noteEditDoneRef.current = true;
+    setNoteEdit(null);
+  }, []);
+
+  const commitLabelEdit = useCallback(() => {
+    if (labelEditDoneRef.current) return;
+    labelEditDoneRef.current = true;
+    const edit = labelEdit;
+    setLabelEdit(null);
+    if (!edit || !onEditSectionLabel) return;
+    const ann = (topoRef.current.annotations ?? []).find((a) => a.id === edit.id);
+    if (!ann || !isSection(ann)) return;
+    const label = edit.draft.trim();
+    if (label === ann.label) return;
+    onEditSectionLabel(edit.id, label);
+  }, [labelEdit, onEditSectionLabel]);
+
+  const cancelLabelEdit = useCallback(() => {
+    labelEditDoneRef.current = true;
+    setLabelEdit(null);
   }, []);
 
   /* ---------------- system clipboard ----------------
@@ -3729,14 +4449,19 @@ export default function Canvas({
       e.preventDefault();
       e.clipboardData.setData('text/plain', text);
       // Cut = copy + the same single-edit delete the Delete key performs.
+      // Annotations partition into their own bucket: the clipboard does not
+      // carry them, but a selected note must still leave the canvas.
       const ids = new Set(topoRef.current.nodes.map((n) => n.id));
+      const annIds = new Set((topoRef.current.annotations ?? []).map((a) => a.id));
       const nodes: string[] = [];
       const edges: string[] = [];
+      const anns: string[] = [];
       for (const id of selRef.current) {
         if (ids.has(id)) nodes.push(id);
+        else if (annIds.has(id)) anns.push(id);
         else edges.push(id);
       }
-      onDeleteSelection(nodes, edges);
+      onDeleteSelection(nodes, edges, anns);
       clearSelection();
     };
 
@@ -3779,7 +4504,12 @@ export default function Canvas({
   /* ---------------- palette drops ---------------- */
 
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    if (!e.dataTransfer.types.includes(NODE_DND_MIME)) return;
+    if (
+      !e.dataTransfer.types.includes(NODE_DND_MIME) &&
+      !e.dataTransfer.types.includes(ANN_DND_MIME)
+    ) {
+      return;
+    }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     setDropHint(true);
@@ -3793,15 +4523,39 @@ export default function Canvas({
 
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
-      const kind = e.dataTransfer.getData(NODE_DND_MIME) as NodeKind;
       setDropHint(false);
+
+      // An annotation dragged off the palette. A dropped note opens its
+      // editor immediately, matching the tool-armed click path.
+      const ann = e.dataTransfer.getData(ANN_DND_MIME);
+      if (ann === 'note' || ann === 'section') {
+        e.preventDefault();
+        const w = toWorld(e.clientX, e.clientY);
+        if (ann === 'note') {
+          const id = onCreateNote?.(snap(w.x), snap(w.y)) ?? null;
+          if (id) {
+            noteEditDoneRef.current = false;
+            setNoteEdit({ id, draft: NEW_NOTE_TEXT });
+          }
+        } else {
+          onCreateSection?.(
+            snap(w.x - NEW_SECTION_W / 2),
+            snap(w.y - NEW_SECTION_H / 2),
+            NEW_SECTION_W,
+            NEW_SECTION_H,
+          );
+        }
+        return;
+      }
+
+      const kind = e.dataTransfer.getData(NODE_DND_MIME) as NodeKind;
       if (!kind) return;
       e.preventDefault();
       const w = toWorld(e.clientX, e.clientY);
       // Drop centers the node on the cursor rather than pinning its corner.
       onDropNode(kind, snap(w.x - NODE_W / 2), snap(w.y - NODE_H / 2));
     },
-    [toWorld, onDropNode],
+    [toWorld, onDropNode, onCreateNote, onCreateSection],
   );
 
   /* ---------------- fit to content ---------------- */
@@ -4202,6 +4956,29 @@ export default function Canvas({
    *  preset over it) unmounts the editor without committing, by lookup. */
   const renameNode = renaming ? (nodeById.get(renaming) ?? null) : null;
 
+  /** The annotation each in-place editor floats over, or null. Deleting it
+   *  (or loading a preset over it) unmounts the editor without committing,
+   *  by the same lookup rule the rename editor uses. */
+  const editNoteRaw = noteEdit
+    ? (annotations.find((a) => a.id === noteEdit.id) ?? null)
+    : null;
+  const editNote = editNoteRaw && isNote(editNoteRaw) ? editNoteRaw : null;
+  const editSectionRaw = labelEdit
+    ? (annotations.find((a) => a.id === labelEdit.id) ?? null)
+    : null;
+  const editSection =
+    editSectionRaw && isSection(editSectionRaw) ? editSectionRaw : null;
+
+  /** Auto-grow the note editor to its content, so what the student types is
+   *  laid out exactly where the committed note will paint. */
+  const noteAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    const el = noteAreaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  });
+
   /** Snapped drop target of the live drag-link, if the drop would be legal. */
   const snapTarget =
     link && link.over && canLink(link.from, link.over) ? link.over : null;
@@ -4254,7 +5031,7 @@ export default function Canvas({
       <div
         ref={surfaceRef}
         className="cv-surface"
-        data-cursor={cursor}
+        data-cursor={tool ? 'crosshair' : cursor}
         onPointerDown={onSurfaceDown}
         onPointerMove={onSurfaceMove}
         onPointerUp={onSurfaceUp}
@@ -4272,6 +5049,23 @@ export default function Canvas({
 
         <svg className="cv-svg">
           <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
+            {/* Sections FIRST: a frame paints behind every wire and node it
+                groups. Its interior is pointer-transparent (see the
+                annotation layer comment), so nothing here can steal a click
+                from the diagram above it. */}
+            {annotations.length > 0 && (
+              <g className="cv-sections">
+                {annotations.filter(isSection).map((s) => (
+                  <SectionView
+                    key={s.id}
+                    section={s}
+                    selected={selectedIds.has(s.id)}
+                    editingLabel={labelEdit?.id === s.id}
+                  />
+                ))}
+              </g>
+            )}
+
             <g className="cv-edges">
               {topology.edges.map((ed) => {
                 const a = nodeById.get(ed.from);
@@ -4325,6 +5119,50 @@ export default function Canvas({
                 />
               ))}
             </g>
+
+            {/* Notes LAST among content: commentary is never hidden by the
+                diagram it comments on. */}
+            {annotations.length > 0 && (
+              <g className="cv-notes">
+                {annotations.filter(isNote).map((n) => (
+                  <NoteView
+                    key={n.id}
+                    note={n}
+                    selected={selectedIds.has(n.id)}
+                    editing={noteEdit?.id === n.id}
+                  />
+                ))}
+              </g>
+            )}
+
+            {/* Selection chrome for annotations, in its own TOP layer so a
+                section's resize handles are never buried under a node that
+                happens to sit on the border. */}
+            {annotations.length > 0 && (
+              <g className="cv-ann-chrome">
+                {annotations
+                  .filter((a) => selectedIds.has(a.id))
+                  .map((a) =>
+                    isSection(a) ? (
+                      <SectionChrome key={a.id} section={a} ui={1 / view.k} />
+                    ) : (
+                      <NoteChrome key={a.id} note={a} ui={1 / view.k} />
+                    ),
+                  )}
+              </g>
+            )}
+
+            {/* Live section-draw preview. */}
+            {draft && (
+              <rect
+                className="cv-section-draft"
+                x={draft.x}
+                y={draft.y}
+                width={draft.w}
+                height={draft.h}
+                rx={8}
+              />
+            )}
 
             {marquee && (
               <rect
@@ -4380,6 +5218,83 @@ export default function Canvas({
         />
       )}
 
+      {/*
+        In-place note editor: a real focused textarea positioned and scaled
+        over the note it edits, with the note's exact font metrics, so what
+        is typed is what will paint. Enter is a newline (native textarea
+        behaviour, deliberately unhandled), Escape cancels, blur commits.
+      */}
+      {editNote && noteEdit && (
+        <textarea
+          ref={noteAreaRef}
+          className={`cv-note-editor is-${editNote.size}`}
+          data-chrome="note-edit"
+          style={{
+            left: editNote.x * view.k + view.x,
+            top: editNote.y * view.k + view.y,
+            width: editNote.width * view.k + 4,
+            fontSize: NOTE_SIZES[editNote.size].font * view.k,
+            lineHeight: `${NOTE_SIZES[editNote.size].line * view.k}px`,
+            fontWeight: NOTE_SIZES[editNote.size].weight,
+          }}
+          value={noteEdit.draft}
+          onChange={(e) =>
+            setNoteEdit((cur) =>
+              cur ? { ...cur, draft: e.target.value.slice(0, 2000) } : cur,
+            )
+          }
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={commitNoteEdit}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelNoteEdit();
+            }
+          }}
+          aria-label="Note text"
+          spellCheck={false}
+          autoFocus
+        />
+      )}
+
+      {/* In-place section label editor: the rename editor's contract. */}
+      {editSection && labelEdit && (
+        <input
+          className="cv-label-editor"
+          data-chrome="label-edit"
+          style={{
+            left: editSection.x * view.k + view.x,
+            top: editSection.y * view.k + view.y,
+            width: Math.min(240, editSection.width) * view.k,
+            height: SEC_LABEL_H * view.k,
+            fontSize: Math.max(11, 12 * view.k),
+          }}
+          value={labelEdit.draft}
+          onChange={(e) =>
+            setLabelEdit((cur) =>
+              cur ? { ...cur, draft: e.target.value.slice(0, 200) } : cur,
+            )
+          }
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={commitLabelEdit}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitLabelEdit();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelLabelEdit();
+            }
+          }}
+          aria-label="Section label"
+          autoComplete="off"
+          spellCheck={false}
+          autoFocus
+        />
+      )}
+
       {topology.nodes.length === 0 && (
         <div className="cv-empty">
           <p className="cv-empty-lead">Start with an empty canvas</p>
@@ -4419,6 +5334,16 @@ export default function Canvas({
         </p>
       )}
 
+      {/* The armed annotation tool teaches its one gesture, exactly the way
+          the armed link does. */}
+      {tool !== null && pendingLink === null && (
+        <p className="cv-hint" role="status">
+          {tool === 'note'
+            ? 'Click the canvas to place a note · Esc to cancel'
+            : 'Drag to draw a section · Esc to cancel'}
+        </p>
+      )}
+
       {/* A one-line contextual hint, the cheapest thing Excalidraw does that
           this app lacked: at rest it teaches the camera, with a node selected
           it teaches the node verbs. Quiet, static, never animated, and it
@@ -4427,23 +5352,26 @@ export default function Canvas({
           (see .cv-ledger). aria-hidden: it repeats what titles and the
           shortcuts dialog already expose to assistive tech, and its churn on
           selection would be noise there. */}
-      {pendingLink === null && topology.nodes.length > 0 && !renameNode && (
-        <div className="cv-hint-idle label" aria-hidden="true">
-          {topology.nodes.some((n) => selectedIds.has(n.id)) ? (
-            <>
-              <span>Drag to move</span>
-              <span>Delete to remove</span>
-              <span>Double-click to rename</span>
-            </>
-          ) : (
-            <>
-              <span>Scroll to pan</span>
-              <span>Ctrl+scroll to zoom</span>
-              <span>Shift+drag to select</span>
-            </>
-          )}
-        </div>
-      )}
+      {pendingLink === null &&
+        tool === null &&
+        topology.nodes.length > 0 &&
+        !renameNode && (
+          <div className="cv-hint-idle label" aria-hidden="true">
+            {topology.nodes.some((n) => selectedIds.has(n.id)) ? (
+              <>
+                <span>Drag to move</span>
+                <span>Delete to remove</span>
+                <span>Double-click to rename</span>
+              </>
+            ) : (
+              <>
+                <span>Scroll to pan</span>
+                <span>Ctrl+scroll to zoom</span>
+                <span>Shift+drag to select</span>
+              </>
+            )}
+          </div>
+        )}
 
       <div className="cv-zoom" data-chrome="zoom">
         <button

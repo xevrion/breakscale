@@ -73,9 +73,28 @@ function configEqual(a: object, b: object): boolean {
   return true;
 }
 
+/**
+ * Annotations are flat plain-data objects, so per-entry field comparison via
+ * configEqual is exact. Absent and empty are the same diagram: a topology
+ * that never had the optional field must not differ from one holding [].
+ */
+function annotationsEqual(
+  a: Topology['annotations'],
+  b: Topology['annotations'],
+): boolean {
+  const xs = a ?? [];
+  const ys = b ?? [];
+  if (xs.length !== ys.length) return false;
+  for (let i = 0; i < xs.length; i++) {
+    if (!configEqual(xs[i]!, ys[i]!)) return false;
+  }
+  return true;
+}
+
 function topologyEqual(a: Topology, b: Topology): boolean {
   if (a.nodes.length !== b.nodes.length) return false;
   if (a.edges.length !== b.edges.length) return false;
+  if (!annotationsEqual(a.annotations, b.annotations)) return false;
   for (let i = 0; i < a.nodes.length; i++) {
     const m = a.nodes[i]!;
     const n = b.nodes[i]!;

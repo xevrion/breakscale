@@ -495,6 +495,43 @@
   --kind-sidecar-ink: #614d17;
 
   /* ------------------------------------------------------------------------
+     Section annotation tones.
+
+     A section stores a palette INDEX, never a colour (annotations.ts), and
+     this is the palette it indexes. Six tones, each an alias into the
+     per-kind system above rather than new hex: sections restyle with any
+     future retheme of the kind palette for free, and every tone inherits
+     the measured contrast work already done for its source hue. Tone 5 is
+     the neutral, for a section that should group without commenting.
+
+     -fill tints the frame's interior, -line strokes its border, -ink is the
+     label text on the fill.
+     ------------------------------------------------------------------------ */
+  --ann-0-fill: var(--kind-lb-fill);
+  --ann-0-line: var(--kind-lb-stroke);
+  --ann-0-ink: var(--kind-lb-ink);
+
+  --ann-1-fill: var(--kind-searchindex-fill);
+  --ann-1-line: var(--kind-searchindex-stroke);
+  --ann-1-ink: var(--kind-searchindex-ink);
+
+  --ann-2-fill: var(--kind-cache-fill);
+  --ann-2-line: var(--kind-cache-stroke);
+  --ann-2-ink: var(--kind-cache-ink);
+
+  --ann-3-fill: var(--kind-queue-fill);
+  --ann-3-line: var(--kind-queue-stroke);
+  --ann-3-ink: var(--kind-queue-ink);
+
+  --ann-4-fill: var(--kind-pubsub-fill);
+  --ann-4-line: var(--kind-pubsub-stroke);
+  --ann-4-ink: var(--kind-pubsub-ink);
+
+  --ann-5-fill: var(--surface-2);
+  --ann-5-line: var(--line-3);
+  --ann-5-ink: var(--text-dim);
+
+  /* ------------------------------------------------------------------------
      Type stacks. System-first: the OS UI font is the one a student's eye is
      already calibrated to, it needs no network request, and it never causes
      a layout shift. No web font is loaded.

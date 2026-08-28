@@ -1256,3 +1256,265 @@
   line-height: 1;
   outline: none;
 }
+
+/* ==========================================================================
+   Annotations: sections and notes.
+
+   Sections paint BEHIND the diagram, notes in front of it, and both are
+   documentation: no health colour, no motion, nothing that competes with a
+   live metric. The tone tokens are aliases resolved in index.css; this file
+   only consumes them, and (matching the per-kind rule) the --sec-* locals
+   are declared on the attribute-carrying group with higher specificity than
+   any consumer, so a source-order tie can never grey a tone out.
+   ========================================================================== */
+
+.cv-section[data-tone='0'] {
+  --sec-fill: var(--ann-0-fill);
+  --sec-line: var(--ann-0-line);
+  --sec-ink: var(--ann-0-ink);
+}
+
+.cv-section[data-tone='1'] {
+  --sec-fill: var(--ann-1-fill);
+  --sec-line: var(--ann-1-line);
+  --sec-ink: var(--ann-1-ink);
+}
+
+.cv-section[data-tone='2'] {
+  --sec-fill: var(--ann-2-fill);
+  --sec-line: var(--ann-2-line);
+  --sec-ink: var(--ann-2-ink);
+}
+
+.cv-section[data-tone='3'] {
+  --sec-fill: var(--ann-3-fill);
+  --sec-line: var(--ann-3-line);
+  --sec-ink: var(--ann-3-ink);
+}
+
+.cv-section[data-tone='4'] {
+  --sec-fill: var(--ann-4-fill);
+  --sec-line: var(--ann-4-line);
+  --sec-ink: var(--ann-4-ink);
+}
+
+.cv-section[data-tone='5'] {
+  --sec-fill: var(--ann-5-fill);
+  --sec-line: var(--ann-5-line);
+  --sec-ink: var(--ann-5-ink);
+}
+
+/* THE INTERIOR IS POINTER-TRANSPARENT. The tint and the visible border are
+   both inert; a press inside the frame falls through to the node, edge or
+   background beneath, so a section can never make its own contents
+   unclickable. The only grabbable perimeter is .cv-section-hit below. */
+.cv-section-fill {
+  fill: var(--sec-fill, var(--surface-2));
+  fill-opacity: 0.55;
+  pointer-events: none;
+}
+
+.cv-section-line {
+  fill: none;
+  stroke: var(--sec-line, var(--border-strong));
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.cv-section.is-selected .cv-section-line {
+  stroke-width: 2;
+}
+
+/* The border's real target: an invisible 16px stroke, pointer-events:stroke
+   so ONLY the perimeter band takes the pointer and the fill it encloses
+   stays transparent to clicks. Same pattern as .cv-edge-hit. */
+.cv-section-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: grab;
+}
+
+/* Label plate, top-left. Solid enough to grab, quiet enough to read as part
+   of the frame. The text itself is inert; the plate carries the hit. */
+.cv-section-label-bg {
+  fill: var(--sec-fill, var(--surface-2));
+  pointer-events: all;
+  cursor: grab;
+}
+
+.cv-section-label-text {
+  fill: var(--sec-ink, var(--text-dim));
+  font-family: var(--sans);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-med);
+  dominant-baseline: central;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Live draw preview for the armed section tool. */
+.cv-section-draft {
+  fill: var(--accent);
+  fill-opacity: 0.06;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   Notes
+   -------------------------------------------------------------------------- */
+
+.cv-note-hit {
+  fill: transparent;
+  pointer-events: all;
+  cursor: grab;
+}
+
+.cv-note-text {
+  fill: var(--text);
+  font-family: var(--sans);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The three scales. Sizes and weights MUST match NOTE_SIZES in
+   annotationLayout.ts, which is what the wrap measurement and the in-place
+   editor both use; a drift here would wrap the text against one font and
+   paint it in another. */
+.cv-note.is-sm .cv-note-text {
+  font-size: 12px;
+  font-weight: 450;
+  fill: var(--text-dim);
+}
+
+.cv-note.is-md .cv-note-text {
+  font-size: 16px;
+  font-weight: 450;
+}
+
+.cv-note.is-lg .cv-note-text {
+  font-size: 24px;
+  font-weight: 550;
+}
+
+/* --------------------------------------------------------------------------
+   Annotation selection chrome: ring, resize handles, note size switch.
+   Geometry arrives in screen-constant units from the component (divided by
+   the zoom), so nothing here needs vector-effect except the ring stroke.
+   -------------------------------------------------------------------------- */
+
+.cv-ann-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.cv-handle {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.cv-handle-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.cv-handle-hit[data-dir='n'],
+.cv-handle-hit[data-dir='s'] {
+  cursor: ns-resize;
+}
+
+.cv-handle-hit[data-dir='e'],
+.cv-handle-hit[data-dir='w'] {
+  cursor: ew-resize;
+}
+
+.cv-handle-hit[data-dir='nw'],
+.cv-handle-hit[data-dir='se'] {
+  cursor: nwse-resize;
+}
+
+.cv-handle-hit[data-dir='ne'],
+.cv-handle-hit[data-dir='sw'] {
+  cursor: nesw-resize;
+}
+
+.cv-note-size rect {
+  fill: var(--surface);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.cv-note-size text {
+  fill: var(--text-dim);
+  font-family: var(--sans);
+  font-weight: var(--fw-med);
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cv-note-size .is-active rect {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+}
+
+.cv-note-size .is-active text {
+  fill: var(--accent-ink);
+}
+
+/* --------------------------------------------------------------------------
+   In-place annotation editors. Siblings of the surface, like the rename
+   input, so the pointer router never sees them. The note editor mirrors the
+   note's own metrics exactly (font, weight, line-height all arrive inline,
+   scaled by the zoom) so the draft is laid out precisely where the
+   committed text will paint.
+   -------------------------------------------------------------------------- */
+
+.cv-note-editor {
+  position: absolute;
+  z-index: 4;
+  box-sizing: content-box;
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.cv-label-editor {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  padding: 0 var(--sp-2);
+  border: var(--bw-strong) solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--sans);
+  font-weight: var(--fw-med);
+  line-height: 1;
+  outline: none;
+}

@@ -28,6 +28,16 @@
 - [ ] Per-example pages
 - [ ] llms.txt
 
+## Save / share (excalidraw parity)
+
+- [x] Design persists to localStorage, restores on reload
+- [ ] Export to file (.breakscale.json)
+- [ ] Import from file, drag-and-drop onto the canvas
+- [ ] Export as PNG / SVG
+- [ ] Share link: topology encoded in the URL hash, read-only for the recipient
+- [ ] Named saves, a list of your own designs
+- [ ] Live collaboration (later, maybe)
+
 ## Product
 
 - [ ] Cloud vendor mode: AWS / GCP / Azure / generic

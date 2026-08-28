@@ -11,6 +11,7 @@ import {
 } from './nodeVisuals';
 import { Term } from './Tooltip';
 import { usePreference } from '../content/preferences';
+import { ANN_DND_MIME } from './annotationLayout';
 import './Palette.css';
 
 /* ------------------------------------------------------------------ *
@@ -164,9 +165,45 @@ function Glyph({ kind }: { kind: NodeKind }) {
   );
 }
 
+export type AnnotationTool = 'note' | 'section';
+
+/**
+ * The two annotation rows. Not components: they carry no traffic, have no
+ * simulation behaviour and never reach the engine, so they sit in their own
+ * group rather than borrowing a NodeKind. The icons are drawn inline for
+ * the same reason: KIND_ICON is the engine-backed vocabulary and these are
+ * not in it.
+ */
+const ANN_ROWS: {
+  tool: AnnotationTool;
+  name: string;
+  hint: string;
+  icon: string[];
+}[] = [
+  {
+    tool: 'note',
+    name: 'Note',
+    hint: 'Free text placed anywhere (N)',
+    // Lucide "type": text as text.
+    icon: ['M4 7V5h16v2', 'M9 20h6', 'M12 5v15'],
+  },
+  {
+    tool: 'section',
+    name: 'Section',
+    hint: 'A labelled frame around a group (B)',
+    // A frame with a label notch: the thing it draws.
+    icon: [
+      'M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
+      'M3 9h8',
+    ],
+  },
+];
+
 export interface PaletteProps {
   /** Add a node of `kind` to the canvas at a default position. */
   onAdd: (kind: NodeKind) => void;
+  /** Place an annotation at the centre of the current view. */
+  onAddAnnotation?: (tool: AnnotationTool) => void;
 }
 
 function handleDragStart(event: DragEvent<HTMLButtonElement>, kind: NodeKind) {
@@ -176,7 +213,13 @@ function handleDragStart(event: DragEvent<HTMLButtonElement>, kind: NodeKind) {
   dt.effectAllowed = 'copy';
 }
 
-export function Palette({ onAdd }: PaletteProps) {
+function handleAnnDragStart(event: DragEvent<HTMLButtonElement>, tool: AnnotationTool) {
+  const dt = event.dataTransfer;
+  dt.setData(ANN_DND_MIME, tool);
+  dt.effectAllowed = 'copy';
+}
+
+export function Palette({ onAdd, onAddAnnotation }: PaletteProps) {
   /**
    * Whether the hover explanations are on. With them OFF (the default) the
    * per-row "?" mark is not rendered at all: <Term> degrades to its bare
@@ -282,6 +325,59 @@ export function Palette({ onAdd }: PaletteProps) {
               </ul>
             </div>
           ))}
+
+          {/*
+            Annotation rows: the documentation layer. Same affordances as a
+            component row (drag onto the canvas, or click to place at the
+            centre of the view), so nothing new has to be learned; the
+            neutral chip is what says "not a component". The keyboard route
+            (N / B arming a tool) is printed in each row's title.
+          */}
+          {onAddAnnotation && (
+            <div className="pal-group">
+              <p className="label pal-group-title">Annotate</p>
+              <ul className="pal-list">
+                {ANN_ROWS.map((row) => (
+                  <li key={row.tool} className="pal-item">
+                    <button
+                      type="button"
+                      className="pal-row"
+                      draggable
+                      onDragStart={(e) => handleAnnDragStart(e, row.tool)}
+                      onClick={() => onAddAnnotation(row.tool)}
+                      onKeyDown={(e) => {
+                        if (e.key === ' ' || e.key === 'Spacebar') {
+                          e.preventDefault();
+                          onAddAnnotation(row.tool);
+                        }
+                      }}
+                      title={row.hint}
+                    >
+                      <span className="pal-glyph">
+                        <svg
+                          width="1.1em"
+                          height="1.1em"
+                          viewBox={`0 0 ${ICON_BOX} ${ICON_BOX}`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={ICON_STROKE}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          role="presentation"
+                          aria-hidden="true"
+                        >
+                          {row.icon.map((d) => (
+                            <path key={d} d={d} />
+                          ))}
+                        </svg>
+                      </span>
+                      <span className="pal-name">{row.name}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     </nav>

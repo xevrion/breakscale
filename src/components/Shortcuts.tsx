@@ -80,6 +80,15 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: 'Notes and sections',
+    rows: [
+      { keys: ['N'], does: 'Note tool: click the canvas to place text' },
+      { keys: ['B'], does: 'Section tool: drag to frame a group' },
+      { keys: ['Double-click a note'], does: 'Edit its text in place' },
+      { keys: ['Double-click a section'], does: 'Rename its label' },
+    ],
+  },
+  {
     title: 'View',
     rows: [
       { keys: ['Ctrl+=', 'Ctrl+-'], does: 'Zoom in or out' },
