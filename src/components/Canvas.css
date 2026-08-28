@@ -1067,7 +1067,10 @@
    both the ledger and the zoom controls. */
 .cv-hint {
   position: absolute;
-  top: var(--sp-3);
+  /* Below the floating islands, which sit centred at the top of the window
+     and would otherwise cover this exactly. --bar-clear is the one number
+     everything that must clear them reads. */
+  top: var(--bar-clear, 84px);
   left: 50%;
   transform: translateX(-50%);
   padding: var(--sp-1) var(--sp-3);
@@ -1128,7 +1131,9 @@
    --text-faint measures 5.17:1 on --bg (AA). */
 .cv-hint-idle {
   position: absolute;
-  top: var(--sp-3);
+  /* Below the floating islands, same as .cv-hint above: both are centred at
+     the top of the canvas, which is exactly where the load island sits. */
+  top: var(--bar-clear, 84px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;

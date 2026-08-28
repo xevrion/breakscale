@@ -52,6 +52,7 @@ import type { AnnotationTool } from './components/Palette';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
 import { usePreference } from './content/preferences';
 import { Settings } from './components/Settings';
+import { MainMenu } from './components/MainMenu';
 import { PanelResizer } from './components/PanelResizer';
 import { applyTheme } from './theme/applyTheme';
 import { usePresence } from './components/presence';
@@ -461,6 +462,8 @@ export default function App() {
   /** The keyboard shortcuts dialog. Ctrl+/ and the top-bar button. */
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const [examplesOpen, setExamplesOpen] = useState(false);
 
   /* ---------------- panel layout ---------------- */
@@ -560,6 +563,43 @@ export default function App() {
     setGlossaryNavigate(openGlossary);
     return () => setGlossaryNavigate(null);
   }, [openGlossary]);
+
+  /**
+   * What the menu offers.
+   *
+   * Ordered by how often a student reaches for it: an example is how most
+   * sessions start, the glossary is what they need mid-run, and the
+   * shortcuts and settings are consulted rarely. Bindings are printed here
+   * as well as in the shortcuts dialog, so a key can be learned from the
+   * menu without opening a second thing to read about the first.
+   */
+  const menuItems = useMemo(
+    () => [
+      {
+        label: 'Examples',
+        icon: 'M3 4a1 1 0 0 1 1-1h6v7H3zM14 3h6a1 1 0 0 1 1 1v5h-7zM3 13h7v8H4a1 1 0 0 1-1-1zM14 13h7v7a1 1 0 0 1-1 1h-6z',
+        onSelect: () => setExamplesOpen(true),
+      },
+      {
+        label: 'Glossary',
+        icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z',
+        hint: '?',
+        onSelect: () => openGlossary(),
+      },
+      {
+        label: 'Keyboard shortcuts',
+        icon: 'M2 5.5A2.5 2.5 0 0 1 4.5 3h15A2.5 2.5 0 0 1 22 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18.5zM6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6M7 17h10',
+        hint: 'Ctrl+/',
+        onSelect: () => setShortcutsOpen(true),
+      },
+      {
+        label: 'Settings',
+        icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
+        onSelect: () => setSettingsOpen(true),
+      },
+    ],
+    [openGlossary],
+  );
 
   /**
    * The engine is a mutable simulation owned outside React's render cycle.
@@ -2043,15 +2083,16 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-bar">
-        {/* The wordmark is the one place the product speaks in its own
+        <div className="app-island app-island-brand">
+          {/* The wordmark is the one place the product speaks in its own
             voice. Two words, sentence case, no abbreviation — a student
             opening this should be able to say what it is out loud. */}
-        <div className="app-brand">
-          <h1 className="app-title">Breakscale</h1>
-          <p className="app-tagline">Build it, load it, watch it break</p>
-        </div>
+          <div className="app-brand">
+            <h1 className="app-title">Breakscale</h1>
+            <p className="app-tagline">Build it, load it, watch it break</p>
+          </div>
 
-        {/*
+          {/*
           Undo / redo. Beside the wordmark, at the editing end of the bar,
           away from the run/pause cluster: these operate on the DIAGRAM, not
           on the simulation. Disabled state is derived from the history
@@ -2061,216 +2102,110 @@ export default function App() {
           icons with a universally settled meaning, and the title carries the
           shortcut for anyone hovering to check.
         */}
-        <div className="app-history">
-          <button
-            type="button"
-            className="btn btn-sm btn-icon"
-            disabled={!canUndo}
-            aria-label="Undo"
-            title="Undo (Ctrl+Z)"
-            onClick={handleUndo}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+          <div className="app-history">
+            <button
+              type="button"
+              className="btn btn-sm btn-icon"
+              disabled={!canUndo}
+              aria-label="Undo"
+              title="Undo (Ctrl+Z)"
+              onClick={handleUndo}
             >
-              <path d="M9 14 4 9l5-5" />
-              <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-icon"
-            disabled={!canRedo}
-            aria-label="Redo"
-            title="Redo (Ctrl+Shift+Z)"
-            onClick={handleRedo}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 14 4 9l5-5" />
+                <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-icon"
+              disabled={!canRedo}
+              aria-label="Redo"
+              title="Redo (Ctrl+Shift+Z)"
+              onClick={handleRedo}
             >
-              <path d="m15 14 5-5-5-5" />
-              <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
-            </svg>
-          </button>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m15 14 5-5-5-5" />
+                <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <TrafficControl
-          rps={offeredRps}
-          onRpsChange={handleRpsChange}
-          running={running}
-          onToggleRun={handleToggleRun}
-          onStep={handleStep}
-          onReset={handleReset}
-          system={snapshot?.system ?? EMPTY_SYSTEM}
-          lost={lostRps}
-          empty={topology.nodes.length === 0}
-        />
+        <div className="app-island app-island-load">
+          <TrafficControl
+            rps={offeredRps}
+            onRpsChange={handleRpsChange}
+            running={running}
+            onToggleRun={handleToggleRun}
+            onStep={handleStep}
+            onReset={handleReset}
+            system={snapshot?.system ?? EMPTY_SYSTEM}
+            lost={lostRps}
+            empty={topology.nodes.length === 0}
+          />
+        </div>
 
-        {/*
-          THE WAY INTO THE GLOSSARY.
+        <div className="app-island app-island-menu">
+          {/*
+          Everything that is reference or setup, behind one button.
 
-          Labelled, not an icon. A lone question mark in a circle is the
-          weakest affordance in interface design: it could be help, support,
-          an about box or a tour, and a student who does not know what "p99"
-          means will not gamble a click to find out which. The word
-          "Glossary" says exactly what is behind it.
-
-          It lives in the top bar because that is the one region present on
-          every screen state, and at the far end because it is a reference,
-          not part of the run/pause loop the bar's other controls belong to.
-
-          `aria-expanded` because it discloses the sheet, and the shortcut is
-          printed rather than hidden in a tooltip so it is learnable by
-          someone who has never opened the panel.
+          Examples, Shortcuts, Settings and Glossary were four buttons
+          competing with the load control and the live readouts. They are all
+          reached BETWEEN actions rather than during one, so folding them
+          here leaves the bar carrying only what changes while the simulation
+          runs, which is the thing a reader is actually watching.
         */}
-        {/*
-          The way into the keyboard shortcuts dialog. Labelled, beside the
-          glossary, for the same reason the glossary is: the two are the
-          app's reference surfaces, and a student who knows no shortcuts is
-          exactly the person an icon-only affordance would lose. The printed
-          chord makes the binding learnable from the button itself.
-        */}
-        {/*
-          Examples opens a gallery rather than living in the components rail.
-          A rail row is something you drag ONTO the canvas; an example is a
-          whole system you load, which is a different act, and the rail had no
-          room to say what any of them teaches. It also means the empty
-          canvas's "open Examples" instruction points at something that is
-          always reachable, which was not true while the rail could be
-          collapsed.
-        */}
-        <button
-          type="button"
-          className="btn app-glossary"
-          aria-haspopup="dialog"
-          aria-expanded={examplesOpen}
-          aria-label="Examples"
-          title="Load a worked example"
-          onClick={() => setExamplesOpen((o) => !o)}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
-            <rect x="14" y="14" width="7" height="7" rx="1" />
-          </svg>
-          <span className="app-glossary-label">Examples</span>
-        </button>
-
-        <button
-          type="button"
-          className="btn app-glossary"
-          aria-haspopup="dialog"
-          aria-expanded={shortcutsOpen}
-          aria-label="Keyboard shortcuts"
-          title="Keyboard shortcuts (Ctrl+/)"
-          onClick={() => setShortcutsOpen((o) => !o)}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <rect x="2" y="5" width="20" height="14" rx="2.5" />
-            <path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6M7 17h10" />
-          </svg>
-          <span className="app-glossary-label">Shortcuts</span>
-          <kbd className="app-glossary-key" aria-hidden="true">
-            Ctrl+/
-          </kbd>
-        </button>
-
-        {/*
-          Settings. Icon-only, unlike its labelled neighbours: the gear is one
-          of the few genuinely universal glyphs, and the reference surfaces
-          (Examples, Shortcuts, Glossary) earn their labels because they are
-          what a lost student needs to see spelled out. This is where you go
-          once you already know what you want to change.
-        */}
-        <button
-          type="button"
-          className="btn btn-icon app-settings"
-          aria-haspopup="dialog"
-          aria-expanded={settingsOpen}
-          aria-label="Settings"
-          title="Settings"
-          onClick={() => setSettingsOpen((o) => !o)}
-        >
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
-
-        <button
-          type="button"
-          className="btn app-glossary"
-          aria-expanded={glossaryOpen}
-          aria-label="Glossary"
-          title="Glossary (?)"
-          onClick={() => (glossaryOpen ? closeGlossary() : openGlossary())}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
-          </svg>
-          <span className="app-glossary-label">Glossary</span>
-          <kbd className="app-glossary-key" aria-hidden="true">
-            ?
-          </kbd>
-        </button>
+          <div className="app-menu-wrap">
+            <button
+              type="button"
+              className="btn btn-icon app-menu-btn"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="Menu"
+              title="Examples, settings and help"
+              onClick={() => setMenuOpen((o) => !o)}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <MainMenu
+              open={menuOpen}
+              onClose={() => setMenuOpen(false)}
+              items={menuItems}
+            />
+          </div>
+        </div>
       </header>
 
       {/*

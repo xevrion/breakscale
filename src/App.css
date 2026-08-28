@@ -11,11 +11,13 @@
    its appearance along with it.
    ========================================================================== */
 
+/* The canvas is the app, so it gets the whole window and everything else
+   floats over it. A grid row for a bar would reserve 72px of screen from the
+   one thing the reader came to look at, on every screen size, forever. */
 .app {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  position: relative;
   height: 100vh;
-  /* dvh keeps the bar reachable on mobile browsers whose toolbars collapse. */
+  /* dvh keeps things reachable on mobile browsers whose toolbars collapse. */
   height: 100dvh;
   overflow: hidden;
   background: var(--bg);
@@ -32,16 +34,67 @@
    nothing inside it has to work around the container any more.
    -------------------------------------------------------------------------- */
 
+/* An island floating over the canvas, not a bar dividing the window.
+
+   It keeps a surface and a shadow rather than going transparent: the things
+   on it are live numbers and a control, and text sitting directly on a
+   moving diagram is unreadable. What it gives up is the full-width rule and
+   the 72px of reserved height, so the canvas runs edge to edge underneath.
+
+   pointer-events are returned to the children, so the gap between the brand
+   and the readouts is canvas you can actually drag through. */
 .app-bar {
+  position: absolute;
+  top: var(--sp-3);
+  left: var(--sp-3);
+  right: var(--sp-3);
+  z-index: 40;
   display: flex;
   align-items: center;
-  gap: var(--sp-10);
-  min-height: 72px;
-  /* flex-none against the shrink that a long headline would otherwise cause. */
-  flex: none;
-  padding: var(--sp-3) var(--sp-5);
-  border-bottom: var(--bw) solid var(--border);
+  gap: var(--sp-3);
+  /* The BAR itself is only a positioning strip: it paints nothing and
+     catches nothing, so the canvas between its islands is draggable. Each
+     island below carries its own surface. */
+  background: none;
+  pointer-events: none;
+}
+
+/* An island. Three of them: the wordmark and history on the left, the load
+   control in the middle, the readouts and the menu on the right. Grouping
+   them this way rather than as one long bar is what leaves canvas visible
+   between them, which is the whole point of floating over it. */
+.app-island {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  /* One height for all three, so they read as a row of islands rather than
+     as three unrelated boxes. The load control is the tallest thing here
+     (a slider over its scale row), so it sets the number and the others
+     match it instead of each sizing to its own contents. */
+  min-height: 56px;
+  padding: 0 var(--sp-3);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r-lg);
   background: var(--surface);
+  box-shadow: var(--shadow-md);
+  pointer-events: auto;
+}
+
+/* The load control takes the slack, but only up to a point: allowed to grow
+   without limit it spans the window and the three islands read as one solid
+   bar again, which is the thing this layout exists to stop. Capped, the
+   canvas shows between them on a wide screen and the island shrinks
+   gracefully on a narrow one. */
+.app-island-load {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 940px;
+}
+
+/* Pushes the menu to the far right, leaving the gap between it and the load
+   island as visible canvas rather than as dead space inside a bar. */
+.app-island-menu {
+  margin-left: auto;
 }
 
 /* --------------------------------------------------------------------------
@@ -84,7 +137,9 @@
 
 /* The traffic control takes the rest of the bar. min-width:0 lets it
    actually shrink instead of forcing the bar wider than the viewport. */
-.app-bar > .traffic {
+/* The traffic control now sits inside its island rather than directly in
+   the bar, so the selector follows it down a level. */
+.app-island-load > .traffic {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -105,6 +160,23 @@
 
 .app-glossary {
   flex: none;
+}
+
+/* The menu button and the menu it opens. Relative, so the menu can anchor
+   under the button rather than to the bar's far corner. */
+.app-menu-wrap {
+  position: relative;
+  flex: none;
+}
+
+.app-menu-btn {
+  flex: none;
+}
+
+.app-menu-btn[aria-expanded='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* The shortcut, printed on the control that performs it, so it is learnable
@@ -214,10 +286,16 @@
    -------------------------------------------------------------------------- */
 
 .app-body {
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: flex;
   min-height: 0;
   overflow: hidden;
+
+  /* How far down the canvas the floating bar reaches: its offset, its own
+     height, and a gap below it. Everything that must clear the bar reads
+     this one number rather than restating the arithmetic. */
+  --bar-clear: 84px;
 
   --rail-w: 224px;
   --ins-w: 320px;
@@ -260,25 +338,34 @@
    separates a panel from the canvas is the panel's own border. */
 .app-slot-left {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
+  /* Below the floating bar rather than behind it, and inset from the window
+     edges so the rounded corners are visible on all four sides. */
+  top: var(--bar-clear);
+  bottom: var(--sp-3);
+  left: var(--sp-3);
   width: var(--rail-w);
   z-index: 10;
 }
 
+/* The rail is an island too, now that it no longer runs to the top of the
+   window. A full-height panel could end flat against the frame; one that
+   starts partway down cannot, because the cut edge reads as clipped rather
+   than as designed. */
 .app-slot-left > .pal {
   flex: 1 1 auto;
   min-width: 0;
-  border-right: var(--bw) solid var(--border);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r-lg);
   background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
 
 .app-slot-right {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
+  top: var(--bar-clear);
+  bottom: var(--sp-3);
+  right: var(--sp-3);
   width: var(--ins-w);
   z-index: 10;
 }
@@ -286,6 +373,10 @@
 .app-slot-right > .ins {
   flex: 1 1 auto;
   min-width: 0;
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
 
 /* --------------------------------------------------------------------------
@@ -355,12 +446,13 @@
 }
 
 .stage-toggle-library {
-  top: var(--sp-3);
+  /* Below the floating bar, not under it. */
+  top: var(--bar-clear);
   left: var(--sp-3);
 }
 
 .stage-toggle-inspector {
-  top: var(--sp-3);
+  top: var(--bar-clear);
   right: var(--sp-3);
 }
 
@@ -387,12 +479,14 @@
    are the shell's own geometry tokens. Canvas.css still owns their look.
    -------------------------------------------------------------------------- */
 
+/* Clears the rail plus BOTH gaps: the rail is inset from the window edge
+   now, so the old single gap left the toggle sitting on the panel. */
 .app-body.has-library .stage-toggle-library {
-  left: calc(var(--rail-w) + var(--sp-3));
+  left: calc(var(--rail-w) + var(--sp-3) * 2);
 }
 
 .app-body.has-inspector .stage-toggle-inspector {
-  right: calc(var(--ins-w) + var(--sp-3));
+  right: calc(var(--ins-w) + var(--sp-3) * 2);
 }
 
 .app-body.has-library .stage-toggle-metrics {
@@ -479,9 +573,12 @@
    opaque surface, and z-order cannot fix what tiling prevents outright. */
 .app-slot-bottom {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  /* Inset like the rails, so all three panels are islands of the same
+     family rather than one floating and two welded to the frame. The
+     has-library / has-inspector rules below add the rail's width on top. */
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: var(--sp-3);
   height: var(--strip-h);
   flex-direction: column;
   z-index: 9;
@@ -495,11 +592,11 @@
 }
 
 .app-body.has-library .app-slot-bottom {
-  left: var(--rail-w);
+  left: calc(var(--rail-w) + var(--sp-3) * 2);
 }
 
 .app-body.has-inspector .app-slot-bottom {
-  right: var(--ins-w);
+  right: calc(var(--ins-w) + var(--sp-3) * 2);
 }
 
 .app-slot-bottom > .mx {
@@ -508,7 +605,9 @@
   /* The fixed height can only be honoured if the strip is allowed to
      scroll rather than spill its charts over the canvas above it. */
   overflow-y: auto;
-  border-top: var(--bw) solid var(--border);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
   background: var(--surface);
 }
 

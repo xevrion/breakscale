@@ -18,8 +18,43 @@
   transition: background-color var(--dur-fast) var(--ease);
 }
 
-.pr:hover,
-.pr:focus-visible {
+/* A short grip in the middle, not a full-height rule.
+
+   Painting the whole 800px strip accent-blue on hover was a bar the length
+   of the window announcing a 5px control, which read as a page element
+   rather than as something to drag. A centred grip says "hold here" and
+   leaves the panel's own border to do the dividing. */
+.pr::after {
+  content: '';
+  position: absolute;
+  border-radius: var(--r-pill);
+  background: var(--border-strong);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+
+.pr-left::after,
+.pr-right::after {
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+}
+
+.pr-bottom::after {
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+}
+
+.pr:hover::after,
+.pr:focus-visible::after {
+  opacity: 1;
   background: var(--accent);
 }
 

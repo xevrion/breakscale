@@ -1,0 +1,107 @@
+/* ==========================================================================
+   Main menu.
+
+   Anchored under its button in the top bar rather than centred like a
+   dialog, because it belongs to that button and a reader should not have to
+   look away from where they pressed to find what happened.
+   ========================================================================== */
+
+.mn {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: 200;
+  min-width: 15rem;
+  padding: var(--sp-1);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--surface);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  transform-origin: top right;
+  animation: mn-in var(--dur-base) var(--ease-out);
+}
+
+.mn.is-closing {
+  animation: mn-out var(--dur-fast) var(--ease) forwards;
+}
+
+/* Grows from the top-right corner it hangs off, which is where the button
+   is, so the menu reads as coming OUT of the control that opened it rather
+   than fading in over the page. The scale is slight: a menu that visibly
+   zooms is a menu you wait for. */
+@keyframes mn-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Leaves faster than it arrives, and without the scale. A dismissal should
+   feel finished the moment it is asked for; only the entrance is worth
+   animating fully. */
+@keyframes mn-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.mn-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--sp-2);
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mn-item:hover {
+  background: var(--surface-2);
+}
+
+.mn-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.mn-item svg {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.mn-item:hover svg {
+  color: var(--accent);
+}
+
+.mn-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The binding, quiet on the right. Present so a shortcut is learnable from
+   the menu rather than only from the shortcuts dialog. */
+.mn-hint {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+}
