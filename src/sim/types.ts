@@ -1296,6 +1296,49 @@ export interface SimSnapshot {
    * alone without asking the engine anything else.
    */
   activeFailures: ActiveFailure[];
+  /**
+   * The most recent completed request, hop by hop, or null before one has
+   * finished.
+   *
+   * Every other number in this snapshot is an aggregate: a rate, a
+   * percentile, a mean. Those say latency ROSE without saying where it went,
+   * and a student reading "p99 400ms" cannot tell whether the work got slower
+   * or whether the request simply stood in line. This is the one place the
+   * simulator answers that, which is why it is a single traced request rather
+   * than a statistic: an average of queueing tells you less than one honest
+   * example of it.
+   */
+  trace: RequestTrace | null;
+}
+
+/** One request's path, sampled and recorded end to end. */
+export interface RequestTrace {
+  /** Simulated ms at which the client issued it. */
+  startMs: number;
+  /** End-to-end latency the client measured. */
+  totalMs: number;
+  ok: boolean;
+  /** Why it failed, when it did. */
+  reason: FailureReason | null;
+  hops: TraceHop[];
+}
+
+/**
+ * One node on a traced request's path.
+ *
+ * `queuedMs` and `serviceMs` are kept apart deliberately. They are the whole
+ * point: under load the second stays roughly flat while the first grows
+ * without bound, and seeing those two bars move differently is the lesson
+ * that no p99 reading can teach.
+ */
+export interface TraceHop {
+  nodeId: string;
+  /** Hop depth from the client, 0 for the client itself. */
+  depth: number;
+  /** Waiting in line before a server slot was free. */
+  queuedMs: number;
+  /** Doing the work, once a slot was held. */
+  serviceMs: number;
 }
 
 export interface HistoryPoint {

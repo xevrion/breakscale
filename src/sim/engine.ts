@@ -13,9 +13,11 @@ import type {
   NodeStats,
   SimEdge,
   SimNode,
+  RequestTrace,
   SimSnapshot,
   SystemStats,
   Topology,
+  TraceHop,
 } from './types';
 
 /* ------------------------------------------------------------------ *
@@ -118,6 +120,14 @@ interface Req {
    * interface said so.
    */
   arriveMs: number;
+  /**
+   * Hops recorded so far, for the ONE request being traced, else null.
+   *
+   * Only the sampled request allocates this array. Tracing every request
+   * would put an allocation and a push on the hot path for data that is
+   * thrown away, and `advance()` runs per frame.
+   */
+  trace: TraceHop[] | null;
   /** Simulated time the root request was generated (client only). */
   rootStartMs: number;
   /** Hop depth from the client root. */
@@ -871,6 +881,7 @@ export class Engine implements BehaviourCtx {
       edgeState: this.snapshotEdgeState(edgeOut),
       failuresByReason: this.failures,
       activeFailures: this.snapshotFailures(),
+      trace: this.lastTrace,
     };
   }
 
@@ -1015,6 +1026,10 @@ export class Engine implements BehaviourCtx {
     this.faults.clear();
     this.cutEdges.clear();
     this.snapFailures.length = 0;
+    // The trace belongs to the run that produced it. Keeping it across a
+    // reset would show a journey through a system that no longer exists.
+    this.tracing = null;
+    this.lastTrace = null;
     // Undo anything a controller wrote back into the topology during the run,
     // so the rebuild below starts from the capacities the run started with.
     for (const n of this.topology.nodes) {
@@ -1200,6 +1215,15 @@ export class Engine implements BehaviourCtx {
     // Draw this request's key. Every downstream call inherits it, so the
     // whole chain agrees on which partition/record is being touched.
     root.key = Math.floor(this.rng.next() * KEYSPACE);
+
+    // Trace one request at a time, and only once the previous one has been
+    // published. Sampling instead of tracing everything keeps the allocation
+    // off the hot path, and tracing one at a time means the recorded hops
+    // always belong to a single journey rather than being interleaved.
+    if (this.tracing === null) {
+      this.tracing = root;
+      root.trace = [];
+    }
 
     this.totalRequests++;
     this.sysOffered.add(this.now, 1);
@@ -1402,6 +1426,52 @@ export class Engine implements BehaviourCtx {
   /* ---------------- admission ---------------- */
 
   /** Offer a request to a node: shed, buffer, or start service. */
+  /**
+   * Record this node's share of a traced request's latency.
+   *
+   * Called once per hop, at the moment the node's own work finishes.
+   * `arriveMs` is when the request reached the node, `enterMs` when a slot
+   * freed and service began, so the gap between them is the queue and the
+   * gap from `enterMs` to now is the work. Splitting them here, rather than
+   * reporting one "time at this node", is the entire point of the feature.
+   */
+  /** The request currently being traced, or null between samples. */
+  private tracing: Req | null = null;
+  /** The last completed trace, handed to every snapshot until replaced. */
+  private lastTrace: RequestTrace | null = null;
+
+  private recordHop(req: Req): void {
+    const traced = this.tracing;
+    const trace = traced?.trace;
+    if (!traced || !trace) return;
+    // Only hops belonging to the sampled journey. A child does not carry the
+    // trace array itself (allocating one per call would put the cost back on
+    // the hot path), so its membership is established by walking up to its
+    // root, which is at most a few links.
+    let root: Req | null = req;
+    while (root && root.parent) root = root.parent;
+    if (root !== traced) return;
+    // A client root is not admitted to a queue and holds no slot, so it has
+    // no arrival stamp and no queue of its own; its elapsed time is the sum
+    // of everything downstream and is already reported as the total. Booking
+    // it as a hop would double-count the whole path.
+    if (req.parent === null && req.hop === 0) return;
+    // A node that never waited (a pass-through, or an idle server) entered
+    // service the moment it arrived, so this is zero without a special case.
+    const queuedMs = Math.max(0, req.enterMs - req.arriveMs);
+    trace.push({
+      nodeId: req.nodeId,
+      depth: req.hop,
+      queuedMs,
+      // The node's OWN work, not its wall clock. A caller sits blocked while
+      // its dependency runs, and charging that to the caller would make every
+      // upstream node look slow when only the deepest one is: at 6x load the
+      // api reads 344ms of wall clock against 22ms of actual work, and the
+      // 322ms belongs to the database it was waiting on.
+      serviceMs: req.ownMs,
+    });
+  }
+
   private admit(state: NodeState, req: Req): void {
     state.arrivals.add(this.now, 1);
     // Stamped here, at the ONE point every request enters a node, so the
@@ -1794,17 +1864,40 @@ export class Engine implements BehaviourCtx {
     if (req.resolved) return;
     req.resolved = true;
 
+    // Recorded here rather than at each completion site: resolve() is the one
+    // funnel every request passes through however it ends, so a hop cannot be
+    // missed by a path that finishes some other way. Measuring it anywhere
+    // else meant only the client was ever recorded.
+    this.recordHop(req);
+
     const parent = req.parent;
 
     if (parent === null) {
       if (req.detached || req.abandoned) {
         // Either a queue message that finished its worker path, or work the
         // caller already timed out on. Nobody is waiting for this result.
+        // Free the sampler if this was the traced one, or nothing would ever
+        // be traced again.
+        if (this.tracing === req) this.tracing = null;
         this.recycle(req);
         return;
       }
       // Root request measured at the client.
       const total = this.now - req.rootStartMs;
+      if (req.trace) {
+        // Deepest first would be arbitrary; ordering by depth then by the
+        // moment each hop finished gives the reader the path in the order
+        // the request actually walked it.
+        const hops = req.trace.slice().sort((a, b) => a.depth - b.depth);
+        this.lastTrace = {
+          startMs: req.rootStartMs,
+          totalMs: total,
+          ok,
+          reason: ok ? null : reason,
+          hops,
+        };
+        this.tracing = null;
+      }
       const client = this.nodes.get(req.nodeId);
       if (ok) {
         this.sysGood.add(this.now, 1);
@@ -2417,6 +2510,7 @@ export class Engine implements BehaviourCtx {
       pooled.childReason = 'error';
       pooled.enterMs = 0;
       pooled.arriveMs = 0;
+      pooled.trace = null;
       pooled.rootStartMs = 0;
       pooled.hop = 0;
       pooled.attempt = 0;
@@ -2444,6 +2538,7 @@ export class Engine implements BehaviourCtx {
       childReason: 'error',
       enterMs: 0,
       arriveMs: 0,
+      trace: null,
       rootStartMs: 0,
       hop: 0,
       attempt: 0,
