@@ -7,22 +7,22 @@
 
 ## Before going public
 
-- [ ] Deploy (Pages or Vercel)
-- [ ] Domain
+- [x] Deploy (breakscale.vercel.app)
+- [ ] Custom domain (breakscale.dev?)
 - [ ] Logo + favicon
 - [ ] OG image (tags done, image missing)
 - [ ] README banner + screenshots
 - [ ] Seed 5-10 good-first-issues
-- [ ] Enable Discussions
-- [ ] Delete TODO.md and NEXT.md
-- [ ] Flip repo public
+- [x] Enable Discussions
+- [ ] Delete TODO.md
+- [x] Flip repo public
 
 ## SEO / AEO
 
 - [x] Meta tags, og:, twitter:
 - [x] robots.txt
-- [ ] sitemap.xml (needs domain)
-- [ ] canonical + og:url (needs domain)
+- [x] sitemap.xml
+- [x] canonical + og:url
 - [ ] JSON-LD: SoftwareApplication, LearningResource
 - [ ] Glossary as crawlable HTML, not locked in the bundle
 - [ ] Per-example pages
@@ -67,7 +67,6 @@
 - [ ] Lint warnings in App.tsx, Glossary.tsx, Metrics.tsx
 - [ ] No visual regression tests
 - [ ] Never tested on real smartboard or tablet
-- [ ] public/__harness.js still in the tree
 
 ## Done
 

@@ -5,6 +5,10 @@
 </p>
 
 <p align="center">
+  <a href="https://breakscale.vercel.app"><strong>Try it</strong></a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img alt="MIT licensed" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
   <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" /></a>
 </p>

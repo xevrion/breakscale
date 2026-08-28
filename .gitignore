@@ -9,3 +9,4 @@ public/__harness.js
 # Workflow scripts, kept out of the published repo
 .workflows/
 NEXT.md
+.vercel

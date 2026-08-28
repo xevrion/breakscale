@@ -3,5 +3,4 @@
 User-agent: *
 Allow: /
 
-# Update the host once a domain is settled, then add:
-# Sitemap: https://breakscale.dev/sitemap.xml
+Sitemap: https://breakscale.vercel.app/sitemap.xml
