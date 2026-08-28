@@ -58,7 +58,7 @@ import { usePresence } from './components/presence';
 import { SessionHistory, syncEngine } from './history';
 import type { HistoryEntry, HistorySnapshot } from './history';
 import { buildShareUrl, decodeTopology, hasShareHash } from './share';
-import { DESIGN_FILE_EXT, downloadDesign, readDesignFile } from './designFile';
+import { DESIGN_FILE_ACCEPT, downloadDesign, readDesignFile } from './designFile';
 import './App.css';
 
 /* ------------------------------------------------------------------ *
@@ -2138,65 +2138,6 @@ export default function App() {
           <span className="app-glossary-label">Examples</span>
         </button>
 
-        {/*
-          Save and Open, beside Examples, because all three answer the same
-          question: where does a whole diagram come from, and where does one
-          go. Save is disabled on an empty canvas, since a file holding no
-          components is a file that teaches its reader nothing. Both are also
-          in Settings, for anyone who looks there first; these are the ones a
-          student finds without going looking.
-        */}
-        <button
-          type="button"
-          className="btn app-glossary"
-          aria-label="Save design to a file"
-          title={`Save this design as a ${DESIGN_FILE_EXT} file`}
-          disabled={topology.nodes.length === 0}
-          onClick={handleExport}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 3v12" />
-            <path d="m7 10 5 5 5-5" />
-            <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-          </svg>
-          <span className="app-glossary-label">Save</span>
-        </button>
-
-        <button
-          type="button"
-          className="btn app-glossary"
-          aria-label="Open a design file"
-          title="Open a saved design, or drop one onto the canvas"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 21V9" />
-            <path d="m7 14 5-5 5 5" />
-            <path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2" />
-          </svg>
-          <span className="app-glossary-label">Open</span>
-        </button>
-
         <button
           type="button"
           className="btn app-glossary"
@@ -2522,7 +2463,7 @@ export default function App() {
         ref={fileInputRef}
         type="file"
         className="app-file-input"
-        accept={`${DESIGN_FILE_EXT},application/json`}
+        accept={DESIGN_FILE_ACCEPT}
         tabIndex={-1}
         aria-hidden="true"
         onChange={handleImportPick}

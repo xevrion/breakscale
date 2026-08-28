@@ -101,18 +101,18 @@ describe('designFileName', () => {
   const day = new Date(2026, 7, 28);
 
   it('names the file from the design and the date', () => {
-    expect(designFileName('Netflix', day)).toBe('netflix-2026-08-28.breakscale.json');
+    expect(designFileName('Netflix', day)).toBe('netflix-2026-08-28.breakscale');
   });
 
   it('falls back to "design" when there is no name', () => {
-    expect(designFileName(null, day)).toBe('design-2026-08-28.breakscale.json');
+    expect(designFileName(null, day)).toBe('design-2026-08-28.breakscale');
   });
 
   it('strips anything a file system or a shell would choke on', () => {
     expect(designFileName('../../etc/passwd; rm -rf /', day)).toBe(
-      'etc-passwd-rm-rf-2026-08-28.breakscale.json',
+      'etc-passwd-rm-rf-2026-08-28.breakscale',
     );
-    expect(designFileName('   ', day)).toBe('design-2026-08-28.breakscale.json');
+    expect(designFileName('   ', day)).toBe('design-2026-08-28.breakscale');
   });
 });
 

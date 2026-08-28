@@ -37,8 +37,22 @@ export const DESIGN_FILE_APP = 'breakscale';
  */
 export const DESIGN_FILE_VERSION = 1;
 
-/** The extension every exported design carries. */
-export const DESIGN_FILE_EXT = '.breakscale.json';
+/**
+ * The extension every exported design carries.
+ *
+ * A bare `.breakscale` rather than `.breakscale.json`, following the same
+ * choice Excalidraw makes with `.excalidraw`: the contents are JSON either
+ * way, but a custom extension is what an operating system can associate with
+ * an application, and it reads as a document belonging to this app rather
+ * than as a data file that happens to be lying around.
+ *
+ * `.json` stays accepted on import, so a file saved before this change, or
+ * one a text editor helpfully renamed, still opens.
+ */
+export const DESIGN_FILE_EXT = '.breakscale';
+
+/** What the file picker will offer, which is broader than what we write. */
+export const DESIGN_FILE_ACCEPT = '.breakscale,.breakscale.json,application/json';
 
 /** What one exported file holds. */
 export interface DesignFile {
@@ -63,7 +77,7 @@ export type DesignParseResult =
 
 /**
  * Serialise the current design, annotations included, as the text of a
- * `.breakscale.json` file.
+ * `.breakscale` file.
  *
  * Deep copied on the way out so the caller's live topology can never be
  * reached through the value being written, and pretty printed with two
