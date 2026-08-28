@@ -10,3 +10,4 @@ public/__harness.js
 .workflows/
 NEXT.md
 .vercel
+.env*

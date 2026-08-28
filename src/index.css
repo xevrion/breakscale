@@ -1250,6 +1250,13 @@ h4 {
     min-width: 44px;
     min-height: 44px;
   }
+
+  /* The slider's hit band grows the same way: the 32px band that suits a
+     mouse is a miss-prone strip under a finger. Track and thumb keep their
+     size; only the input's touchable height changes. */
+  .slider {
+    height: 44px;
+  }
 }
 
 /* Disabled. Opacity alone would drag the label under 4.5:1, so the disabled

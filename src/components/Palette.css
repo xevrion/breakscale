@@ -256,6 +256,15 @@
   transition: background-color var(--dur-fast) var(--ease);
 }
 
+/* Same 44px floor the shared .btn takes under a coarse pointer (index.css):
+   a professor picking components at a smartboard taps these rows with a
+   finger, and 40px is under the floor. Width is already full-rail. */
+@media (pointer: coarse) {
+  .pal-row {
+    min-height: 44px;
+  }
+}
+
 .pal-row:hover {
   background: var(--surface-2);
 }
