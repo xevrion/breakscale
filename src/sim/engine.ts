@@ -2,6 +2,7 @@ import { behaviourFor, type ComponentBehaviour } from './behaviour';
 import type { BehaviourCtx, NodeStateLike, ReqLike } from './engine-types';
 import { MinHeap, type Timed } from './heap';
 import { Rng } from './random';
+import { DEFAULT_TRAFFIC_PERIOD_S } from './types';
 import type {
   ActiveFailure,
   EdgeState,
@@ -37,6 +38,18 @@ const LATENCY_RING = 4096;
 /** Max samples sorted per percentile computation; beyond this the window is strided. */
 const PERCENTILE_SAMPLE_CAP = 512;
 /** Trailing window for rate (per-second) measurements. */
+/* Traffic pattern shape. Chosen so a spike's MEAN over one cycle stays near
+   the baseline: the reader compares the same work arriving unevenly, not more
+   of it. 0.9 quiet at 0.1x plus 0.1 loud at 4x averages 0.49x, near enough
+   that the comparison is about burstiness rather than volume. */
+const SPIKE_QUIET_FRACTION = 0.9;
+const SPIKE_PEAK = 4;
+const SPIKE_TROUGH = 0.1;
+
+/* A day swings between a quarter of the baseline and twice it. */
+const DIURNAL_TROUGH = 0.25;
+const DIURNAL_PEAK = 2;
+
 const RATE_WINDOW_MS = 1000;
 /** Number of buckets the rate window is split into. */
 const RATE_BUCKETS = 10;
@@ -1187,9 +1200,12 @@ export class Engine implements BehaviourCtx {
   private scheduleArrival(nodeId: string): void {
     const state = this.nodes.get(nodeId);
     if (!state || !state.behaviour.generatesLoad) return;
-    const rps = state.config.rps;
+    // The pattern's rate, not the baseline: a spike's quiet phase must
+    // actually schedule arrivals further apart.
+    const rps = this.effectiveRps(state);
     if (!(rps > 0)) {
-      // Poll again shortly so raising the slider resumes traffic.
+      // Poll again shortly so raising the slider, or a pattern coming back up
+      // off its trough, resumes traffic.
       this.push(this.now + 50, EV_ARRIVAL, nodeId, null, 0);
       return;
     }
@@ -1199,7 +1215,7 @@ export class Engine implements BehaviourCtx {
 
   private onClientArrival(state: NodeState): void {
     this.scheduleArrival(state.id);
-    if (state.config.rps <= 0) return;
+    if (this.effectiveRps(state) <= 0) return;
     if (this.liveRequests >= MAX_LIVE_REQUESTS) return;
 
     const root = this.acquireReq();
@@ -2061,6 +2077,52 @@ export class Engine implements BehaviourCtx {
    * the instance model existed, so nothing written against the old meaning
    * changes behaviour.
    */
+  /**
+   * The rate this client is offering RIGHT NOW, after its traffic pattern.
+   *
+   * `config.rps` is the baseline the reader set and keeps its meaning; the
+   * pattern scales it. Absent or `steady` returns the baseline unchanged, so
+   * every design written before patterns existed behaves exactly as it did.
+   *
+   * A pure function of simulation time and config: nothing is carried between
+   * ticks and the RNG is untouched, so the same seed and topology still
+   * replay byte-identically.
+   */
+  effectiveRps(state: NodeStateLike): number {
+    const base = state.config.rps;
+    const pattern = state.config.traffic;
+    if (!pattern || pattern === 'steady' || !(base > 0)) return base;
+
+    const periodS = state.config.trafficPeriodS ?? DEFAULT_TRAFFIC_PERIOD_S;
+    if (!(periodS > 0)) return base;
+
+    const t = (this.now / 1000) % periodS;
+    const phase = t / periodS;
+
+    switch (pattern) {
+      case 'ramp':
+        // Climbs over the first cycle and holds. Past one period the reader
+        // is watching a system at full load, which is the point of a ramp:
+        // it is how you got there that differs, not where you end up.
+        return this.now / 1000 >= periodS ? base : base * phase;
+      case 'spike':
+        // Quiet, then a burst in the last tenth of the cycle. The burst is
+        // 4x the baseline and the quiet is a tenth of it, so the MEAN over a
+        // cycle stays near the baseline: the reader is comparing the same
+        // amount of work arriving unevenly, not simply more work.
+        return phase >= SPIKE_QUIET_FRACTION ? base * SPIKE_PEAK : base * SPIKE_TROUGH;
+      case 'diurnal': {
+        // A day as a cosine between a quarter of the baseline and twice it.
+        // Smooth because real daily traffic has no corners, and offset so a
+        // run starts in the small hours rather than mid-peak.
+        const swing = (1 - Math.cos(2 * Math.PI * phase)) / 2;
+        return base * (DIURNAL_TROUGH + (DIURNAL_PEAK - DIURNAL_TROUGH) * swing);
+      }
+      default:
+        return base;
+    }
+  }
+
   effectiveCapacity(state: NodeStateLike): number {
     return (
       Math.max(1, Math.floor(state.config.capacity)) * this.effectiveInstances(state)

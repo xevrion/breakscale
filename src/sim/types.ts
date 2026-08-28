@@ -81,6 +81,28 @@ export interface NodeConfig {
   retries: number;
   /** Client only: requests per second offered to the system. */
   rps: number;
+  /**
+   * Client only: how the offered rate varies over time.
+   *
+   * `rps` stays the BASELINE the reader set, and the pattern scales it. Real
+   * traffic is never a flat line, and a system that copes with 500 a second
+   * arriving evenly can still fall over when the same 500 arrive in a burst.
+   *
+   * Absent means steady, so every topology and saved design written before
+   * patterns existed keeps its exact behaviour. The engine reads it through
+   * `effectiveRps`, which is a pure function of simulation time: no state is
+   * carried between ticks, so a seed and a topology still replay identically.
+   */
+  traffic?: TrafficPattern;
+  /**
+   * Client only: seconds for one full cycle of `traffic`.
+   *
+   * What a cycle means depends on the pattern: for `ramp` it is the climb
+   * from nothing to the baseline, for `spike` the gap between bursts, for
+   * `diurnal` a whole simulated day. Defaults to `DEFAULT_TRAFFIC_PERIOD_S`
+   * when absent.
+   */
+  trafficPeriodS?: number;
 
   /* ---- autoscaler ------------------------------------------------- *
    * An autoscaler is a controller, not a request path. It watches one node's
@@ -1161,6 +1183,44 @@ export interface SystemStats {
   totalRequests: number;
   totalFailed: number;
 }
+
+/**
+ * How a client's offered rate varies over time.
+ *
+ * Each pattern scales the client's `rps` baseline; none of them replaces it.
+ * The shapes are the ones a student meets first, and each one breaks a system
+ * a different way:
+ *
+ * - `steady`   flat. The default, and the only one that was possible before.
+ * - `ramp`     climbs from nothing to the baseline over one period, then
+ *              holds. A launch, or traffic arriving as a region wakes up.
+ * - `spike`    quiet at a tenth of the baseline, then a short burst well
+ *              above it. This is the one that finds queue limits.
+ * - `diurnal`  a smooth day: a trough overnight, a peak in the afternoon.
+ *              Teaches that a system sized for the average is undersized for
+ *              half the day.
+ *
+ * A thundering herd is deliberately NOT here. The other four are rate curves,
+ * but a herd is correlated ARRIVALS: many callers retrying at the same instant
+ * after a recovery. That is a different mechanism, not a different curve, and
+ * modelling it as a tall thin spike would be a plausible-looking lie.
+ */
+export type TrafficPattern = 'steady' | 'ramp' | 'spike' | 'diurnal';
+
+export const TRAFFIC_PATTERNS: readonly TrafficPattern[] = [
+  'steady',
+  'ramp',
+  'spike',
+  'diurnal',
+];
+
+/**
+ * Seconds for one cycle when a client does not say.
+ *
+ * 60 is chosen so a reader watching in real time sees a whole cycle without
+ * waiting: a full ramp, or a gap between two spikes, inside a minute.
+ */
+export const DEFAULT_TRAFFIC_PERIOD_S = 60;
 
 export type FailureReason =
   | 'error'
