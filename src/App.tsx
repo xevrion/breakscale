@@ -9,6 +9,7 @@ import { Metrics } from './components/Metrics';
 import { Palette } from './components/Palette';
 import { Glossary } from './components/Glossary';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
+import { togglePreference, usePreference } from './content/preferences';
 import './App.css';
 
 /* ------------------------------------------------------------------ *
@@ -317,6 +318,7 @@ export default function App() {
    * closes so that reopening from the top bar starts at the top of the list
    * rather than resuming wherever the last "see also" link happened to go.
    */
+  const tooltipsOn = usePreference('tooltips');
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [glossaryFocusId, setGlossaryFocusId] = useState<string | undefined>(undefined);
 
@@ -959,6 +961,44 @@ export default function App() {
           printed rather than hidden in a tooltip so it is learnable by
           someone who has never opened the panel.
         */}
+        {/*
+          Tooltips are off by default, so this is how a student turns the
+          explanations on. It sits beside the glossary because the two are the
+          same feature seen from different angles: the panel is the reference
+          you go and read, the tooltips are the reference coming to you.
+
+          aria-pressed rather than aria-expanded: it switches a mode on and
+          off, it does not disclose anything.
+        */}
+        <button
+          type="button"
+          className="btn app-glossary"
+          aria-pressed={tooltipsOn}
+          title={
+            tooltipsOn
+              ? 'Hide the explanations on metric names'
+              : 'Explain metric names on hover'
+          }
+          onClick={() => togglePreference('tooltips')}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+            <path d="M12 17h.01" />
+          </svg>
+          {tooltipsOn ? 'Hints on' : 'Hints off'}
+        </button>
+
         <button
           type="button"
           className="btn app-glossary"

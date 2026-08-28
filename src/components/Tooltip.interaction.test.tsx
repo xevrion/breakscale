@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Term, TooltipLayer, setGlossaryNavigate } from './Tooltip';
+import { setPreference, __resetPreferences } from '../content/preferences';
 
 /**
  * Interaction tests, driven with REAL events.
@@ -27,6 +28,10 @@ class FakePointerEvent extends MouseEvent {
 }
 
 beforeEach(() => {
+  // Tooltips ship OFF, so a <Term> renders its children bare by default and
+  // there is no trigger to drive. These tests are about what the tooltip does
+  // once a student has asked for it, so they opt in explicitly.
+  setPreference('tooltips', true);
   vi.stubGlobal('PointerEvent', FakePointerEvent);
   vi.useFakeTimers();
   container = document.createElement('div');
@@ -39,6 +44,7 @@ afterEach(() => {
   container.remove();
   document.body.innerHTML = '';
   setGlossaryNavigate(null);
+  __resetPreferences();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });

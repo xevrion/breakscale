@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { GLOSSARY_BY_ID, type GlossaryEntry } from '../content/glossary';
+import { usePreference } from '../content/preferences';
 import './Tooltip.css';
 
 /* ==========================================================================
@@ -345,8 +346,21 @@ export interface TermProps {
  * re-renders at 10Hz.
  */
 export function Term({ id, children, className, bare = false }: TermProps) {
+  const enabled = usePreference('tooltips');
   const entry = GLOSSARY_BY_ID.get(id);
-  if (!entry) return <>{children}</>;
+
+  /*
+   * Tooltips are off by default, so this is the common path and it has to be
+   * genuinely free. Returning the children bare means no underline, no cursor
+   * change, no hover tint, no focus stop and no listeners: a <Term> costs
+   * exactly what the text inside it costs. The glossary panel is unaffected,
+   * so every explanation is still one click away, it just stops decorating
+   * every number on screen.
+   *
+   * An unknown id degrades the same way, which is why the glossary wiring test
+   * exists: silence here is indistinguishable from a missing entry.
+   */
+  if (!enabled || !entry) return <>{children}</>;
 
   /*
    * One shared description node per glossary id, rendered once by
