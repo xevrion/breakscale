@@ -95,6 +95,18 @@
    island as visible canvas rather than as dead space inside a bar. */
 .app-island-menu {
   margin-left: auto;
+  gap: var(--sp-1);
+}
+
+/* The source link carries the mark alone, so it reads as an icon button
+   rather than borrowing the accent that means "you did this" in this app. */
+.app-source-link {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.app-source-link:hover {
+  color: var(--text);
 }
 
 /* --------------------------------------------------------------------------
