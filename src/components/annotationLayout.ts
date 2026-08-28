@@ -141,6 +141,59 @@ export function layoutNote(
 }
 
 /* ------------------------------------------------------------------ *
+ * Note editing
+ * ------------------------------------------------------------------ */
+
+/**
+ * Tab inserts spaces, never a literal tab.
+ *
+ * The note is painted as SVG text, which has no tab stops, so a real \t
+ * would measure as zero and render as nothing: the indent would exist in the
+ * model and be invisible on the canvas.
+ */
+export const TAB_SIZE = 2;
+export const TAB = ' '.repeat(TAB_SIZE);
+
+export interface TextEditState {
+  value: string;
+  /** Caret start and end, as a textarea reports them. */
+  start: number;
+  end: number;
+}
+
+/**
+ * Apply Tab (indent) or Shift+Tab (outdent) to a note being edited.
+ *
+ * Tab must never move focus here. Tabbing out of a half-written note commits
+ * it and throws the caret onto a toolbar button, which loses the writer's
+ * place for a gesture they meant as formatting.
+ *
+ * Outdent removes at most TAB_SIZE leading spaces from the caret's own line,
+ * and returns the state unchanged when there is nothing to remove, so the
+ * caller can skip a no-op edit rather than push an identical draft.
+ */
+export function applyTab(state: TextEditState, outdent: boolean): TextEditState {
+  const { value, start, end } = state;
+  if (!outdent) {
+    return {
+      value: value.slice(0, start) + TAB + value.slice(end),
+      start: start + TAB_SIZE,
+      end: start + TAB_SIZE,
+    };
+  }
+  // Start of the line the caret sits on.
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+  const lead = /^ +/.exec(value.slice(lineStart, start))?.[0].length ?? 0;
+  const drop = Math.min(lead, TAB_SIZE);
+  if (drop === 0) return state;
+  return {
+    value: value.slice(0, lineStart) + value.slice(lineStart + drop),
+    start: start - drop,
+    end: end - drop,
+  };
+}
+
+/* ------------------------------------------------------------------ *
  * Section resize
  * ------------------------------------------------------------------ */
 

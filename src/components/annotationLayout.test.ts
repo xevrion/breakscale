@@ -14,6 +14,9 @@ import { describe, expect, it } from 'vitest';
  */
 import {
   NOTE_SIZES,
+  TAB,
+  TAB_SIZE,
+  applyTab,
   layoutNote,
   noteStyle,
   resizeRect,
@@ -125,5 +128,61 @@ describe('handleAnchor', () => {
     expect(handleAnchor(rect, 'se')).toEqual({ x: 100, y: 50 });
     expect(handleAnchor(rect, 'n')).toEqual({ x: 50, y: 0 });
     expect(handleAnchor(rect, 'w')).toEqual({ x: 0, y: 25 });
+  });
+});
+
+describe('applyTab', () => {
+  it('indents at the caret rather than moving focus', () => {
+    // Tab in a note is formatting, not navigation. The alternative is that a
+    // half-written note commits itself and the caret lands on a toolbar
+    // button, which is what a bare textarea does and is always wrong here.
+    expect(applyTab({ value: 'abc', start: 0, end: 0 }, false)).toEqual({
+      value: `${TAB}abc`,
+      start: TAB_SIZE,
+      end: TAB_SIZE,
+    });
+  });
+
+  it('replaces the selection rather than inserting beside it', () => {
+    expect(applyTab({ value: 'abcdef', start: 1, end: 4 }, false)).toEqual({
+      value: `a${TAB}ef`,
+      start: 1 + TAB_SIZE,
+      end: 1 + TAB_SIZE,
+    });
+  });
+
+  it('outdents only the caret line, and only its leading spaces', () => {
+    const value = 'one\n    two';
+    // Caret sits inside the second line's indent.
+    const out = applyTab({ value, start: 8, end: 8 }, true);
+    expect(out.value).toBe('one\n  two');
+    expect(out.start).toBe(8 - TAB_SIZE);
+  });
+
+  it('returns the state untouched when there is nothing to outdent', () => {
+    // Identity, so the caller can skip pushing a draft that did not change.
+    const state = { value: 'flush left', start: 4, end: 4 };
+    expect(applyTab(state, true)).toBe(state);
+  });
+
+  it('outdents a partial indent without eating the text', () => {
+    // One space where TAB_SIZE is two: remove the one that is there, and
+    // stop, rather than running on into the word.
+    const out = applyTab({ value: ' x', start: 2, end: 2 }, true);
+    expect(out.value).toBe('x');
+    expect(out.start).toBe(1);
+  });
+
+  it('indents the first line correctly when it is not the first line', () => {
+    const value = 'a\nb';
+    expect(applyTab({ value, start: 3, end: 3 }, false).value).toBe(`a\nb${TAB}`);
+  });
+
+  it('never inserts a literal tab', () => {
+    // SVG text has no tab stops: a real \t measures as nothing and would be
+    // an indent that exists in the model and is invisible on the canvas.
+    const out = applyTab({ value: '', start: 0, end: 0 }, false);
+    expect(out.value.includes('\t')).toBe(false);
+    expect(out.value).toBe(TAB);
   });
 });

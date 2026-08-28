@@ -69,6 +69,7 @@ import {
   NOTE_SIZES,
   RESIZE_DIRS,
   handleAnchor,
+  applyTab,
   layoutNote,
   resizeRect,
 } from './annotationLayout';
@@ -4602,11 +4603,6 @@ export default function Canvas({
     onEditNote(edit.id, edit.draft);
   }, [noteEdit, onEditNote]);
 
-  const cancelNoteEdit = useCallback(() => {
-    noteEditDoneRef.current = true;
-    setNoteEdit(null);
-  }, []);
-
   const commitLabelEdit = useCallback(() => {
     if (labelEditDoneRef.current) return;
     labelEditDoneRef.current = true;
@@ -5468,9 +5464,27 @@ export default function Canvas({
             left: editNote.x * view.k + view.x,
             top: editNote.y * view.k + view.y,
             width: editNote.width * view.k + 4,
+            // Height follows the DRAFT, not the committed note, so the box
+            // grows with the text as it wraps instead of scrolling inside a
+            // fixed frame. Derived from the same layoutNote the canvas paints
+            // with, so the editor and the result wrap identically rather than
+            // from scrollHeight, which would measure the browser's own
+            // wrapping and disagree with the painted line breaks.
+            height:
+              layoutNote(
+                noteEdit.draft || ' ',
+                editNote.width,
+                editNote.size,
+                editNote.font,
+              ).height *
+                view.k +
+              4,
             fontSize: NOTE_SIZES[editNote.size].font * view.k,
             lineHeight: `${NOTE_SIZES[editNote.size].line * view.k}px`,
             fontWeight: NOTE_SIZES[editNote.size].weight,
+            // The editor must be set in the face the note is painted in, or
+            // the two wrap at different widths and the text jumps on commit.
+            fontFamily: `var(--${editNote.font ?? 'sans'})`,
           }}
           value={noteEdit.draft}
           onChange={(e) =>
@@ -5482,9 +5496,48 @@ export default function Canvas({
           onBlur={commitNoteEdit}
           onKeyDown={(e) => {
             e.stopPropagation();
+            // An IME candidate window swallows Enter and Escape to choose a
+            // character. Committing on those would end the edit in the middle
+            // of composing a word, so composition wins until it is done.
+            // keyCode 229 is the pre-composition signal older WebKit sends
+            // without setting isComposing.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
             if (e.key === 'Escape') {
               e.preventDefault();
-              cancelNoteEdit();
+              // Commits rather than reverts, matching every other editor on
+              // this canvas and Excalidraw's own contract. Escape here means
+              // "I am done", and undo is the way back; a silent revert would
+              // throw away typing with no way to recover it.
+              commitNoteEdit();
+              return;
+            }
+            // Ctrl/Cmd+Enter commits, because plain Enter has to stay a
+            // newline: a note is a paragraph, and the whole point of a
+            // textarea is that it wraps to more than one line.
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              commitNoteEdit();
+              return;
+            }
+            if (e.key === 'Tab') {
+              // Never move focus. Tabbing out mid-sentence commits the note
+              // and throws the caret onto a toolbar button, which loses the
+              // writer's place for a keystroke they meant as formatting.
+              e.preventDefault();
+              const el = e.currentTarget;
+              const next = applyTab(
+                { value: el.value, start: el.selectionStart, end: el.selectionEnd },
+                e.shiftKey,
+              );
+              if (next.value === el.value) return;
+              el.value = next.value;
+              el.setSelectionRange(next.start, next.end);
+              // React never saw the programmatic write, so the draft is
+              // pushed by hand; without this the indent is lost on commit.
+              setNoteEdit((cur) =>
+                cur ? { ...cur, draft: el.value.slice(0, 2000) } : cur,
+              );
             }
           }}
           aria-label="Note text"
