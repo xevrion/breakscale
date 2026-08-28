@@ -482,6 +482,19 @@
      wordmark and this control. It previously compensated here for a gap
      token that did not exist; that token is fixed, so the workaround is
      gone and spacing lives in one place again. */
+
+  /* This control is a CONTAINER, and everything it sheds as space runs out
+     is keyed on ITS width, not the viewport's. The width it actually gets
+     is the bar minus the wordmark, the undo pair and the reference cluster,
+     and those change at their own breakpoints, so a viewport query here would
+     have to restate all of that arithmetic and would silently break the
+     next time any of it moved (the strip in Metrics.css had exactly that
+     bug: a media query that could never fire). Inline-size containment is
+     also what makes the degradation sound: the readouts inside can never
+     push the bar wider than the viewport, so the run controls can never be
+     painted over again. */
+  container-type: inline-size;
+  container-name: traffic;
 }
 
 /* --------------------------------------------------------------------------
@@ -699,22 +712,35 @@
 }
 
 /* --------------------------------------------------------------------------
-   Narrow bar.
+   Narrow traffic control.
 
-   Below this the secondary readouts are dropped rather than crushed: the
-   slider and p99 are the two things that must survive, and three squeezed
-   figures help nobody. Nothing here may wrap — the bar grows if it does,
-   and it is meant to stay one line tall.
+   Container queries against the control's own width (the container is
+   declared on .traffic above), because what these readouts compete with is
+   the slider BESIDE them, not the window: a wide monitor with every panel
+   label showing and a narrow laptop with the bar already stripped hand this
+   control very different widths at the same viewport. Nothing here may
+   wrap: the bar grows if it does, and it is meant to stay one line tall.
 
-   The thresholds are set by measurement, not taste. With the undo/redo
-   cluster and the three reference buttons beside the wordmark, the bar's
-   minimum one-line width with all four readouts is about 1350px; below that
-   the later chrome painted over Reset and pushed the reference buttons off
-   screen. Dropping the secondary readouts at 1360px keeps every control
-   reachable down to about 1180px, where the slider gives up width next.
+   The thresholds are set by measurement, not taste. The control's pieces
+   at full size: load 420 + spacer 16 + p99 98 + secondary readouts 228 +
+   transport 118 + three 20px gaps, about 940px.
+
+   What gives way, in order:
+     860  the secondary readouts. Between 940 and 860 the slider absorbs
+          the squeeze (420 down to ~340, still generous travel); past that,
+          keeping three more figures would crush the one control the
+          student drives, so the figures go and the slider springs back.
+          The charts strip still carries every one of these numbers.
+     620  the slider's floor comes down to 260 and the headline tightens.
+     560  the "requests / sec" unit and the spacer's guarantee go, and the
+          slider may reach 220. The slider's aria-valuetext still says the
+          unit, and this fires only in sub-900px windows where the p99
+          hero, the slider and the transport are worth more than a word.
+
+   Never dropped: the load slider, the p99 hero, the transport.
    -------------------------------------------------------------------------- */
 
-@media (max-width: 1360px) {
+@container traffic (max-width: 860px) {
   .traffic-metric-group {
     display: none;
   }
@@ -724,12 +750,31 @@
   }
 }
 
-@media (max-width: 1180px) {
+@container traffic (max-width: 620px) {
   .traffic-load {
-    flex-basis: 220px;
-    min-width: 160px;
+    min-width: 260px;
+  }
+}
+
+@container traffic (max-width: 560px) {
+  .traffic-load {
+    min-width: 220px;
   }
 
+  .traffic-load-unit {
+    display: none;
+  }
+
+  .traffic-spacer {
+    min-width: 0;
+  }
+}
+
+/* The one thing the container cannot style is its own gap (a container
+   query cannot match the container it measures against). Purely spacing,
+   so a coarse viewport step is honest here: by 1000px every bar
+   configuration has this control tight for room. */
+@media (max-width: 1000px) {
   .traffic {
     gap: var(--sp-4);
   }

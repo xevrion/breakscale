@@ -1520,6 +1520,7 @@ export default function App() {
           className="btn app-glossary"
           aria-haspopup="dialog"
           aria-expanded={examplesOpen}
+          aria-label="Examples"
           title="Load a worked example"
           onClick={() => setExamplesOpen((o) => !o)}
         >
@@ -1539,7 +1540,7 @@ export default function App() {
             <rect x="3" y="14" width="7" height="7" rx="1" />
             <rect x="14" y="14" width="7" height="7" rx="1" />
           </svg>
-          Examples
+          <span className="app-glossary-label">Examples</span>
         </button>
 
         <button

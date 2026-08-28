@@ -124,13 +124,11 @@
 /* --------------------------------------------------------------------------
    The bar's width cascade. What gives way, in order:
 
-     1. 1780  the printed shortcut keys and the widest gaps. Annotations,
+     1. 1900  the printed shortcut keys and the widest gaps. Annotations,
               and the shortcuts dialog documents every binding.
-     2. 1620  the tagline. Charm, not information — and it goes BEFORE the
-              reference labels do, because "Glossary" is a teaching word
-              and "Build it, load it, watch it break" is a slogan.
-     3. 1460  the reference labels collapse to their icons. aria-label and
+     2. 1700  the reference labels collapse to their icons. aria-label and
               the titles keep the names at every width.
+     3. 1620  the tagline. Charm, not information.
      4. 1360  the rails narrow and the bar's padding tightens (below).
      5. ~T860 the secondary readouts (Goodput / Errors / Dropped) go —
               but that step lives on the TRAFFIC CONTROL'S OWN WIDTH as a
@@ -142,16 +140,18 @@
    What never gives way: the load slider (the cause), the p99 hero (the
    effect), and the transport. They are the app.
 
-   THE THRESHOLDS SIT ABOVE THE BAR'S MEASURED MIN-CONTENT, not below it.
-   Measured with the icon transport (118px): brand 170 + undo 68 + traffic
-   at its 800px floor + labelled buttons 329 + gaps + padding puts the
-   min-content at ~1507 once the keys are gone, ~1412 once the tagline is
-   too. Each step below lands before the width it rescues: keys at 1780,
-   tagline at 1620 (min-content ~1412), labels at 1460 (~1200), and from
-   there the container query in Inspector.css takes over.
+   THE THRESHOLDS SIT ABOVE THE POINT WHERE A STEP DOWN IN PRIORITY WOULD
+   OTHERWISE FIRE, not merely above the bar's min-content. Measured with
+   the icon transport (118px) and all four reference buttons labelled:
+   brand 170 + undo 68 + buttons 493 + six 40px gaps + padding leaves the
+   traffic control less than its 860px readout threshold below ~1910, so
+   the keys go at 1900 or the ANNOTATIONS would outlive the READOUTS; the
+   same arithmetic with sp-5 gaps (chrome ~828) puts the label step at
+   1700. Each step keeps every control on screen and the priority order
+   intact down to the next one.
    -------------------------------------------------------------------------- */
 
-@media (max-width: 1780px) {
+@media (max-width: 1900px) {
   .app-glossary-key {
     display: none;
   }
@@ -161,14 +161,14 @@
   }
 }
 
-@media (max-width: 1620px) {
-  .app-tagline {
+@media (max-width: 1700px) {
+  .app-glossary-label {
     display: none;
   }
 }
 
-@media (max-width: 1460px) {
-  .app-glossary-label {
+@media (max-width: 1620px) {
+  .app-tagline {
     display: none;
   }
 }
