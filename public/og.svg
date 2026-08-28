@@ -11,76 +11,71 @@
     Social card. 1200x630 is what every scraper crops to, so nothing that
     matters sits within 60px of an edge.
 
-    The card is the KNEE: the curve a system traces as it runs out of
-    headroom, flat while there is slack and vertical once there is not. The
-    shape is not drawn by eye, it is M/M/1 response time, T = 1/(mu - lambda),
-    sampled across the box, so the card carries the curve the simulator
-    actually produces.
+    The nodes are drawn to the canvas's own anatomy rather than to a
+    resemblance of it: 184x88 at rx 6, the header hairline inset 12 to 172 in
+    the kind's stroke at 0.28 opacity, the icon at x 12 and the name at x 38,
+    the status dot at 168.5, the primary readout at (12,52) in mono 16/650,
+    the paired secondaries at y 70, and the 160x3 meter at y 80. The per-kind
+    fills, strokes and inks are the dark palette's own values. A reader who
+    clicks through meets the same object.
 
-    The four nodes sit ON the curve and take the app's own status colours,
-    green while the system copes, amber at the knee, red past it. That is what
-    turns a chart into this product: the reader sees components changing state
-    as load rises, which is the thing they will do on the canvas a minute
-    later.
+    The story is the one the tool exists to tell, read left to right: traffic
+    healthy at the client, the service warm at 86 percent, the database at 100
+    with a queue backing up and a third of its work failing. Colour escalates
+    with it, which is how the canvas itself reports trouble.
 
-    No screenshot: a dense simulator scaled to a timeline thumbnail is
-    unreadable. No feature list either, it competes with the one idea.
+    Not a screenshot: the interface chrome carries none of the meaning and a
+    dense simulator does not survive a timeline thumbnail. The readouts are
+    illustrative of a state the simulator produces, not a transcript of one
+    particular run.
   -->
-  <rect width="1200" height="630" fill="#151419" />
-
-  <!-- The canvas grid, at the app's spacing, kept near invisible. -->
+  <rect width="1200" height="630" fill="#151419"/>
   <g stroke="#232128" stroke-width="1">
-    <path d="M0 90.5h1200M0 180.5h1200M0 270.5h1200M0 360.5h1200M0 450.5h1200M0 540.5h1200" />
-    <path
-      d="M90.5 0v630M180.5 0v630M270.5 0v630M360.5 0v630M450.5 0v630M540.5 0v630M630.5 0v630M720.5 0v630M810.5 0v630M900.5 0v630M990.5 0v630M1080.5 0v630"
-    />
+    <path d="M0 90.5h1200M0 180.5h1200M0 270.5h1200M0 360.5h1200M0 450.5h1200M0 540.5h1200"/>
+    <path d="M90.5 0v630M180.5 0v630M270.5 0v630M360.5 0v630M450.5 0v630M540.5 0v630M630.5 0v630M720.5 0v630M810.5 0v630M900.5 0v630M990.5 0v630M1080.5 0v630"/>
   </g>
-
-  <g transform="translate(640, 250)">
-    <!-- The rule the curve departs from. Without it the curve is a hook. -->
-    <path d="M0 260.5 H500" stroke="#33313c" stroke-width="2" stroke-linecap="round" />
-    <path
-      d="M0.0 241.4 L80.0 238.0 L160.0 232.7 L220.0 226.8 L260.0 221.3 L300.0 213.5 L340.0 201.9 L360.0 193.7 L380.0 182.6 L400.0 167.1 L420.0 143.9 L440.0 105.2 L460.0 27.8 L468.0 4.0"
-      fill="none"
-      stroke="#f0656a"
-      stroke-width="9"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    />
-    <!-- Components on the curve, escalating as headroom runs out. -->
-    <circle cx="80" cy="238.0" r="11" fill="#151419" stroke="#4ac06e" stroke-width="5" />
-    <circle cx="260" cy="221.3" r="11" fill="#151419" stroke="#4ac06e" stroke-width="5" />
-    <circle cx="380" cy="182.6" r="11" fill="#151419" stroke="#d79a2b" stroke-width="5" />
-    <circle cx="440" cy="105.2" r="11" fill="#151419" stroke="#f0656a" stroke-width="5" />
+  <text x="96" y="248" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="82" font-weight="700" letter-spacing="-1.8" fill="#f3f1f5">Breakscale</text>
+  <text x="98" y="300" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="32" fill="#a5a1b0">Build a system. Load it until it breaks. Watch why.</text>
+  <g transform="translate(236, 356)">
+    <path d="M184 44 H266" stroke="#4a4856" stroke-width="2"/>
+    <path d="M456 44 H538" stroke="#4a4856" stroke-width="2"/>
+    <path d="M264 39 L273 44 L264 49 Z" fill="#5a5866"/>
+    <path d="M536 39 L545 44 L536 49 Z" fill="#5a5866"/>
+  <g transform="translate(0,0)">
+    <rect width="184" height="88" rx="6" fill="#261e3a" stroke="#ac8ff9" stroke-width="1.5"/>
+    <line x1="12" y1="30" x2="172" y2="30" stroke="#ac8ff9" stroke-opacity="0.28" stroke-width="1"/>
+    <g transform="translate(12,6) scale(0.75)" fill="none" stroke="#d4c7ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15"/><path d="M7 19h5"/><rect width="6" height="10" x="16" y="12" rx="2"/></g>
+    <text x="38" y="15" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="450" fill="#eceaf2" dominant-baseline="middle">Client</text>
+    <circle cx="168.5" cy="15" r="3.5" fill="#4ac06e"/>
+    <text x="12" y="52" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16" font-weight="650" fill="#f3f1f5">1.2k<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="650" fill="#d4c7ff" letter-spacing="0.66" dx="4">/s</tspan></text>
+    <text x="12" y="70" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">1.2k/s<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#d4c7ff" letter-spacing="0.6" dx="3">ok</tspan></text>
+    <text x="172" y="70" text-anchor="end" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">0%<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#d4c7ff" letter-spacing="0.6" dx="3">failing</tspan></text>
+    <rect x="12" y="80" width="160" height="3" rx="1.5" fill="#ac8ff9" fill-opacity="0.25"/>
+    <rect x="12" y="80" width="158" height="3" rx="1.5" fill="#4ac06e"/>
   </g>
-
-  <text
-    x="96"
-    y="300"
-    font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace"
-    font-size="82"
-    font-weight="700"
-    letter-spacing="-1.8"
-    fill="#f3f1f5"
-  >
-    Breakscale
-  </text>
-  <text
-    x="98"
-    y="356"
-    font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-    font-size="32"
-    fill="#a5a1b0"
-  >
-    Build a system. Load it until it breaks.
-  </text>
-  <text
-    x="98"
-    y="400"
-    font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-    font-size="32"
-    fill="#a5a1b0"
-  >
-    Watch why.
-  </text>
+  <g transform="translate(272,0)">
+    <rect width="184" height="88" rx="6" fill="#15243c" stroke="#6ea3ff" stroke-width="1.5"/>
+    <line x1="12" y1="30" x2="172" y2="30" stroke="#6ea3ff" stroke-opacity="0.28" stroke-width="1"/>
+    <g transform="translate(12,6) scale(0.75)" fill="none" stroke="#b5d2ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/></g>
+    <text x="38" y="15" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="450" fill="#eceaf2" dominant-baseline="middle">API Server</text>
+    <circle cx="168.5" cy="15" r="3.5" fill="#d79a2b"/>
+    <text x="12" y="52" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16" font-weight="650" fill="#d79a2b">86<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="650" fill="#b5d2ff" letter-spacing="0.66" dx="4">%</tspan></text>
+    <text x="12" y="70" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">104ms<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#b5d2ff" letter-spacing="0.6" dx="3">p99</tspan></text>
+    <text x="172" y="70" text-anchor="end" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">12<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#b5d2ff" letter-spacing="0.6" dx="3">waiting</tspan></text>
+    <rect x="12" y="80" width="160" height="3" rx="1.5" fill="#6ea3ff" fill-opacity="0.25"/>
+    <rect x="12" y="80" width="138" height="3" rx="1.5" fill="#d79a2b"/>
+  </g>
+  <g transform="translate(544,0)">
+    <rect width="184" height="88" rx="6" fill="#022839" stroke="#f0656a" stroke-width="1.5"/>
+    <line x1="12" y1="30" x2="172" y2="30" stroke="#f0656a" stroke-opacity="0.28" stroke-width="1"/>
+    <g transform="translate(12,6) scale(0.75)" fill="none" stroke="#9fdcf5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></g>
+    <text x="38" y="15" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="450" fill="#eceaf2" dominant-baseline="middle">Database</text>
+    <circle cx="168.5" cy="15" r="3.5" fill="#e2565c"/>
+    <text x="12" y="52" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16" font-weight="650" fill="#f0656a">100<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="650" fill="#9fdcf5" letter-spacing="0.66" dx="4">%</tspan></text>
+    <text x="12" y="70" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">64<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#9fdcf5" letter-spacing="0.6" dx="3">queued</tspan></text>
+    <text x="172" y="70" text-anchor="end" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">31%<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#9fdcf5" letter-spacing="0.6" dx="3">failing</tspan></text>
+    <rect x="12" y="80" width="160" height="3" rx="1.5" fill="#f0656a" fill-opacity="0.25"/>
+    <rect x="12" y="80" width="160" height="3" rx="1.5" fill="#e2565c"/>
+  </g>
+  </g>
 </svg>

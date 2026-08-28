@@ -14,7 +14,7 @@
       name the host, so doing them twice is wasted. Domain first.
 - [x] Logo + favicon
 - [x] OG image
-- [ ] README banner + screenshots
+- [x] README banner (screenshots still to come)
 - [x] Seed 5-10 good-first-issues
 - [x] Enable Discussions
 - [ ] Delete TODO.md
@@ -33,7 +33,8 @@
       image, favicon and logo, so running it against the code-drawn
       placeholders would just generate findings that the real assets fix.
 - [ ] Replace the generated art with custom OG image, favicon and logo
-      Hand-made, not drawn in code. The current ones are generic.
+      Redrawn in code around the knee curve, derived from M/M/1 rather than
+      styled by eye. Keep if it holds up, otherwise hand-make.
 - [ ] Screenshots for the README (a retry storm collapsing is the one to get)
 - [ ] Per-example pages
 - [x] llms.txt

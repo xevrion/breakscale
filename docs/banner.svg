@@ -1,19 +1,61 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="Breakscale">
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 1280 300"
+  width="1280"
+  height="300"
+  role="img"
+  aria-label="Breakscale: build a system, load it until it breaks, and watch why"
+>
   <title>Breakscale</title>
-  <rect width="1280" height="320" fill="#151419"/>
+  <!-- The README banner. Same nodes as the social card, same anatomy as the
+       canvas, at banner proportions. See public/og.svg for the reasoning. -->
+  <rect width="1280" height="300" fill="#151419"/>
   <g stroke="#232128" stroke-width="1">
-    <path d="M0 80.5h1280M0 160.5h1280M0 240.5h1280"/>
-    <path d="M80.5 0v320M160.5 0v320M240.5 0v320M320.5 0v320M400.5 0v320M480.5 0v320M560.5 0v320M640.5 0v320M720.5 0v320M800.5 0v320M880.5 0v320M960.5 0v320M1040.5 0v320M1120.5 0v320M1200.5 0v320"/>
+    <path d="M0 75.5h1280M0 150.5h1280M0 225.5h1280"/>
+    <path d="M80.5 0v300M160.5 0v300M240.5 0v300M320.5 0v300M400.5 0v300M480.5 0v300M560.5 0v300M640.5 0v300M720.5 0v300M800.5 0v300M880.5 0v300M960.5 0v300M1040.5 0v300M1120.5 0v300M1200.5 0v300"/>
   </g>
-  <g transform="translate(700, 60)">
-    <path d="M0 200.5 H500" stroke="#33313c" stroke-width="2" stroke-linecap="round"/>
-    <path d="M0.0 185.0 L80.0 182.4 L160.0 178.4 L220.0 173.9 L260.0 169.7 L300.0 163.7 L340.0 154.8 L360.0 148.5 L380.0 140.0 L400.0 128.1 L420.0 110.3 L440.0 80.7 L460.0 21.3 L466.0 6.0"
-      fill="none" stroke="#f0656a" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="80"  cy="182.4" r="9" fill="#151419" stroke="#4ac06e" stroke-width="4"/>
-    <circle cx="260" cy="169.7" r="9" fill="#151419" stroke="#4ac06e" stroke-width="4"/>
-    <circle cx="380" cy="140.0" r="9" fill="#151419" stroke="#d79a2b" stroke-width="4"/>
-    <circle cx="440" cy="80.7"  r="9" fill="#151419" stroke="#f0656a" stroke-width="4"/>
+  <text x="88" y="104" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="58" font-weight="700" letter-spacing="-1.3" fill="#f3f1f5">Breakscale</text>
+  <text x="90" y="142" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="23" fill="#a5a1b0">Build a system. Load it until it breaks. Watch why.</text>
+<g transform="translate(292, 176)">
+    <path d="M184 44 H266" stroke="#4a4856" stroke-width="2"/>
+    <path d="M456 44 H538" stroke="#4a4856" stroke-width="2"/>
+    <path d="M264 39 L273 44 L264 49 Z" fill="#5a5866"/>
+    <path d="M536 39 L545 44 L536 49 Z" fill="#5a5866"/>
+  <g transform="translate(0,0)">
+    <rect width="184" height="88" rx="6" fill="#261e3a" stroke="#ac8ff9" stroke-width="1.5"/>
+    <line x1="12" y1="30" x2="172" y2="30" stroke="#ac8ff9" stroke-opacity="0.28" stroke-width="1"/>
+    <g transform="translate(12,6) scale(0.75)" fill="none" stroke="#d4c7ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15"/><path d="M7 19h5"/><rect width="6" height="10" x="16" y="12" rx="2"/></g>
+    <text x="38" y="15" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="450" fill="#eceaf2" dominant-baseline="middle">Client</text>
+    <circle cx="168.5" cy="15" r="3.5" fill="#4ac06e"/>
+    <text x="12" y="52" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16" font-weight="650" fill="#f3f1f5">1.2k<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="650" fill="#d4c7ff" letter-spacing="0.66" dx="4">/s</tspan></text>
+    <text x="12" y="70" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">1.2k/s<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#d4c7ff" letter-spacing="0.6" dx="3">ok</tspan></text>
+    <text x="172" y="70" text-anchor="end" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">0%<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#d4c7ff" letter-spacing="0.6" dx="3">failing</tspan></text>
+    <rect x="12" y="80" width="160" height="3" rx="1.5" fill="#ac8ff9" fill-opacity="0.25"/>
+    <rect x="12" y="80" width="158" height="3" rx="1.5" fill="#4ac06e"/>
   </g>
-  <text x="88" y="168" font-family="ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace" font-size="60" font-weight="700" letter-spacing="-1.2" fill="#f3f1f5">Breakscale</text>
-  <text x="90" y="212" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="24" fill="#a5a1b0">Build a system. Load it until it breaks. Watch why.</text>
+  <g transform="translate(272,0)">
+    <rect width="184" height="88" rx="6" fill="#15243c" stroke="#6ea3ff" stroke-width="1.5"/>
+    <line x1="12" y1="30" x2="172" y2="30" stroke="#6ea3ff" stroke-opacity="0.28" stroke-width="1"/>
+    <g transform="translate(12,6) scale(0.75)" fill="none" stroke="#b5d2ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/></g>
+    <text x="38" y="15" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="450" fill="#eceaf2" dominant-baseline="middle">API Server</text>
+    <circle cx="168.5" cy="15" r="3.5" fill="#d79a2b"/>
+    <text x="12" y="52" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16" font-weight="650" fill="#d79a2b">86<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="650" fill="#b5d2ff" letter-spacing="0.66" dx="4">%</tspan></text>
+    <text x="12" y="70" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">104ms<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#b5d2ff" letter-spacing="0.6" dx="3">p99</tspan></text>
+    <text x="172" y="70" text-anchor="end" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">12<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#b5d2ff" letter-spacing="0.6" dx="3">waiting</tspan></text>
+    <rect x="12" y="80" width="160" height="3" rx="1.5" fill="#6ea3ff" fill-opacity="0.25"/>
+    <rect x="12" y="80" width="138" height="3" rx="1.5" fill="#d79a2b"/>
+  </g>
+  <g transform="translate(544,0)">
+    <rect width="184" height="88" rx="6" fill="#022839" stroke="#f0656a" stroke-width="1.5"/>
+    <line x1="12" y1="30" x2="172" y2="30" stroke="#f0656a" stroke-opacity="0.28" stroke-width="1"/>
+    <g transform="translate(12,6) scale(0.75)" fill="none" stroke="#9fdcf5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></g>
+    <text x="38" y="15" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="450" fill="#eceaf2" dominant-baseline="middle">Database</text>
+    <circle cx="168.5" cy="15" r="3.5" fill="#e2565c"/>
+    <text x="12" y="52" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16" font-weight="650" fill="#f0656a">100<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="650" fill="#9fdcf5" letter-spacing="0.66" dx="4">%</tspan></text>
+    <text x="12" y="70" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">64<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#9fdcf5" letter-spacing="0.6" dx="3">queued</tspan></text>
+    <text x="172" y="70" text-anchor="end" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="13" font-weight="650" fill="#a5a1b0">31%<tspan font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="650" fill="#9fdcf5" letter-spacing="0.6" dx="3">failing</tspan></text>
+    <rect x="12" y="80" width="160" height="3" rx="1.5" fill="#f0656a" fill-opacity="0.25"/>
+    <rect x="12" y="80" width="160" height="3" rx="1.5" fill="#e2565c"/>
+  </g>
+  </g>
 </svg>
