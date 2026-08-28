@@ -31,7 +31,9 @@ import {
   NOTE_DEFAULT_WIDTH,
   SECTION_MIN_HEIGHT,
   SECTION_MIN_WIDTH,
+  NOTE_MAX_SCALE,
   NOTE_MAX_WIDTH,
+  NOTE_MIN_SCALE,
   NOTE_MIN_WIDTH,
   SECTION_TONE_COUNT,
   isNote,
@@ -869,6 +871,28 @@ export default function App() {
               }
             : a,
         ),
+      );
+    },
+    [history, setAnnotations],
+  );
+
+  const handleScaleNote = useCallback(
+    (id: string, x: number, width: number, scale: number) => {
+      if (!history.inGesture) history.touch('resize', snapRef.current);
+      setAnnotations(
+        (topoLiveRef.current.annotations ?? []).map((a) => {
+          if (a.id !== id || !isNote(a)) return a;
+          const next: Note = {
+            ...a,
+            x,
+            width: Math.min(Math.max(width, NOTE_MIN_WIDTH), NOTE_MAX_WIDTH),
+            scale: Math.min(Math.max(scale, NOTE_MIN_SCALE), NOTE_MAX_SCALE),
+          };
+          // Back at 1 is the absence of a scale, not a scale of one: storing
+          // it would put a redundant field in every share link.
+          if (next.scale === 1) delete next.scale;
+          return next;
+        }),
       );
     },
     [history, setAnnotations],
@@ -2052,6 +2076,7 @@ export default function App() {
               onMoveAnnotation={handleMoveAnnotation}
               onResizeSection={handleResizeSection}
               onResizeNote={handleResizeNote}
+              onScaleNote={handleScaleNote}
               onCreateNote={handleCreateNote}
               onCreateSection={handleCreateSection}
               onEditNote={handleEditNote}

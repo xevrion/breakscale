@@ -31,6 +31,18 @@ export interface Note {
    */
   size: 'sm' | 'md' | 'lg';
   /**
+   * Continuous multiplier on the size preset, set by dragging a corner.
+   *
+   * The preset stays the coarse control (the S/M/L buttons, and what a
+   * preset author writes); this is the fine one. Kept as a MULTIPLIER rather
+   * than an absolute px size so the two cannot contradict each other: a note
+   * scaled to 1.5 and then switched from md to lg is still half again bigger
+   * than an lg note, which is what someone who dragged it that size expects.
+   *
+   * Absent means 1, so a note that has never been scaled stores nothing.
+   */
+  scale?: number;
+  /**
    * Typeface. A hand-drawn face reads as a margin annotation rather than as
    * part of the system being described, which is the distinction a student
    * needs when the same canvas carries both.
@@ -148,6 +160,16 @@ export const NOTE_DEFAULT_WIDTH = 220;
  */
 export const NOTE_MIN_WIDTH = 80;
 export const NOTE_MAX_WIDTH = 900;
+
+/**
+ * Bounds on the corner-drag scale.
+ *
+ * Below the minimum a note is smaller than the node labels around it and
+ * reads as a mistake; above the maximum it is a headline competing with the
+ * diagram it annotates.
+ */
+export const NOTE_MIN_SCALE = 0.6;
+export const NOTE_MAX_SCALE = 4;
 export const SECTION_MIN_WIDTH = 120;
 export const SECTION_MIN_HEIGHT = 90;
 
@@ -239,6 +261,7 @@ export function sanitizeAnnotations(input: unknown): Annotation[] {
         ...noteTone(a.tone),
         ...(a.bold === true ? { bold: true } : {}),
         ...(a.italic === true ? { italic: true } : {}),
+        ...noteScale(a.scale),
         ...(a.underline === true ? { underline: true } : {}),
       });
       seen.add(id);
@@ -307,6 +330,19 @@ function colour(v: unknown): { color?: string } {
  * tone follows the body text colour, which is the right default and not the
  * same as shade 0.
  */
+/**
+ * A note's scale, or nothing.
+ *
+ * Absent means 1 and is the common case, so an unset or out-of-range value
+ * returns nothing rather than writing a redundant 1 into every note.
+ */
+function noteScale(v: unknown): { scale?: number } {
+  const n = num(v);
+  if (n === null) return {};
+  const c = clamp(n, NOTE_MIN_SCALE, NOTE_MAX_SCALE);
+  return c === 1 ? {} : { scale: c };
+}
+
 function noteTone(v: unknown): { tone?: number } {
   const n = num(v);
   if (n === null) return {};

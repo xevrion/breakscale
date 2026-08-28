@@ -17,6 +17,7 @@ import {
   TAB,
   TAB_SIZE,
   applyTab,
+  scaledSpec,
   layoutNote,
   noteStyle,
   resizeRect,
@@ -256,5 +257,36 @@ describe('note resize', () => {
     const w = resizeNote({ x: 100, w: 200 }, 'w', -5000);
     expect(w.width).toBe(900);
     expect(w.x + w.width).toBe(300);
+  });
+});
+
+describe('scaledSpec', () => {
+  it('leaves the preset alone at scale 1', () => {
+    // Identity, so an unscaled note pays nothing and cannot drift off the
+    // preset by a rounding error.
+    expect(scaledSpec('md')).toBe(NOTE_SIZES.md);
+    expect(scaledSpec('md', 1)).toBe(NOTE_SIZES.md);
+  });
+
+  it('scales the line height with the font, not just the font', () => {
+    // Holding the leading fixed while the type grew would collide the lines
+    // at any scale above about 1.3.
+    const md = NOTE_SIZES.md;
+    const big = scaledSpec('md', 2);
+    expect(big.font).toBe(md.font * 2);
+    expect(big.line).toBe(md.line * 2);
+  });
+
+  it('keeps the weight, which is not a size', () => {
+    expect(scaledSpec('lg', 1.5).weight).toBe(NOTE_SIZES.lg.weight);
+  });
+
+  it('returns whole pixels, so the SVG and the editor can agree', () => {
+    // The in-place editor is an HTML textarea positioned over the painted
+    // text; a sub-pixel difference between them shows as the text shifting
+    // the moment the editor opens.
+    const s = scaledSpec('sm', 1.37);
+    expect(Number.isInteger(s.font)).toBe(true);
+    expect(Number.isInteger(s.line)).toBe(true);
   });
 });

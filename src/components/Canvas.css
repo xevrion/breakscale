@@ -1728,6 +1728,14 @@
   cursor: nwse-resize;
 }
 
+/* A note's corners SCALE its type rather than reflowing it, so they are
+   drawn as circles against the squares of every other handle in the app.
+   The two gestures produce different results and must not look identical. */
+.cv-handle.is-corner {
+  rx: 50%;
+  ry: 50%;
+}
+
 .cv-handle-hit[data-dir='ne'],
 .cv-handle-hit[data-dir='sw'] {
   cursor: nesw-resize;

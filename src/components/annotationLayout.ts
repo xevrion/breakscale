@@ -61,8 +61,9 @@ export function noteStyle(
   font?: AnnotationFont,
   bold?: boolean,
   italic?: boolean,
+  scale = 1,
 ): TextStyle {
-  const spec = NOTE_SIZES[size];
+  const spec = scaledSpec(size, scale);
   // Bold and italic both change glyph widths, so both have to reach the
   // MEASUREMENT and not only the paint: wrapping upright and regular while
   // painting slanted and heavy overruns the note's own box. Underline is
@@ -72,6 +73,24 @@ export function noteStyle(
     weight: bold ? NOTE_BOLD_WEIGHT : spec.weight,
     family: font ?? 'sans',
     ...(italic ? { italic: true } : {}),
+  };
+}
+
+/**
+ * The size preset with a corner-drag scale applied.
+ *
+ * The line height scales with the font rather than staying fixed, or the
+ * leading would collapse as the text grew and the lines would collide. Both
+ * are rounded to whole pixels so the SVG paint and the HTML editor, which
+ * must agree to the pixel, cannot land on different sub-pixel values.
+ */
+export function scaledSpec(size: Note['size'], scale = 1): NoteSizeSpec {
+  const spec = NOTE_SIZES[size];
+  if (scale === 1) return spec;
+  return {
+    font: Math.round(spec.font * scale),
+    line: Math.round(spec.line * scale),
+    weight: spec.weight,
   };
 }
 
@@ -141,9 +160,10 @@ export function layoutNote(
   font?: AnnotationFont,
   bold?: boolean,
   italic?: boolean,
+  scale = 1,
 ): NoteLayout {
-  const spec = NOTE_SIZES[size];
-  const style = noteStyle(size, font, bold, italic);
+  const spec = scaledSpec(size, scale);
+  const style = noteStyle(size, font, bold, italic, scale);
   const lines = wrapText(text, width, style);
   const baseline = baselineIn(spec.line, style);
   return {

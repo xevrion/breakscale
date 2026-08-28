@@ -68,6 +68,7 @@ import {
   NEW_SECTION_W,
   NOTE_BOLD_WEIGHT,
   NOTE_SIZES,
+  scaledSpec,
   RESIZE_DIRS,
   handleAnchor,
   applyTab,
@@ -79,7 +80,9 @@ import {
   SECTION_MIN_HEIGHT,
   SECTION_MIN_WIDTH,
   ANNOTATION_FONTS,
+  NOTE_MAX_SCALE,
   NOTE_MAX_WIDTH,
+  NOTE_MIN_SCALE,
   NOTE_MIN_WIDTH,
   SECTION_TONE_COUNT,
   isNote,
@@ -418,6 +421,11 @@ export interface CanvasProps {
    * text on every layout, so there is nothing else for a caller to set.
    */
   onResizeNote?: (id: string, x: number, width: number) => void;
+  /**
+   * Scale a note from a corner: the type and the wrap width move together,
+   * so the line breaks hold and the note keeps its shape.
+   */
+  onScaleNote?: (id: string, x: number, width: number, scale: number) => void;
   /**
    * Restyle a note. Every field is optional so one handler serves the whole
    * toolbar; `tone: null` clears the colour, and bold toggles rather than
@@ -1831,6 +1839,19 @@ const FONT_LABEL: Record<AnnotationFont, string> = {
   mono: 'Monospace',
 };
 
+/**
+ * A note's handles: two sides that reflow the text, four corners that scale
+ * it. Listed once so the chrome and the cursor rules cannot disagree.
+ */
+const NOTE_HANDLES = [
+  { dir: 'w', corner: false },
+  { dir: 'e', corner: false },
+  { dir: 'nw', corner: true },
+  { dir: 'ne', corner: true },
+  { dir: 'sw', corner: true },
+  { dir: 'se', corner: true },
+] as const;
+
 const SEC_LABEL_STYLE: TextStyle = { size: 12, weight: 550, family: 'sans' };
 const SEC_LABEL_PAD_X = 10;
 const SEC_LABEL_H = 24;
@@ -1993,8 +2014,16 @@ interface NoteViewProps {
 const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewProps) {
   const layout = useMemo(
     () =>
-      layoutNote(note.text, note.width, note.size, note.font, note.bold, note.italic),
-    [note.text, note.width, note.size, note.font, note.bold, note.italic],
+      layoutNote(
+        note.text,
+        note.width,
+        note.size,
+        note.font,
+        note.bold,
+        note.italic,
+        note.scale,
+      ),
+    [note.text, note.width, note.size, note.font, note.bold, note.italic, note.scale],
   );
   return (
     <g
@@ -2019,7 +2048,17 @@ const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewPro
         height={layout.height + 8}
       />
       {!editing && (
-        <text className="cv-note-text" x={0} y={0}>
+        <text
+          className="cv-note-text"
+          x={0}
+          y={0}
+          // Painted from the LAYOUT, not left to the size class, because a
+          // corner-scaled note has a font size the three preset classes
+          // cannot express. Set only when it differs, so an unscaled note
+          // still takes its size from the stylesheet and the two cannot
+          // drift apart.
+          style={note.scale ? { fontSize: layout.font } : undefined}
+        >
           {layout.lines.map((line, i) => (
             <tspan key={i} x={0} y={layout.baseline + i * layout.lineH}>
               {line === '' ? ' ' : line}
@@ -2132,8 +2171,16 @@ function SectionChrome({
 function NoteChrome({ note, ui }: { note: Note; ui: number }) {
   const layout = useMemo(
     () =>
-      layoutNote(note.text, note.width, note.size, note.font, note.bold, note.italic),
-    [note.text, note.width, note.size, note.font, note.bold, note.italic],
+      layoutNote(
+        note.text,
+        note.width,
+        note.size,
+        note.font,
+        note.bold,
+        note.italic,
+        note.scale,
+      ),
+    [note.text, note.width, note.size, note.font, note.bold, note.italic, note.scale],
   );
   // The ring, plus two width handles. Everything that STYLES the note lives
   // in the floating bar above the charts strip: a toolbar anchored to the
@@ -2153,20 +2200,33 @@ function NoteChrome({ note, ui }: { note: Note; ui: number }) {
         rx={4}
       />
 
-      {/* WIDTH ONLY, and only two handles. A note's height is DERIVED from
-          its wrapped text on every layout and never stored, so a bottom or
-          corner handle would set a number the next render throws away: the
-          drag would appear to work and then snap back. Two side handles say
-          truthfully that width is the thing you control and the height
-          follows the words. */}
-      {(['w', 'e'] as const).map((dir) => {
-        const x = dir === 'w' ? note.x - 6 : note.x + note.width + 6;
+      {/* Two kinds of handle, because a note has two things worth changing.
+          A SIDE handle reflows the text at its current size: the wrap width
+          moves and the words rearrange. A CORNER scales the type and the
+          width together, so the line breaks stay where they are and the
+          whole note simply gets bigger.
+
+          There is no bottom or top handle. A note's height is DERIVED from
+          its wrapped text on every layout and never stored, so a vertical
+          drag would set a number the next render throws away and the gesture
+          would appear to work and then snap back. */}
+      {NOTE_HANDLES.map(({ dir, corner }) => {
+        const x = dir.includes('w')
+          ? note.x - 6
+          : dir.includes('e')
+            ? note.x + note.width + 6
+            : 0;
+        const y = corner
+          ? dir.startsWith('n')
+            ? note.y - 4
+            : note.y + layout.height + 4
+          : midY;
         return (
           <g key={dir}>
             <rect
-              className="cv-handle"
+              className={`cv-handle${corner ? ' is-corner' : ''}`}
               x={x - hs / 2}
-              y={midY - hs / 2}
+              y={y - hs / 2}
               width={hs}
               height={hs}
               rx={2 * ui}
@@ -2175,11 +2235,11 @@ function NoteChrome({ note, ui }: { note: Note; ui: number }) {
                 sized for a fingertip, matching the section handles. */}
             <rect
               className="cv-handle-hit"
-              data-hit="note-resize"
+              data-hit={corner ? 'note-scale' : 'note-resize'}
               data-id={note.id}
               data-dir={dir}
               x={x - hit / 2}
-              y={midY - hit / 2}
+              y={y - hit / 2}
               width={hit}
               height={hit}
             />
@@ -3050,6 +3110,7 @@ type HitKind =
   | 'section'
   | 'section-resize'
   | 'note-resize'
+  | 'note-scale'
   | 'note-size'
   | 'note-bold'
   | 'note-font'
@@ -3110,6 +3171,7 @@ interface Pending {
     | 'ann'
     | 'ann-resize'
     | 'note-resize'
+    | 'note-scale'
     | 'draw-section'
     | null;
   /** Grab offset for a node drag, in world units. Set at promotion. */
@@ -3173,6 +3235,7 @@ export default function Canvas({
   onSetNoteSize,
   onSetSectionTone,
   onResizeNote,
+  onScaleNote,
   onSetNoteStyle,
   spark,
   viewCenterRef,
@@ -3541,7 +3604,8 @@ export default function Canvas({
         (p.mode === 'node' ||
           p.mode === 'ann' ||
           p.mode === 'ann-resize' ||
-          p.mode === 'note-resize')
+          p.mode === 'note-resize' ||
+          p.mode === 'note-scale')
       ) {
         onMoveEnd?.();
       }
@@ -3876,7 +3940,8 @@ export default function Canvas({
           break;
         }
 
-        case 'note-resize': {
+        case 'note-resize':
+        case 'note-scale': {
           const id = p.hit.id;
           const ann = id
             ? (topoRef.current.annotations ?? []).find((a) => a.id === id)
@@ -3885,11 +3950,12 @@ export default function Canvas({
             p.mode = 'pan';
             break;
           }
-          p.mode = 'note-resize';
+          p.mode = p.hit.kind === 'note-scale' ? 'note-scale' : 'note-resize';
           onMoveStart?.('resize');
-          // Height is a placeholder: only x and w are read back, because the
-          // note's height is derived from its text and is not ours to set.
-          p.annRect = { x: ann.x, y: ann.y, w: ann.width, h: 0 };
+          // h carries the note's scale at grab time rather than a height:
+          // the height is derived from the text and is not ours to set, and
+          // a scale drag needs its starting multiplier to work from.
+          p.annRect = { x: ann.x, y: ann.y, w: ann.width, h: ann.scale ?? 1 };
           break;
         }
 
@@ -4129,6 +4195,34 @@ export default function Canvas({
         return;
       }
 
+      if (p.mode === 'note-scale' && p.annRect) {
+        // Proportional: the type and the wrap width grow by the same factor,
+        // so the line breaks stay where they are and the note keeps its
+        // shape. Driven by the HORIZONTAL delta alone, because the height is
+        // derived from the text and cannot be dragged: taking the larger of
+        // dx and dy would make the note jump when the pointer moved
+        // vertically over a dimension it does not control.
+        const dx = w.x - p.worldX;
+        const grow = p.hit.dir?.includes('w') ? -dx : dx;
+        const factor = (p.annRect.w + grow) / p.annRect.w;
+        const scale = clamp(p.annRect.h * factor, NOTE_MIN_SCALE, NOTE_MAX_SCALE);
+        // The width tracks the SAME clamped factor, so a note pinned at the
+        // scale limit stops growing rather than stretching its box on alone.
+        const applied = scale / p.annRect.h;
+        const width = clamp(
+          snap(p.annRect.w * applied),
+          NOTE_MIN_WIDTH,
+          NOTE_MAX_WIDTH,
+        );
+        // A west-side corner keeps the east edge still, exactly as the side
+        // handle does.
+        const x = p.hit.dir?.includes('w')
+          ? p.annRect.x + p.annRect.w - width
+          : p.annRect.x;
+        onScaleNote?.(p.hit.id!, x, width, scale);
+        return;
+      }
+
       if (p.mode === 'draw-section') {
         const x0 = snap(Math.min(p.worldX, w.x));
         const y0 = snap(Math.min(p.worldY, w.y));
@@ -4279,6 +4373,7 @@ export default function Canvas({
           case 'section':
           case 'section-resize':
           case 'note-resize':
+          case 'note-scale':
             // A handle click without a drag is a click on what it belongs to.
             if (p.hit.id) selectOne(p.hit.id, additive);
             break;
@@ -4408,6 +4503,7 @@ export default function Canvas({
       onSetNoteSize,
       onSetSectionTone,
       onResizeNote,
+      onScaleNote,
       onSetNoteStyle,
       clearSelection,
       selectOne,
@@ -5643,11 +5739,12 @@ export default function Canvas({
                 editNote.font,
                 editNote.bold,
                 editNote.italic,
+                editNote.scale,
               ).height *
                 view.k +
               4,
-            fontSize: NOTE_SIZES[editNote.size].font * view.k,
-            lineHeight: `${NOTE_SIZES[editNote.size].line * view.k}px`,
+            fontSize: scaledSpec(editNote.size, editNote.scale).font * view.k,
+            lineHeight: `${scaledSpec(editNote.size, editNote.scale).line * view.k}px`,
             // EVERY style the note carries is mirrored here, not just the
             // family. Editing is meant to feel like typing into the note that
             // is already there, and an editor that drops the colour, the
