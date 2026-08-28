@@ -39,7 +39,9 @@ import type { Annotation, Note } from './sim/annotations';
 import { NEW_NOTE_TEXT } from './components/annotationLayout';
 import type { AnnotationTool } from './components/Palette';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
-import { togglePreference, usePreference } from './content/preferences';
+import { usePreference } from './content/preferences';
+import { Settings } from './components/Settings';
+import { applyTheme } from './theme/applyTheme';
 import { usePresence } from './components/presence';
 import { SessionHistory, syncEngine } from './history';
 import type { HistoryEntry, HistorySnapshot } from './history';
@@ -362,12 +364,18 @@ export default function App() {
    * closes so that reopening from the top bar starts at the top of the list
    * rather than resuming wherever the last "see also" link happened to go.
    */
-  const tooltipsOn = usePreference('tooltips');
+  /* The theme is applied to <html>, which is outside React, so this is a
+     genuine external-system synchronisation rather than derived state. */
+  const themeChoice = usePreference('theme');
+  useEffect(() => {
+    applyTheme(themeChoice);
+  }, [themeChoice]);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [glossaryFocusId, setGlossaryFocusId] = useState<string | undefined>(undefined);
 
   /** The keyboard shortcuts dialog. Ctrl+/ and the top-bar button. */
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
 
   /* ---------------- panel layout ---------------- */
@@ -1689,47 +1697,6 @@ export default function App() {
           someone who has never opened the panel.
         */}
         {/*
-          Tooltips are off by default, so this is how a student turns the
-          explanations on. It sits beside the glossary because the two are the
-          same feature seen from different angles: the panel is the reference
-          you go and read, the tooltips are the reference coming to you.
-
-          aria-pressed rather than aria-expanded: it switches a mode on and
-          off, it does not disclose anything.
-        */}
-        <button
-          type="button"
-          className="btn app-glossary"
-          aria-pressed={tooltipsOn}
-          aria-label={tooltipsOn ? 'Hints on' : 'Hints off'}
-          title={
-            tooltipsOn
-              ? 'Hide the explanations on metric names'
-              : 'Explain metric names on hover'
-          }
-          onClick={() => togglePreference('tooltips')}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
-            <path d="M12 17h.01" />
-          </svg>
-          <span className="app-glossary-label">
-            {tooltipsOn ? 'Hints on' : 'Hints off'}
-          </span>
-        </button>
-
-        {/*
           The way into the keyboard shortcuts dialog. Labelled, beside the
           glossary, for the same reason the glossary is: the two are the
           app's reference surfaces, and a student who knows no shortcuts is
@@ -1800,6 +1767,38 @@ export default function App() {
           <kbd className="app-glossary-key" aria-hidden="true">
             Ctrl+/
           </kbd>
+        </button>
+
+        {/*
+          Settings. Icon-only, unlike its labelled neighbours: the gear is one
+          of the few genuinely universal glyphs, and the reference surfaces
+          (Examples, Shortcuts, Glossary) earn their labels because they are
+          what a lost student needs to see spelled out. This is where you go
+          once you already know what you want to change.
+        */}
+        <button
+          type="button"
+          className="btn btn-icon app-settings"
+          aria-haspopup="dialog"
+          aria-expanded={settingsOpen}
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => setSettingsOpen((o) => !o)}
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
         </button>
 
         <button
@@ -1981,6 +1980,7 @@ export default function App() {
       <TooltipLayer />
       <Glossary open={glossaryOpen} onClose={closeGlossary} focusId={glossaryFocusId} />
       <Shortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <Examples
         open={examplesOpen}

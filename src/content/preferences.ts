@@ -29,12 +29,30 @@ export interface Preferences {
   sparklines: boolean;
   /** Snap node positions to the 8px grid while dragging. */
   snapToGrid: boolean;
+  /**
+   * Colour theme.
+   *
+   * Three states rather than a boolean, because "follow the system" is a real
+   * choice and not the absence of one: a student on a machine that switches
+   * to dark at sunset should switch with it unless they have said otherwise.
+   * A boolean would have to encode that as null, which is how a toggle ends
+   * up with three meanings and no name for the third.
+   */
+  theme: ThemeChoice;
 }
+
+/** What the reader picked. `system` defers to the OS. */
+export type ThemeChoice = 'light' | 'dark' | 'system';
+
+export const THEME_CHOICES: readonly ThemeChoice[] = ['light', 'dark', 'system'];
 
 export const DEFAULT_PREFERENCES: Preferences = {
   tooltips: false,
   sparklines: true,
   snapToGrid: true,
+  // Follow the OS until told otherwise. Picking light as the default would
+  // flash a bright page at someone whose machine is set to dark.
+  theme: 'system',
 };
 
 const STORAGE_KEY = 'breakscale.preferences.v1';
@@ -60,6 +78,7 @@ function load(): Preferences {
       tooltips: bool(p.tooltips, DEFAULT_PREFERENCES.tooltips),
       sparklines: bool(p.sparklines, DEFAULT_PREFERENCES.sparklines),
       snapToGrid: bool(p.snapToGrid, DEFAULT_PREFERENCES.snapToGrid),
+      theme: theme(p.theme),
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -68,6 +87,12 @@ function load(): Preferences {
 
 function bool(v: unknown, fallback: boolean): boolean {
   return typeof v === 'boolean' ? v : fallback;
+}
+
+function theme(v: unknown): ThemeChoice {
+  return v === 'light' || v === 'dark' || v === 'system'
+    ? v
+    : DEFAULT_PREFERENCES.theme;
 }
 
 function persist(): void {
