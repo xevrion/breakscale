@@ -467,6 +467,16 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [designsOpen, setDesignsOpen] = useState(false);
+
+  /**
+   * Whether the canvas has reached storage yet.
+   *
+   * Work has always persisted and the app has never said so, which left a
+   * student with no way to know whether closing the tab would cost them the
+   * last twenty minutes. Starts 'saved', because what is on screen at boot
+   * came out of storage in the first place.
+   */
+  const [saveState, setSaveState] = useState<'saved' | 'saving'>('saved');
   const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const [examplesOpen, setExamplesOpen] = useState(false);
@@ -738,8 +748,12 @@ export default function App() {
     // design with someone else's before they had touched anything.
     if (sharePending) return;
     // Debounced: dragging a node or a slider must not write on every frame.
+    // Between a change and the write, the work genuinely is not saved yet,
+    // and the indicator says so rather than reassuring early.
+    setSaveState('saving');
     const id = window.setTimeout(() => {
       saveSession({ topology, rps, presetId });
+      setSaveState('saved');
     }, 400);
     return () => window.clearTimeout(id);
   }, [topology, rps, presetId, sharePending]);
@@ -2190,6 +2204,26 @@ export default function App() {
             <h1 className="app-title">Breakscale</h1>
             <p className="app-tagline">Build it, load it, watch it break</p>
           </div>
+
+          {/*
+            Says the work is safe.
+
+            role=status, so it is announced rather than only drawn: someone
+            who cannot see the dot has the same reason to worry about closing
+            the tab as someone who can.
+          */}
+          <p
+            className={`app-saved is-${saveState}`}
+            role="status"
+            title={
+              saveState === 'saved'
+                ? 'Your work is saved in this browser'
+                : 'Saving your work'
+            }
+          >
+            <span className="app-saved-dot" aria-hidden="true" />
+            {saveState === 'saved' ? 'Saved' : 'Saving'}
+          </p>
 
           {/*
           Undo / redo. Beside the wordmark, at the editing end of the bar,

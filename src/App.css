@@ -137,6 +137,47 @@
 
 /* The traffic control takes the rest of the bar. min-width:0 lets it
    actually shrink instead of forcing the bar wider than the viewport. */
+/* The saved indicator.
+
+   Deliberately quiet. It answers a question a student asks once ("will I
+   lose this?") and then stops mattering, so it earns a dot and a word and
+   no more. Beside the wordmark because that is where the app talks about
+   itself rather than about the system on the canvas. */
+.app-saved {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  font-size: var(--fs-label);
+  letter-spacing: var(--tr-label);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.app-saved-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok-mark);
+  transition: background-color var(--dur-base) var(--ease);
+}
+
+/* Amber while writing, green once written. Not a spinner: the write takes
+   400ms of debounce and then microseconds, so an animation would be motion
+   for something that is already over. */
+.app-saved.is-saving .app-saved-dot {
+  background: var(--warn-mark);
+}
+
+/* Below the tagline's own breakpoint: on a narrow bar the diagram matters
+   more than a reassurance that has already been read once. */
+@media (max-width: 1620px) {
+  .app-saved {
+    display: none;
+  }
+}
+
 /* The traffic control now sits inside its island rather than directly in
    the bar, so the selector follows it down a level. */
 .app-island-load > .traffic {

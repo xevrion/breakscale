@@ -10,6 +10,8 @@
 
 - [x] Deploy (breakscale.vercel.app)
 - [ ] Custom domain (breakscale.dev?)
+      BLOCKS the SEO work below: canonical, og:url, sitemap and llms.txt all
+      name the host, so doing them twice is wasted. Domain first.
 - [x] Logo + favicon
 - [x] OG image
 - [ ] README banner + screenshots
@@ -31,6 +33,8 @@
       image, favicon and logo, so running it against the code-drawn
       placeholders would just generate findings that the real assets fix.
 - [ ] Replace the generated art with custom OG image, favicon and logo
+      Hand-made, not drawn in code. The current ones are generic.
+- [ ] Screenshots for the README (a retry storm collapsing is the one to get)
 - [ ] Per-example pages
 - [x] llms.txt
 
@@ -50,7 +54,7 @@
 - [x] Adjustable size for the rail, the inspector and the charts strip
 - [x] A visible button to bring the diagram back on screen
 - [x] Minimap for large diagrams (off by default, toggle in Settings)
-- [ ] Name the design + a "saved" indicator, so people know work persists
+- [x] Name the design + a "saved" indicator, so people know work persists
 - [ ] Canvas toggles surfaced in the inspector: snap, grid, minimap, edge labels
 - [ ] Component count by category ("3 network, 2 database")
 - [ ] Baseline rate x pattern multiplier, clearer than a raw slider
@@ -62,7 +66,7 @@
   - [x] Real instance classes and their actual limits (db.r6g.large, n2-standard-4)
   - [x] Defaults derived from published specs, cited in the source
   - [x] Picker in preferences, generic stays the default
-  - [ ] Vendor pricing, feeds the cost model below
+  - [x] Vendor pricing gathered and cited (43 hourly prices, all sourced)
 - [ ] Challenges ("5k rps under 200ms p99")
 - [x] Request tracer (queued vs service time)
 - [ ] Cost model
