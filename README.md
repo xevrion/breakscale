@@ -142,3 +142,9 @@ rendering predictable.
 ## License
 
 [MIT](LICENSE)
+
+The bundled Caveat webfont in `public/fonts/Caveat/` is **not** covered by the
+MIT licence. It is licensed separately under the
+[SIL Open Font License 1.1](public/fonts/Caveat/OFL.txt), which ships alongside
+the font file as that licence requires.
+Copyright 2014 The Caveat Project Authors.
