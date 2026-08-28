@@ -1,0 +1,80 @@
+/* ==========================================================================
+   Vendor details in the inspector.
+
+   Quiet by design. The knobs above it are what a student changes to learn
+   something; this is context, and it should not compete with them.
+   ========================================================================== */
+
+.vp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) 0 0;
+  border-top: var(--bw) solid var(--border);
+}
+
+.vp-eyebrow {
+  margin: 0;
+  color: var(--text-faint);
+}
+
+.vp-product {
+  margin: 0;
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+
+.vp-note,
+.vp-derived,
+.vp-source {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+/* The caveat that the capacity is ours, not the vendor's. Marked with the
+   warning ramp rather than left as body text: it is the one line here a
+   reader must not skim past, because everything else on this panel IS
+   published and this is the part that is not. */
+.vp-derived {
+  padding: var(--sp-2);
+  margin-top: var(--sp-1);
+  border-left: 2px solid var(--warn-mark);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--warn-soft);
+  color: var(--text);
+}
+
+.vp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+}
+
+.vp-label {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+.vp-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--sp-2);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-btn);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.vp-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.vp-source a {
+  color: var(--accent);
+}

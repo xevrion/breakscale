@@ -466,7 +466,18 @@ export function Palette({ onAdd, onAddAnnotation, armedTool }: PaletteProps) {
                       <span className="pal-glyph">
                         <Glyph kind={kind} />
                       </span>
-                      <span className="pal-name">{nameFor(kind, vendor)}</span>
+                      {/* The generic name stays the heading and the vendor's
+                          product goes beneath it. Swapping them outright made
+                          two rows read "Amazon EC2" (a service and a worker
+                          are both an instance) and truncated the longer
+                          names, which is worse than useless in a rail whose
+                          job is telling components apart. */}
+                      <span className="pal-names">
+                        <span className="pal-name">{KIND_NAME[kind]}</span>
+                        {vendor && nameFor(kind, vendor) !== KIND_NAME[kind] && (
+                          <span className="pal-vendor">{nameFor(kind, vendor)}</span>
+                        )}
+                      </span>
                     </button>
                     {/*
                       `bare` because the row is already a strong affordance

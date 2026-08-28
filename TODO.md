@@ -57,11 +57,11 @@
 
 ## Product
 
-- [ ] Cloud vendor mode: AWS / GCP / Azure / generic
-  - [ ] Vendor names per component (Database -> RDS / Cloud SQL / Azure SQL)
-  - [ ] Real instance classes and their actual limits (db.r6g.large, n2-standard-4)
-  - [ ] Defaults derived from published specs, cited in the source
-  - [ ] Picker in preferences, generic stays the default
+- [x] Cloud vendor mode: AWS / GCP / Azure / generic
+  - [x] Vendor names per component (Database -> RDS / Cloud SQL / Azure SQL)
+  - [x] Real instance classes and their actual limits (db.r6g.large, n2-standard-4)
+  - [x] Defaults derived from published specs, cited in the source
+  - [x] Picker in preferences, generic stays the default
   - [ ] Vendor pricing, feeds the cost model below
 - [ ] Challenges ("5k rps under 200ms p99")
 - [x] Request tracer (queued vs service time)

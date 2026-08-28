@@ -424,6 +424,28 @@
   transform: scale(1.06);
 }
 
+/* The concept over the product. Stacked rather than side by side: a rail is
+   224px and "Elastic Load Balancing (Application Load Balancer)" does not
+   share a line with anything. */
+.pal-names {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+/* The vendor's own name for the thing, quiet beneath it. Truncated rather
+   than wrapped, because a rail row that grows to three lines pushes the
+   rest of the list off the screen. */
+.pal-vendor {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--fs-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pal-name {
   flex: 1 1 auto;
   min-width: 0;

@@ -157,8 +157,8 @@ export const GCP: Vendor = {
           name: 'db-custom-2-7680',
           vcpu: 2,
           memory: 7.5,
-          memoryUnit: 'GB',
-          // 7.5 GB lands in the "from 7.5 to < 15" band, whose published
+          memoryUnit: 'GiB',
+          // 7.5 GiB lands in the "from 7.5 to < 15" band, whose published
           // default max_connections is 400.
           maxConnections: 400,
           pricePerHour: 0.1351,
@@ -170,8 +170,8 @@ export const GCP: Vendor = {
           name: 'db-custom-4-16384',
           vcpu: 4,
           memory: 16,
-          memoryUnit: 'GB',
-          // 16 GB lands in the "from 15 to < 30" band, default 500.
+          memoryUnit: 'GiB',
+          // 16 GiB lands in the "from 15 to < 30" band, default 500.
           maxConnections: 500,
           pricePerHour: 0.2772,
           pricedOn: PRICED_ON,
@@ -182,8 +182,8 @@ export const GCP: Vendor = {
           name: 'db-custom-8-32768',
           vcpu: 8,
           memory: 32,
-          memoryUnit: 'GB',
-          // 32 GB lands in the "from 30 to < 60" band, default 600.
+          memoryUnit: 'GiB',
+          // 32 GiB lands in the "from 30 to < 60" band, default 600.
           maxConnections: 600,
           pricePerHour: 0.5544,
           pricedOn: PRICED_ON,
@@ -194,8 +194,8 @@ export const GCP: Vendor = {
           name: 'db-custom-16-65536',
           vcpu: 16,
           memory: 64,
-          memoryUnit: 'GB',
-          // 64 GB lands in the "from 60 to < 120" band, default 800.
+          memoryUnit: 'GiB',
+          // 64 GiB lands in the "from 60 to < 120" band, default 800.
           maxConnections: 800,
           pricePerHour: 1.1088,
           pricedOn: PRICED_ON,

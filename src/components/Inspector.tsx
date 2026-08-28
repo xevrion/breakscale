@@ -29,6 +29,7 @@ import {
   toneClass,
 } from './format';
 import { Term } from './Tooltip';
+import { VendorPanel } from './VendorPanel';
 import './Inspector.css';
 
 /* ------------------------------------------------------------------ *
@@ -2704,6 +2705,15 @@ function SingleInspector({
             )}
           </Section>
         )}
+
+        {/* Last, because it is context rather than a knob. A student is here
+            to change capacity and service time; what the thing is called at
+            a cloud vendor is worth knowing and worth reading after. */}
+        <VendorPanel
+          kind={node.kind}
+          config={node.config}
+          onChange={(patch) => onChange(node.id, patch)}
+        />
       </div>
 
       <div className="ins-foot">
