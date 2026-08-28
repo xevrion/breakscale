@@ -52,6 +52,15 @@ import { buildClipboardText, parseClipboardText } from '../clipboard';
 import type { ClipboardSubgraph } from '../clipboard';
 import { arrowPath, previewPath, routeEdge } from './edgeRoute';
 import type { EdgeRoute } from './edgeRoute';
+import {
+  beginPinch,
+  dragThresholdFor,
+  endPointer,
+  isPalmTouch,
+  pinchFrame,
+  pressAction,
+} from './pointerInput';
+import type { PinchState, TouchMap } from './pointerInput';
 import './Canvas.css';
 
 /* ------------------------------------------------------------------ *
@@ -259,16 +268,16 @@ const FIT_MARGIN = 64;
 const FIT_MIN = DETAIL_ZOOM;
 const FIT_MAX = 1.5;
 
-/**
- * Screen-space distance a press may travel and still count as a click.
- *
- * This is the single number that separates "select" from "drag", and it is
- * measured in CSS pixels on the SCREEN, not in world units: a human's hand
- * shakes by the same number of screen pixels regardless of zoom, so a
- * world-space threshold would make the canvas feel twitchy at 2.5x and sticky
- * at 0.4x.
+/*
+ * The click/drag threshold lives in pointerInput.ts (dragThresholdFor) and
+ * is PER POINTER TYPE: 4px for a mouse, 10px for a finger or a pen, which
+ * jitter. It is measured in CSS pixels on the SCREEN, not in world units: a
+ * human's hand shakes by the same number of screen pixels regardless of
+ * zoom, so a world-space threshold would make the canvas feel twitchy at
+ * 2.5x and sticky at 0.4x. Each press latches its own threshold at
+ * pointerdown, so a pen press and a mouse press in flight together cannot
+ * read each other's number.
  */
-const DRAG_THRESHOLD = 4;
 
 export interface Viewport {
   x: number;
@@ -1690,6 +1699,11 @@ const EdgeView = memo(function EdgeView({
           role="button"
           aria-label="Delete connection"
         >
+          {/* Invisible hit pad, same pattern as the ports: the visible
+              button is 18x18 world px, which at zoom 1 is far below a
+              fingertip. The pad only exists while the edge is selected, so
+              the click that selected the edge is never stolen by it. */}
+          <rect className="cv-edge-del-hit" x={-22} y={-22} width={44} height={44} />
           <rect x={-9} y={-9} width={18} height={18} rx={3} />
           <path d="M-3.5,-3.5 L3.5,3.5 M3.5,-3.5 L-3.5,3.5" />
         </g>
@@ -2555,6 +2569,11 @@ interface Hit {
 interface Pending {
   pointerId: number;
   hit: Hit;
+  /**
+   * Drag-promotion threshold in screen px, latched from the pointer type at
+   * press time: 4 for a mouse, 10 for a finger or a pen (see pointerInput).
+   */
+  threshold: number;
   /** Screen coords at press. Drag promotion is measured from here. */
   screenX: number;
   screenY: number;
@@ -2633,6 +2652,21 @@ export default function Canvas({
    * at paste time stays correct through both.
    */
   const lastClientRef = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * Live touch contacts on the surface, keyed by pointerId, in
+   * surface-relative coords. Only 'touch' pointers are tracked: a mouse and
+   * a pen are one-pointer devices by nature, and only fingers pinch.
+   */
+  const touchesRef = useRef<TouchMap>(new Map());
+  /** Live two-finger pinch/pan, or null. See pointerInput.ts. */
+  const pinchRef = useRef<PinchState | null>(null);
+  /**
+   * True while a pen is in CONTACT (not merely hovering). While it is, every
+   * touch-down is rejected as a palm: the hand holding the pen is resting on
+   * the glass. Hover must not set this, or a teacher pointing with the pen
+   * an inch off the board would lock out their other hand entirely.
+   */
+  const penDownRef = useRef(false);
 
   const [view, setView] = useState<Viewport>({ x: 0, y: 0, k: 1 });
   /**
@@ -2744,6 +2778,33 @@ export default function Canvas({
       viewCenterRef.current = null;
     };
   }, [viewCenterRef, toWorld, visibleRect]);
+
+  /* ---------------- the zoom write ---------------- */
+
+  /**
+   * THE zoom write. Every path that changes the scale — the wheel, the
+   * two-finger pinch, the keyboard chords, the corner buttons, the 100%
+   * reset — funnels through this one function, so a single clamp and a
+   * single rounding govern all of them and no two paths can drift to
+   * different limits. The rounding (three decimals) also stops repeated
+   * in/out steps accumulating float residue that would make "100%" quietly
+   * render as 99%.
+   *
+   * `next` maps the current scale to the wanted one; (px, py) is the point
+   * in surface coords that stays pinned while the scale changes.
+   *
+   * Declared before the pointer handlers because the pinch path inside
+   * onSurfaceMove closes over it.
+   */
+  const zoomAt = useCallback((px: number, py: number, next: (k: number) => number) => {
+    setView((v) => {
+      const k = clamp(Math.round(next(v.k) * 1000) / 1000, MIN_ZOOM, MAX_ZOOM);
+      if (k === v.k) return v;
+      const wx = (px - v.x) / v.k;
+      const wy = (py - v.y) / v.k;
+      return { k, x: px - wx * k, y: py - wy * k };
+    });
+  }, []);
 
   /* ---------------- selection helpers ---------------- */
 
@@ -2911,10 +2972,56 @@ export default function Canvas({
         return;
       }
 
-      // Middle button pans; right button does nothing (the context menu is
-      // already suppressed). Anything else is ignored outright.
-      const middle = e.button === 1;
-      if (e.button !== 0 && !middle) return;
+      // Route the press by button AND pointer type: a primary press starts a
+      // gesture, the mouse middle button forces a pan, and everything else —
+      // right button (the context menu is already suppressed), a pen's
+      // barrel button (button 2), a pen's eraser tip (button 5) — is ignored
+      // outright, so a barrel-button press can never be misread as a normal
+      // press.
+      const action = pressAction(e.button, e.pointerType);
+      if (action === 'none') return;
+      const middle = action === 'pan';
+
+      // PALM REJECTION, decided once at press time: a touch that is either
+      // palm-sized or landing while the pen is in contact never becomes a
+      // gesture, is never tracked, and therefore can never start or join a
+      // pinch. See pointerInput.ts for the policy and its limits.
+      if (isPalmTouch(e.pointerType, e.width, e.height, penDownRef.current)) {
+        return;
+      }
+      if (e.pointerType === 'pen') penDownRef.current = true;
+
+      if (e.pointerType === 'touch') {
+        const rect = e.currentTarget.getBoundingClientRect();
+        touchesRef.current.set(e.pointerId, {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        });
+
+        // A third finger joining mid-pinch changes nothing: the pinch keeps
+        // its original pair, and the extra contact is merely tracked.
+        if (pinchRef.current) return;
+
+        if (touchesRef.current.size >= 2) {
+          // SECOND FINGER DOWN = PINCH. Whatever the first finger had
+          // started was almost certainly the opening of this pinch rather
+          // than a deliberate drag, so abort it — and a node drag that had
+          // already moved puts its nodes back first, so the aborted
+          // fragment leaves no trace on the diagram.
+          const prior = pendingRef.current;
+          if (prior?.active && prior.mode === 'node' && prior.hit.id) {
+            onMoveNode(
+              prior.hit.id,
+              prior.worldX + prior.grabDx,
+              prior.worldY + prior.grabDy,
+            );
+            for (const [gid, o] of prior.groupOrigins) onMoveNode(gid, o.x, o.y);
+          }
+          cancelGesture();
+          pinchRef.current = beginPinch(touchesRef.current, viewRef.current.k);
+          return;
+        }
+      }
 
       const hit = middle
         ? ({ kind: 'background', id: null } as Hit)
@@ -2924,6 +3031,7 @@ export default function Canvas({
 
       pendingRef.current = {
         pointerId: e.pointerId,
+        threshold: dragThresholdFor(e.pointerType),
         // Space-held or middle-drag forces a pan regardless of what is under
         // the pointer, which is the documented escape hatch for panning while
         // the viewport is full of nodes.
@@ -2952,7 +3060,7 @@ export default function Canvas({
       // happens at promotion, in onSurfaceMove, once the gesture is known to
       // be a drag.
     },
-    [hitTest, toWorld],
+    [hitTest, toWorld, cancelGesture, onMoveNode],
   );
 
   /* ---------------- pointermove: promote, then drag ---------------- */
@@ -3073,6 +3181,30 @@ export default function Canvas({
       // paste, and converting at paste time stays honest through both.
       lastClientRef.current = { x: e.clientX, y: e.clientY };
 
+      // PINCH / TWO-FINGER PAN. A tracked touch updates its position; while
+      // a pinch is live, each frame pans by the midpoint's travel and then
+      // zooms to the ABSOLUTE target scale (initial scale times the finger
+      // distance ratio) about the moving midpoint. The zoom goes through
+      // zoomAt like every other zoom path, so the pinch obeys the same
+      // clamp and rounding as the wheel, the buttons and the keyboard.
+      if (e.pointerType === 'touch' && touchesRef.current.has(e.pointerId)) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        touchesRef.current.set(e.pointerId, {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        });
+        const pinch = pinchRef.current;
+        if (pinch) {
+          const frame = pinchFrame(pinch, touchesRef.current);
+          if (frame) {
+            setView((v) => ({ ...v, x: v.x + frame.dx, y: v.y + frame.dy }));
+            zoomAt(frame.mid.x, frame.mid.y, () => frame.k);
+            pinch.lastMid = frame.mid;
+          }
+          return;
+        }
+      }
+
       const p = pendingRef.current;
       if (!p || p.pointerId !== e.pointerId) return;
 
@@ -3106,8 +3238,9 @@ export default function Canvas({
       if (!p.active) {
         const dx = e.clientX - p.screenX;
         const dy = e.clientY - p.screenY;
-        // Squared comparison: no sqrt on the hot path.
-        if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+        // Squared comparison: no sqrt on the hot path. The threshold is the
+        // one latched at press time for this pointer's type.
+        if (dx * dx + dy * dy < p.threshold * p.threshold) return;
         promote(p, e.clientX, e.clientY);
       }
 
@@ -3173,13 +3306,28 @@ export default function Canvas({
         });
       }
     },
-    [promote, toWorld, onMoveNode, nodeAt, cancelGesture],
+    [promote, toWorld, onMoveNode, nodeAt, cancelGesture, zoomAt],
   );
 
   /* ---------------- pointerup: click, or finish the drag ---------------- */
 
   const onSurfaceUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
+      // Multi-pointer bookkeeping first, whatever else this up means: the
+      // pen is no longer in contact (touches stop being palm-rejected), and
+      // a lifted finger leaves the touch map. Lifting either finger of a
+      // pinch ends the pinch; the surviving finger deliberately starts
+      // nothing, because its pending gesture was cancelled at pinch start
+      // and inventing a pan from its stale position would jump the view.
+      if (e.pointerType === 'pen') penDownRef.current = false;
+      if (e.pointerType === 'touch') {
+        pinchRef.current = endPointer(
+          touchesRef.current,
+          pinchRef.current,
+          e.pointerId,
+        );
+      }
+
       const p = pendingRef.current;
       if (!p || p.pointerId !== e.pointerId) return;
 
@@ -3292,6 +3440,31 @@ export default function Canvas({
     ],
   );
 
+  /* ---------------- pointercancel: the browser took the pointer ----------
+   *
+   * Fired when the OS or browser reclaims a pointer mid-gesture: digitizer-
+   * level palm rejection, an incoming system edge gesture, a pen leaving
+   * the hover range mid-press. Treated exactly like the buttons===0 guard —
+   * whatever was in flight is dropped cleanly instead of staying armed
+   * forever — plus the same multi-pointer bookkeeping as pointerup, so a
+   * cancelled finger also ends a pinch it was half of.
+   */
+  const onSurfaceCancel = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.pointerType === 'pen') penDownRef.current = false;
+      if (e.pointerType === 'touch') {
+        pinchRef.current = endPointer(
+          touchesRef.current,
+          pinchRef.current,
+          e.pointerId,
+        );
+      }
+      const p = pendingRef.current;
+      if (p && p.pointerId === e.pointerId) cancelGesture();
+    },
+    [cancelGesture],
+  );
+
   /* ---------------- marquee drag on empty background ----------------
    *
    * A plain drag on empty background pans; shift/ctrl+drag box-selects.
@@ -3318,27 +3491,6 @@ export default function Canvas({
     return () => {
       live = false;
     };
-  }, []);
-
-  /**
-   * THE zoom write. Every path that changes the scale — the wheel, the
-   * keyboard chords, the corner buttons, the 100% reset — funnels through
-   * this one function, so a single clamp and a single rounding govern all of
-   * them and no two paths can drift to different limits. The rounding (three
-   * decimals) also stops repeated in/out steps accumulating float residue
-   * that would make "100%" quietly render as 99%.
-   *
-   * `next` maps the current scale to the wanted one; (px, py) is the point
-   * in surface coords that stays pinned while the scale changes.
-   */
-  const zoomAt = useCallback((px: number, py: number, next: (k: number) => number) => {
-    setView((v) => {
-      const k = clamp(Math.round(next(v.k) * 1000) / 1000, MIN_ZOOM, MAX_ZOOM);
-      if (k === v.k) return v;
-      const wx = (px - v.x) / v.k;
-      const wy = (py - v.y) / v.k;
-      return { k, x: px - wx * k, y: py - wy * k };
-    });
   }, []);
 
   /**
@@ -4106,7 +4258,7 @@ export default function Canvas({
         onPointerDown={onSurfaceDown}
         onPointerMove={onSurfaceMove}
         onPointerUp={onSurfaceUp}
-        onPointerCancel={cancelGesture}
+        onPointerCancel={onSurfaceCancel}
         onPointerLeave={() => {
           // Paste-at-pointer must not aim at a position the pointer left.
           lastClientRef.current = null;

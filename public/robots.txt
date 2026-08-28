@@ -1,0 +1,7 @@
+# Breakscale is a single-page app with no private routes and no backend.
+# Everything here is meant to be found.
+User-agent: *
+Allow: /
+
+# Update the host once a domain is settled, then add:
+# Sitemap: https://breakscale.dev/sitemap.xml

@@ -1201,6 +1201,20 @@ h4 {
   width: 32px;
 }
 
+/* Touch-first devices: every button meets the 44px touch floor, whatever
+   size variant it declares. min-height/min-width beat the fixed height and
+   width above by CSS sizing rules (not by specificity), so this one rule
+   covers .btn, .btn-sm and .btn-icon alike without re-declaring any of
+   them. Wall displays are used at arm's length, where 44px is the floor
+   rather than the target; padding and typography are untouched, so the
+   buttons grow, they do not rescale. */
+@media (pointer: coarse) {
+  .btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
 /* Disabled. Opacity alone would drag the label under 4.5:1, so the disabled
    state is expressed with real tokens and keeps its contrast. */
 .btn:disabled {

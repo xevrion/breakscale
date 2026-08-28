@@ -245,6 +245,15 @@
   stroke-width: 1;
 }
 
+/* The invisible hit pad under the visible 18x18 button, same pattern as the
+   port discs: `fill: transparent` (never `none`) so it takes pointer events
+   while painting nothing. Scoped harder than `.cv-edge-del rect` above so it
+   wins outright rather than by source order. */
+.cv-edge-del rect.cv-edge-del-hit {
+  fill: transparent;
+  stroke: none;
+}
+
 .cv-edge-del path {
   stroke: var(--text-dim);
   stroke-width: 1.5;
@@ -1166,6 +1175,17 @@
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
+}
+
+/* On a touch-first device (smartboard, tablet) the zoom cluster is the only
+   navigation chrome, pressed at arm's length: 44px is the floor, not the
+   target. min-* rather than fixed sizes so the shared .btn styling keeps
+   governing everything else about the buttons. */
+@media (pointer: coarse) {
+  .cv-zoom .btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* --------------------------------------------------------------------------

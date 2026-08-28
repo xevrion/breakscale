@@ -10,6 +10,25 @@
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Breakscale</title>
+
+    <!-- Social preview. Without these a shared link renders as a bare URL,
+         which for a visual tool throws away the one thing most likely to make
+         somebody click it. og:image is intentionally absent until a real one
+         exists: pointing it at a missing file is worse than omitting it, since
+         a broken image is what gets cached. See TODO.md. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Breakscale" />
+    <meta property="og:title" content="Breakscale" />
+    <meta
+      property="og:description"
+      content="Build a system, load it until it breaks, and watch why. A system design simulator for learning distributed systems."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Breakscale" />
+    <meta
+      name="twitter:description"
+      content="Build a system, load it until it breaks, and watch why. A system design simulator for learning distributed systems."
+    />
   </head>
   <body>
     <div id="root"></div>
