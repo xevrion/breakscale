@@ -716,10 +716,38 @@
   }
 }
 
+/* A refused import. Same shape as the receipt, in the danger palette, and
+   wider: this one carries a sentence explaining what was wrong with the
+   file, not a two-word label. --danger on --danger-soft is the pair
+   index.css measures at AA, so the message is readable in both themes. */
+.app-toast-error {
+  max-width: min(46ch, calc(100vw - var(--sp-6)));
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  text-align: center;
+  text-wrap: balance;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-toast {
     animation: none;
   }
+}
+
+/* The file picker behind the Open button. Not display:none, because a
+   hidden input in some browsers stops accepting a programmatic click;
+   taken out of the layout and out of the tab order instead, since the
+   styled button in front of it is what a keyboard reaches. */
+.app-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 /* --------------------------------------------------------------------------

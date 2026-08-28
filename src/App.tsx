@@ -6,7 +6,13 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { AnimationEvent, CSSProperties, ReactNode } from 'react';
+import type {
+  AnimationEvent,
+  ChangeEvent,
+  CSSProperties,
+  DragEvent,
+  ReactNode,
+} from 'react';
 import type { NodeConfig, NodeKind, SimNode, SimSnapshot, Topology } from './sim/types';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
@@ -51,6 +57,8 @@ import { applyTheme } from './theme/applyTheme';
 import { usePresence } from './components/presence';
 import { SessionHistory, syncEngine } from './history';
 import type { HistoryEntry, HistorySnapshot } from './history';
+import { buildShareUrl, decodeTopology, hasShareHash } from './share';
+import { DESIGN_FILE_EXT, downloadDesign, readDesignFile } from './designFile';
 import './App.css';
 
 /* ------------------------------------------------------------------ *
@@ -359,6 +367,25 @@ function saveSession(session: Session): void {
   }
 }
 
+/**
+ * Is this tab opening a share link?
+ *
+ * Read once, synchronously, before the first render. Decoding it is
+ * asynchronous (inflating is stream-based), so the app boots on the stored
+ * session and swaps the shared design in when it arrives; this flag is what
+ * holds the session WRITE back in the meantime, so a recipient who opens
+ * someone else's link and closes the tab still has their own work waiting
+ * for them next time.
+ */
+function shareHashPresent(): boolean {
+  try {
+    return hasShareHash(window.location.hash);
+  } catch {
+    // No DOM (a test importing App), or a locked-down location object.
+    return false;
+  }
+}
+
 /** Every traffic source on the canvas. Presets routinely have several. */
 function findClients(t: Topology): SimNode[] {
   return t.nodes.filter((n) => n.kind === 'client');
@@ -386,6 +413,16 @@ export default function App() {
   // Read storage once, before the first paint, so the app never flashes a
   // preset and then swaps to the restored session.
   const [initial] = useState(loadSession);
+
+  /**
+   * "A share link is on the URL and has not been dealt with yet."
+   *
+   * While this is true the session is not written to storage. The
+   * recipient's own design stays exactly as they left it until they
+   * actually change something on the shared one, which is the whole of the
+   * read-only promise this feature makes.
+   */
+  const [sharePending, setSharePending] = useState(shareHashPresent);
 
   const [topology, setTopology] = useState<Topology>(initial.topology);
   const [rps, setRps] = useState<number>(initial.rps);
@@ -645,12 +682,16 @@ export default function App() {
   /* ---------------- persistence ---------------- */
 
   useEffect(() => {
+    // A share link is still being decoded, or has just been opened and not
+    // yet edited. Writing here would overwrite the recipient's own saved
+    // design with someone else's before they had touched anything.
+    if (sharePending) return;
     // Debounced: dragging a node or a slider must not write on every frame.
     const id = window.setTimeout(() => {
       saveSession({ topology, rps, presetId });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [topology, rps, presetId]);
+  }, [topology, rps, presetId, sharePending]);
 
   /* ---------------- undo / redo ---------------- */
 
@@ -663,7 +704,17 @@ export default function App() {
    */
   const [, setHistVersion] = useState(0);
   const [history] = useState(
-    () => new SessionHistory({ onChange: () => setHistVersion((v) => v + 1) }),
+    () =>
+      new SessionHistory({
+        onChange: () => {
+          setHistVersion((v) => v + 1);
+          // An entry landing is the definition of "the reader changed
+          // something", so it is also the moment a design opened from a
+          // share link stops being someone else's and starts being theirs.
+          // Saving resumes from here; see sharePending.
+          setSharePending((p) => (p ? false : p));
+        },
+      }),
   );
   const canUndo = history.canUndo;
   const canRedo = history.canRedo;
@@ -1489,17 +1540,24 @@ export default function App() {
    */
   const [fitNonce, setFitNonce] = useState(0);
 
-  const handleLoadPreset = useCallback(
-    (preset: Preset) => {
-      // ONE entry, captured before the load, so a student who loads an
-      // example over a half-built system can undo back to what they had.
-      history.commit('example load', snapRef.current);
-      // Deep copy: presets are module-level constants and must never be
-      // mutated by editing the loaded system.
-      const fresh = structuredClone(preset.topology);
+  /**
+   * Replace the whole design, as one history entry.
+   *
+   * Loading an example and opening a file are the same act from the
+   * student's side: the diagram they were looking at is gone and another
+   * one is in its place. They share this so they can never drift into
+   * disagreeing about what "replace" means, and in particular so an
+   * imported design is undoable on exactly the terms an example load is.
+   * The caller owns the copy it passes; this takes it as given.
+   */
+  const replaceDesign = useCallback(
+    (fresh: Topology, nextPresetId: string | null, label: string) => {
+      // ONE entry, captured before the load, so a student who replaces a
+      // half-built system can undo back to what they had.
+      history.commit(label, snapRef.current);
       setTopology(fresh);
       setRps(clientRps(fresh));
-      setPresetId(preset.id);
+      setPresetId(nextPresetId);
       setSelectedIds(new Set<string>());
       topoLiveRef.current = fresh;
       engine.setTopology(fresh);
@@ -1510,6 +1568,175 @@ export default function App() {
     },
     [engine, history, resetLostRate],
   );
+
+  const handleLoadPreset = useCallback(
+    (preset: Preset) => {
+      // Deep copy: presets are module-level constants and must never be
+      // mutated by editing the loaded system.
+      replaceDesign(structuredClone(preset.topology), preset.id, 'example load');
+    },
+    [replaceDesign],
+  );
+
+  /* ---------------- design files ----------------
+   *
+   * A share link moves a design between two browsers; a file moves it
+   * between two people, and it is the only copy that outlives the browser
+   * profile it was drawn in. Both directions live in designFile.ts; what
+   * is here is the wiring, plus the one rule that matters on the way in:
+   * a file that does not hold up says so and CHANGES NOTHING. A student
+   * who opens the wrong file must still be looking at their own work.
+   */
+
+  const [importError, setImportError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!importError) return;
+    const t = window.setTimeout(() => setImportError(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [importError]);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleExport = useCallback(() => {
+    const preset = PRESETS.find((p) => p.id === presetId);
+    downloadDesign(topology, preset?.name ?? null);
+  }, [topology, presetId]);
+
+  const importDesign = useCallback(
+    async (file: File) => {
+      const result = await readDesignFile(file);
+      if (!result.ok) {
+        setImportError(result.error);
+        return;
+      }
+      // The imported design is no longer any example, so the preset id is
+      // cleared: leaving it set would have the Examples gallery claim a
+      // file the student opened is the example it was edited from.
+      replaceDesign(result.topology, null, 'file import');
+      setImportError(null);
+      toastSeq.current += 1;
+      setToast({
+        text: result.name ? `Opened ${result.name}` : 'Opened design',
+        id: toastSeq.current,
+      });
+    },
+    [replaceDesign],
+  );
+
+  const handleImportPick = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      // Cleared so choosing the same file twice in a row fires again; a
+      // picker that silently does nothing the second time reads as broken.
+      e.target.value = '';
+      if (file) void importDesign(file);
+    },
+    [importDesign],
+  );
+
+  /**
+   * A design dropped onto the canvas.
+   *
+   * On the wrapper rather than inside the canvas: the gesture router owns
+   * `.cv-surface` and a file drop is not one of its gestures. The
+   * dragover handler exists only to call preventDefault, without which
+   * the browser navigates away from the app to render the JSON, losing
+   * whatever was on the canvas.
+   */
+  const handleFileDragOver = useCallback((e: DragEvent) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleFileDrop = useCallback(
+    (e: DragEvent) => {
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      e.preventDefault();
+      void importDesign(file);
+    },
+    [importDesign],
+  );
+
+  /* ---------------- share links ---------------- */
+
+  /**
+   * Open the design carried on the URL, INSTEAD of the stored session.
+   *
+   * Runs once. The decode is asynchronous, so the app has already painted
+   * the stored session by the time this lands; swapping here rather than
+   * blocking the first paint means a link with a mangled payload shows a
+   * working app with a sentence explaining itself, never a blank screen.
+   * The hash is left on the URL so the recipient can copy the link on to
+   * someone else, and `sharePending` stays true until they edit something,
+   * which is what keeps their own saved design intact.
+   *
+   * Anything that fails validation falls through to the ordinary startup
+   * path with the toast saying so.
+   */
+  useEffect(() => {
+    if (!sharePending) return;
+    let cancelled = false;
+    void decodeTopology(window.location.hash).then((result) => {
+      if (cancelled) return;
+      if (result.status === 'ok') {
+        setTopology(result.topology);
+        setRps(clientRps(result.topology));
+        setPresetId(null);
+        setSelectedIds(new Set<string>());
+        topoLiveRef.current = result.topology;
+        engine.setTopology(result.topology);
+        engine.reset();
+        resetLostRate();
+        setSnapshot(engine.snapshot());
+        setFitNonce((n) => n + 1);
+        toastSeq.current += 1;
+        setToast({ text: 'Opened a shared design', id: toastSeq.current });
+        return;
+      }
+      // Not ours, or ours and broken. Either way the stored session that
+      // is already on screen stays, and saving resumes.
+      setSharePending(false);
+      if (result.status === 'invalid') {
+        toastSeq.current += 1;
+        setToast({ text: result.message, id: toastSeq.current });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Once, at boot. `sharePending` is deliberately absent from the deps:
+    // the recipient's first edit clears it, and re-running this then would
+    // reload the link over the change they had just made.
+  }, [engine, resetLostRate]);
+
+  /**
+   * Copy link. Writes the whole design into the URL fragment and puts that
+   * URL on the clipboard, so the confirmation the reader gets is the same
+   * receipt undo and redo use.
+   */
+  const handleCopyLink = useCallback(() => {
+    void (async () => {
+      let text: string;
+      try {
+        text = await buildShareUrl(topology, window.location.href);
+        await navigator.clipboard.writeText(text);
+      } catch {
+        toastSeq.current += 1;
+        setToast({
+          text: 'Could not copy the link. Your browser blocked clipboard access.',
+          id: toastSeq.current,
+        });
+        return;
+      }
+      toastSeq.current += 1;
+      setToast({
+        text: 'Link copied. It carries the whole design.',
+        id: toastSeq.current,
+      });
+    })();
+  }, [topology]);
 
   const handleReset = useCallback(() => {
     engine.reset();
@@ -1911,6 +2138,65 @@ export default function App() {
           <span className="app-glossary-label">Examples</span>
         </button>
 
+        {/*
+          Save and Open, beside Examples, because all three answer the same
+          question: where does a whole diagram come from, and where does one
+          go. Save is disabled on an empty canvas, since a file holding no
+          components is a file that teaches its reader nothing. Both are also
+          in Settings, for anyone who looks there first; these are the ones a
+          student finds without going looking.
+        */}
+        <button
+          type="button"
+          className="btn app-glossary"
+          aria-label="Save design to a file"
+          title={`Save this design as a ${DESIGN_FILE_EXT} file`}
+          disabled={topology.nodes.length === 0}
+          onClick={handleExport}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 3v12" />
+            <path d="m7 10 5 5 5-5" />
+            <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+          </svg>
+          <span className="app-glossary-label">Save</span>
+        </button>
+
+        <button
+          type="button"
+          className="btn app-glossary"
+          aria-label="Open a design file"
+          title="Open a saved design, or drop one onto the canvas"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 21V9" />
+            <path d="m7 14 5-5 5 5" />
+            <path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2" />
+          </svg>
+          <span className="app-glossary-label">Open</span>
+        </button>
+
         <button
           type="button"
           className="btn app-glossary"
@@ -2058,7 +2344,18 @@ export default function App() {
             leaves a dead edge: the affordance that closed it is the
             affordance that brings it back, in the same place.
           */}
-          <div className="stage-canvas">
+          {/*
+            A design file dropped anywhere on the canvas opens it. The
+            handlers sit on this wrapper rather than inside the Canvas
+            because a file drop is not one of the pointer router's
+            gestures, and because without the dragover preventDefault the
+            browser would leave the app to display the JSON.
+          */}
+          <div
+            className="stage-canvas"
+            onDragOver={handleFileDragOver}
+            onDrop={handleFileDrop}
+          >
             <Canvas
               topology={topology}
               snapshot={snapshot}
@@ -2201,10 +2498,42 @@ export default function App() {
         </div>
       ) : null}
 
+      {/*
+        A refused import. role="alert" rather than "status" because this
+        reports a failure the student needs to notice, and it sits longer
+        than the toast does: the sentence names what was wrong with the
+        file, and there is nothing else on screen that changed to say so.
+        Nothing on the canvas moved, which is the point.
+      */}
+      {importError ? (
+        <div className="app-toast app-toast-error" role="alert">
+          {importError}
+        </div>
+      ) : null}
+
       <TooltipLayer />
       <Glossary open={glossaryOpen} onClose={closeGlossary} focusId={glossaryFocusId} />
       <Shortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {/* The real file input, kept off screen. A bare one cannot be styled,
+          so the Settings row calls click() on this. It lives beside the
+          dialogs rather than in the top bar, which no longer carries any
+          save or share control. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="app-file-input"
+        accept={`${DESIGN_FILE_EXT},application/json`}
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={handleImportPick}
+      />
+      <Settings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onExport={handleExport}
+        onImport={() => fileInputRef.current?.click()}
+        onCopyLink={handleCopyLink}
+      />
 
       <Examples
         open={examplesOpen}

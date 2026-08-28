@@ -264,3 +264,62 @@
 .st-switch[aria-checked='true'] .st-switch-thumb {
   transform: translateX(14px);
 }
+
+/* Save and share. Full-width rows rather than a row of small buttons: each
+   one is an icon, a name and a line saying what it does, which is the same
+   shape as the toggles above and means the panel reads as one list instead
+   of a list and then a button bar.
+
+   Buttons, not switches, because these are actions: they happen once when
+   pressed rather than holding a state. */
+.st-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.st-action {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2);
+  margin: calc(var(--sp-2) * -1);
+  margin-bottom: 0;
+  border: none;
+  border-radius: var(--r-btn);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.st-action:hover {
+  background: var(--surface-2);
+}
+
+.st-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Aligned to the label's cap height rather than centred on the whole row,
+   so the icon sits with the name and not between the two lines. */
+.st-action-icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--text-dim);
+}
+
+.st-action:hover .st-action-icon {
+  color: var(--accent);
+}
+
+.st-action-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}

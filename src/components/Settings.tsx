@@ -60,12 +60,54 @@ const THEMES: Array<{ value: ThemeChoice; label: string }> = [
   { value: 'system', label: 'System' },
 ];
 
+/**
+ * One 16px stroked glyph, matching the icons the top bar and the rail use.
+ * A shared component rather than five inline svgs, so the stroke weight and
+ * the sizing cannot drift row to row.
+ */
+function Glyph({ d }: { d: string }) {
+  return (
+    <svg
+      className="st-action-icon"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={d} />
+    </svg>
+  );
+}
+
 export interface SettingsProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * What to do with the design you have built.
+   *
+   * These are actions rather than preferences, which is not what a settings
+   * panel usually holds. They live here anyway because the alternative was
+   * three more buttons in a top bar that already carried nine, and a save
+   * and a share are things a reader goes looking for rather than reaches for
+   * mid-thought.
+   */
+  onExport?: () => void;
+  onImport?: () => void;
+  onCopyLink?: () => void;
 }
 
-export function Settings({ open, onClose }: SettingsProps) {
+export function Settings({
+  open,
+  onClose,
+  onExport,
+  onImport,
+  onCopyLink,
+}: SettingsProps) {
   const { mounted, closing, unmount } = usePresence(open);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const prefs = usePreferences();
@@ -175,6 +217,48 @@ export function Settings({ open, onClose }: SettingsProps) {
               </p>
             </div>
           </section>
+
+          {(onExport || onImport || onCopyLink) && (
+            <section className="st-group">
+              <h3 className="st-group-title">Your design</h3>
+              <div className="st-actions">
+                {onCopyLink && (
+                  <button type="button" className="st-action" onClick={onCopyLink}>
+                    <Glyph d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5" />
+                    <span className="st-action-text">
+                      <span className="st-row-label">Copy link</span>
+                      <span className="st-hint">
+                        Carries the design in the address itself. Nothing is uploaded
+                        and nobody needs an account.
+                      </span>
+                    </span>
+                  </button>
+                )}
+                {onExport && (
+                  <button type="button" className="st-action" onClick={onExport}>
+                    <Glyph d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                    <span className="st-action-text">
+                      <span className="st-row-label">Save to a file</span>
+                      <span className="st-hint">
+                        Downloads the whole design, notes and all.
+                      </span>
+                    </span>
+                  </button>
+                )}
+                {onImport && (
+                  <button type="button" className="st-action" onClick={onImport}>
+                    <Glyph d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                    <span className="st-action-text">
+                      <span className="st-row-label">Open a file</span>
+                      <span className="st-hint">
+                        Or drop one straight onto the canvas.
+                      </span>
+                    </span>
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
 
           <section className="st-group">
             <h3 className="st-group-title">Canvas</h3>

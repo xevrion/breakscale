@@ -1,0 +1,151 @@
+/* ==========================================================================
+   Minimap.
+
+   Sits in the canvas's top-right corner, opposite the zoom cluster, so the
+   two pieces of view chrome do not compete for the same corner. Chrome, so
+   it carries [data-chrome] and the pointer router leaves it alone.
+   ========================================================================== */
+
+.mm {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  z-index: 8;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  touch-action: none;
+  overflow: hidden;
+}
+
+/* A node is a plain mark in its kind's colour. No label, no metric, no
+   border: at this size a hairline is half the mark's width and the map
+   would read as a grid of boxes rather than as a shape. */
+.mm-node {
+  position: absolute;
+  background: var(--k-line, var(--line-2));
+  border-radius: 1px;
+}
+
+/* The viewport. An outline rather than a tint, so it never obscures the
+   marks it is meant to locate. */
+.mm-view {
+  position: absolute;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  pointer-events: none;
+}
+
+/* The same per-kind colour contract the canvas and the palette use, so a
+   node is the same colour in all three places. Only the line token is
+   needed: a 3px mark has no room for a fill and a stroke. */
+.mm-node[data-kind='client'] {
+  --k-line: var(--kind-client-line);
+}
+.mm-node[data-kind='lb'] {
+  --k-line: var(--kind-lb-line);
+}
+.mm-node[data-kind='cdn'] {
+  --k-line: var(--kind-cdn-line);
+}
+.mm-node[data-kind='edgecompute'] {
+  --k-line: var(--kind-edgecompute-line);
+}
+.mm-node[data-kind='service'] {
+  --k-line: var(--kind-service-line);
+}
+.mm-node[data-kind='worker'] {
+  --k-line: var(--kind-worker-line);
+}
+.mm-node[data-kind='queue'] {
+  --k-line: var(--kind-queue-line);
+}
+.mm-node[data-kind='retryqueue'] {
+  --k-line: var(--kind-retryqueue-line);
+}
+.mm-node[data-kind='transcoder'] {
+  --k-line: var(--kind-transcoder-line);
+}
+.mm-node[data-kind='db'] {
+  --k-line: var(--kind-db-line);
+}
+.mm-node[data-kind='cache'] {
+  --k-line: var(--kind-cache-line);
+}
+.mm-node[data-kind='writebehind'] {
+  --k-line: var(--kind-writebehind-line);
+}
+.mm-node[data-kind='replica'] {
+  --k-line: var(--kind-replica-line);
+}
+.mm-node[data-kind='shard'] {
+  --k-line: var(--kind-shard-line);
+}
+.mm-node[data-kind='objectstore'] {
+  --k-line: var(--kind-objectstore-line);
+}
+.mm-node[data-kind='searchindex'] {
+  --k-line: var(--kind-searchindex-line);
+}
+.mm-node[data-kind='timeseriesdb'] {
+  --k-line: var(--kind-timeseriesdb-line);
+}
+.mm-node[data-kind='graphdb'] {
+  --k-line: var(--kind-graphdb-line);
+}
+.mm-node[data-kind='vectordb'] {
+  --k-line: var(--kind-vectordb-line);
+}
+.mm-node[data-kind='coldstorage'] {
+  --k-line: var(--kind-coldstorage-line);
+}
+.mm-node[data-kind='streambroker'] {
+  --k-line: var(--kind-streambroker-line);
+}
+.mm-node[data-kind='pubsub'] {
+  --k-line: var(--kind-pubsub-line);
+}
+.mm-node[data-kind='websocket'] {
+  --k-line: var(--kind-websocket-line);
+}
+.mm-node[data-kind='lambda'] {
+  --k-line: var(--kind-lambda-line);
+}
+.mm-node[data-kind='cron'] {
+  --k-line: var(--kind-cron-line);
+}
+.mm-node[data-kind='ratelimiter'] {
+  --k-line: var(--kind-ratelimiter-line);
+}
+.mm-node[data-kind='loadshedder'] {
+  --k-line: var(--kind-loadshedder-line);
+}
+.mm-node[data-kind='breaker'] {
+  --k-line: var(--kind-breaker-line);
+}
+.mm-node[data-kind='bulkhead'] {
+  --k-line: var(--kind-bulkhead-line);
+}
+.mm-node[data-kind='autoscaler'] {
+  --k-line: var(--kind-autoscaler-line);
+}
+.mm-node[data-kind='region'] {
+  --k-line: var(--kind-region-line);
+}
+.mm-node[data-kind='apigateway'] {
+  --k-line: var(--kind-apigateway-line);
+}
+.mm-node[data-kind='sidecar'] {
+  --k-line: var(--kind-sidecar-line);
+}
+
+/* A small window is mostly canvas already, so the map would be taking room
+   from the thing it helps you navigate. */
+@media (max-width: 1100px), (max-height: 620px) {
+  .mm {
+    display: none;
+  }
+}
