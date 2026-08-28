@@ -15,7 +15,7 @@
 - [x] Logo + favicon
 - [x] OG image
 - [ ] README banner + screenshots
-- [ ] Seed 5-10 good-first-issues
+- [x] Seed 5-10 good-first-issues
 - [x] Enable Discussions
 - [ ] Delete TODO.md
 - [x] Flip repo public
