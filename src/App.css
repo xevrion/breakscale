@@ -364,6 +364,10 @@
      already scroll internally when they want more. 26vh capped at 260px
      keeps the diagram the dominant half of the screen at every window. */
   --strip-h: clamp(196px, 26vh, 260px);
+  /* dvh for the same reason .app uses it: on a phone the charts sheet reads
+     this, and vh would size it against a window taller than the visible
+     one. Harmless on a desktop, where the two are identical. */
+  --strip-h: clamp(196px, 26dvh, 260px);
 }
 
 /* --------------------------------------------------------------------------
@@ -1118,15 +1122,43 @@
   .app-slot-right,
   .app-slot-bottom {
     position: fixed;
+    /* A floor as well as a ceiling. --bar-clear is measured in JS, so for a
+       frame after the address bar collapses it can still describe the old
+       window; without a hard top the sheet's own height would push its top
+       edge off the screen. `top: auto` lets the height rule position it,
+       and this stops it ever starting above the header. */
     top: auto;
     bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
     left: 0;
     right: 0;
     width: auto;
     height: auto;
+    /* dvh, not vh.
+
+       vh is the TALL viewport: it ignores the mobile browser's address bar,
+       so on a real phone this cap was computed against a window ~60-100px
+       larger than the one the sheet actually lives in, and the top of the
+       sheet sat above the visible area. Chrome's device mode does not
+       simulate the collapsing toolbar, which is why it looked correct there
+       and wrong on the actual device.
+
+       vh first as the fallback for anything without dvh; dvh wins where it
+       is supported, matching what .app itself does for the same reason. */
     max-height: min(
       62vh,
       calc(100vh - var(--bar-clear) - var(--tabbar-h) - var(--sp-3))
+    );
+    max-height: min(
+      62dvh,
+      calc(100dvh - var(--bar-clear) - var(--tabbar-h) - var(--sp-3))
+    );
+    /* Belt and braces against a stale --bar-clear: whatever that says, the
+       sheet never claims more than this share of the visible window, so its
+       top edge cannot leave the screen even mid-toolbar-transition. */
+    max-height: min(
+      62dvh,
+      calc(100dvh - var(--bar-clear) - var(--tabbar-h) - var(--sp-3)),
+      calc(100dvh - var(--tabbar-h) - 96px)
     );
   }
 

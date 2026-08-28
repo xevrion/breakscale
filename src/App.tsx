@@ -667,12 +667,24 @@ export default function App() {
   useLayoutEffect(() => {
     const el = barRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => {
-      setBarH(Math.round(el.getBoundingClientRect().height));
-    });
+    const measure = () => setBarH(Math.round(el.getBoundingClientRect().height));
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setBarH(Math.round(el.getBoundingClientRect().height));
-    return () => ro.disconnect();
+    measure();
+
+    /* A phone's address bar collapsing resizes the VIEWPORT without resizing
+       the header, so the ResizeObserver above never fires while everything
+       measured against the window shifts underneath it. visualViewport is
+       the event that reports it; `resize` covers orientation changes and any
+       browser without it. */
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', measure);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      vv?.removeEventListener('resize', measure);
+      window.removeEventListener('resize', measure);
+    };
   }, []);
 
   /* On a phone a panel is a sheet over the canvas, so opening one closes the
