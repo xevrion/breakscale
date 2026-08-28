@@ -49,7 +49,7 @@
 - [x] Search box over the 33 components
 - [x] Adjustable size for the rail, the inspector and the charts strip
 - [x] A visible button to bring the diagram back on screen
-- [ ] Minimap for large diagrams
+- [x] Minimap for large diagrams (off by default, toggle in Settings)
 - [ ] Name the design + a "saved" indicator, so people know work persists
 - [ ] Canvas toggles surfaced in the inspector: snap, grid, minimap, edge labels
 - [ ] Component count by category ("3 network, 2 database")

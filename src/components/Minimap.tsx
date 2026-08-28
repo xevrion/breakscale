@@ -157,13 +157,25 @@ export const Minimap = memo(function Minimap({
           }}
         />
       ))}
+      {/* The viewport, clamped to the map's own bounds.
+
+          Zoomed out far enough, or on a small diagram, the visible area is
+          LARGER than everything there is to see, and an unclamped rectangle
+          spills past the map and out over the canvas. Clamping says the
+          honest thing instead: the whole map is on screen. */}
       <span
         className="mm-view"
         style={{
-          left: (viewWorld.x - world.x) * fit.k,
-          top: (viewWorld.y - world.y) * fit.k,
-          width: viewWorld.w * fit.k,
-          height: viewWorld.h * fit.k,
+          left: Math.max(0, (viewWorld.x - world.x) * fit.k),
+          top: Math.max(0, (viewWorld.y - world.y) * fit.k),
+          width: Math.min(
+            viewWorld.w * fit.k,
+            fit.w - Math.max(0, (viewWorld.x - world.x) * fit.k),
+          ),
+          height: Math.min(
+            viewWorld.h * fit.k,
+            fit.h - Math.max(0, (viewWorld.y - world.y) * fit.k),
+          ),
         }}
       />
     </div>

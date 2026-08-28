@@ -30,6 +30,14 @@ export interface Preferences {
   /** Snap node positions to the 8px grid while dragging. */
   snapToGrid: boolean;
   /**
+   * Show the minimap over the canvas.
+   *
+   * OFF by default. A minimap earns its space on a twenty-node company
+   * reconstruction and costs it on the three-node examples most people open
+   * first, so it is offered rather than assumed.
+   */
+  minimap: boolean;
+  /**
    * Colour theme.
    *
    * Three states rather than a boolean, because "follow the system" is a real
@@ -50,6 +58,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   tooltips: false,
   sparklines: true,
   snapToGrid: true,
+  minimap: false,
   // Follow the OS until told otherwise. Picking light as the default would
   // flash a bright page at someone whose machine is set to dark.
   theme: 'system',
@@ -78,6 +87,7 @@ function load(): Preferences {
       tooltips: bool(p.tooltips, DEFAULT_PREFERENCES.tooltips),
       sparklines: bool(p.sparklines, DEFAULT_PREFERENCES.sparklines),
       snapToGrid: bool(p.snapToGrid, DEFAULT_PREFERENCES.snapToGrid),
+      minimap: bool(p.minimap, DEFAULT_PREFERENCES.minimap),
       theme: theme(p.theme),
     };
   } catch {

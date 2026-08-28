@@ -52,6 +52,11 @@ const TOGGLES: ToggleRow[] = [
     label: 'Snap to the grid',
     hint: 'Keep components aligned while dragging. Hold Ctrl to bypass it.',
   },
+  {
+    key: 'minimap',
+    label: 'Minimap',
+    hint: 'A small map of the whole diagram, for finding your way around a big one.',
+  },
 ];
 
 const THEMES: Array<{ value: ThemeChoice; label: string }> = [

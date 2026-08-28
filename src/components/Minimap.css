@@ -8,7 +8,10 @@
 
 .mm {
   position: absolute;
-  top: var(--sp-3);
+  /* Below the floating islands, like every other piece of canvas chrome.
+     The menu island sits at the top right, which is exactly where a map
+     placed at sp-3 would land. */
+  top: var(--bar-clear, 84px);
   right: var(--sp-3);
   z-index: 8;
   background: var(--surface);

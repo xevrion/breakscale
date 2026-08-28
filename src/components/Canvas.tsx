@@ -89,6 +89,8 @@ import {
   isSection,
 } from '../sim/annotations';
 import type { Annotation, AnnotationFont, Note, Section } from '../sim/annotations';
+import { usePreference } from '../content/preferences';
+import { Minimap } from './Minimap';
 import { serialiseSvg } from '../imageExport';
 import './Canvas.css';
 
@@ -3284,6 +3286,40 @@ export default function Canvas({
   const penDownRef = useRef(false);
 
   const [view, setView] = useState<Viewport>({ x: 0, y: 0, k: 1 });
+
+  /* Read here rather than threaded down as a prop. usePreference subscribes
+     to one primitive through useSyncExternalStore, so this component
+     re-renders only when THIS flag changes, and the shell does not gain a
+     prop it would only be passing through. */
+  const showMinimap = usePreference('minimap');
+
+  /**
+   * The surface's size in screen px, for the minimap's viewport rectangle.
+   *
+   * State rather than a measurement taken at paint, because the rectangle
+   * has to move when the WINDOW resizes as well as when the camera does, and
+   * nothing else re-renders on a resize. Only tracked while the minimap is
+   * on: a ResizeObserver running for a feature nobody enabled is a cost paid
+   * by every reader for one who is not there.
+   */
+  const [surfaceSize, setSurfaceSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    if (!showMinimap) return;
+    const el = surfaceRef.current;
+    if (!el) return;
+    // Measured off the element rather than read from the entry's
+    // contentRect: the map is switched on long after mount, and the first
+    // callback can carry a zero rect, which collapsed the viewport
+    // rectangle to nothing and left it that way until the window resized.
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      setSurfaceSize({ width: r.width, height: r.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [showMinimap]);
   /**
    * Mirror of `view` for use inside pointer handlers. Keeping the live value
    * in a ref lets `toWorld` stay identity-stable, so the memoized node and
@@ -6110,6 +6146,27 @@ export default function Canvas({
             />
           </div>
         </div>
+      )}
+
+      {showMinimap && (
+        <Minimap
+          nodes={topology.nodes}
+          view={view}
+          surface={surfaceSize}
+          onGoTo={(wx, wy) => {
+            // Centre the VISIBLE area on the point, not the whole surface:
+            // with a rail open, centring the surface parks the target under
+            // the panel the reader is looking past.
+            const rects = visibleRect();
+            if (!rects) return;
+            const { surface, view: vis } = rects;
+            setView((v) => ({
+              ...v,
+              x: vis.left - surface.left + vis.width / 2 - wx * v.k,
+              y: vis.top - surface.top + vis.height / 2 - wy * v.k,
+            }));
+          }}
+        />
       )}
 
       <div className="cv-zoom" data-chrome="zoom">

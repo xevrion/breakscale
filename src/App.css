@@ -517,8 +517,15 @@
   bottom: calc(var(--strip-h) + var(--sp-3) * 2 + 32px + var(--sp-3));
 }
 
-.app-body.has-inspector .cv-zoom {
+.app-body.has-inspector .cv-zoom,
+.app-body.has-inspector .mm {
   right: calc(var(--ins-w) + var(--sp-3) * 2);
+}
+
+/* The inspector toggle sits at the top right of the canvas, so the map drops
+   below it rather than starting level with it. */
+.app-body .mm {
+  top: calc(var(--bar-clear) + 32px + var(--sp-2));
 }
 
 .cv-ledger,
