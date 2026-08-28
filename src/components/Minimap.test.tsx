@@ -33,13 +33,17 @@ function viewWorld(
 
 /** The clamped rectangle, in map px. */
 function viewportRect(world: Box, fit: { k: number; w: number; h: number }, v: Box) {
-  const left = Math.max(0, (v.x - world.x) * fit.k);
-  const top = Math.max(0, (v.y - world.y) * fit.k);
+  const x0 = (v.x - world.x) * fit.k;
+  const y0 = (v.y - world.y) * fit.k;
+  const left = Math.min(Math.max(0, x0), fit.w);
+  const top = Math.min(Math.max(0, y0), fit.h);
+  const right = Math.min(Math.max(0, x0 + v.w * fit.k), fit.w);
+  const bottom = Math.min(Math.max(0, y0 + v.h * fit.k), fit.h);
   return {
     left,
     top,
-    width: Math.min(v.w * fit.k, fit.w - left),
-    height: Math.min(v.h * fit.k, fit.h - top),
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
   };
 }
 
@@ -88,6 +92,32 @@ describe('minimap viewport', () => {
       viewWorld({ x: 0, y: 0, k: 4 }, { width: 1000, height: 500 }),
     );
     expect(close.width).toBeLessThan(wide.width);
+  });
+
+  it('shrinks as the camera pans off the content, rather than sticking', () => {
+    // The bug this replaced: clamping only the near edge pinned the box at
+    // the top left and left it the same size, so a camera sitting on the
+    // corner and one a mile past it looked identical.
+    const onEdge = viewportRect(
+      world,
+      fit,
+      viewWorld({ x: 0, y: 0, k: 1 }, { width: 400, height: 200 }),
+    );
+    const wayOff = viewportRect(
+      world,
+      fit,
+      viewWorld({ x: 900, y: 400, k: 1 }, { width: 400, height: 200 }),
+    );
+    expect(wayOff.width).toBeLessThan(onEdge.width);
+  });
+
+  it('disappears entirely when the camera is nowhere near the content', () => {
+    const gone = viewportRect(
+      world,
+      fit,
+      viewWorld({ x: 9000, y: 9000, k: 1 }, { width: 400, height: 200 }),
+    );
+    expect(gone.width).toBe(0);
   });
 
   it('collapses to nothing before the surface has been measured', () => {

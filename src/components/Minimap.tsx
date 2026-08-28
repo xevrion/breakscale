@@ -165,18 +165,28 @@ export const Minimap = memo(function Minimap({
           honest thing instead: the whole map is on screen. */}
       <span
         className="mm-view"
-        style={{
-          left: Math.max(0, (viewWorld.x - world.x) * fit.k),
-          top: Math.max(0, (viewWorld.y - world.y) * fit.k),
-          width: Math.min(
-            viewWorld.w * fit.k,
-            fit.w - Math.max(0, (viewWorld.x - world.x) * fit.k),
-          ),
-          height: Math.min(
-            viewWorld.h * fit.k,
-            fit.h - Math.max(0, (viewWorld.y - world.y) * fit.k),
-          ),
-        }}
+        style={(() => {
+          // Clamp BOTH edges, not just the near one.
+          //
+          // Pinning left at zero without also pulling the far edge in made
+          // the rectangle look identical whether the camera sat exactly on
+          // the content's corner or a mile off past it: it stuck to the top
+          // left and stopped reporting. Clamping the pair means panning away
+          // visibly shrinks the box until it disappears, which is the honest
+          // reading of "you are looking at nothing".
+          const x0 = (viewWorld.x - world.x) * fit.k;
+          const y0 = (viewWorld.y - world.y) * fit.k;
+          const left = Math.min(Math.max(0, x0), fit.w);
+          const top = Math.min(Math.max(0, y0), fit.h);
+          const right = Math.min(Math.max(0, x0 + viewWorld.w * fit.k), fit.w);
+          const bottom = Math.min(Math.max(0, y0 + viewWorld.h * fit.k), fit.h);
+          return {
+            left,
+            top,
+            width: Math.max(0, right - left),
+            height: Math.max(0, bottom - top),
+          };
+        })()}
       />
     </div>
   );
