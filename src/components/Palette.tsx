@@ -1,5 +1,5 @@
-import { createElement, useCallback, useMemo } from 'react';
-import type { DragEvent, KeyboardEvent } from 'react';
+import { createElement, useCallback, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
 import type { NodeKind } from '../sim/types';
 import {
   ICON_BOX,
@@ -199,6 +199,27 @@ const ANN_ROWS: {
   },
 ];
 
+/**
+ * Does `kind` match the typed query?
+ *
+ * Matches the display name, the one-line hint and the group title, so
+ * "melting" finds the Control group's contents and "stale" finds read
+ * replicas. Searching only the names would fail exactly the student this
+ * is for: someone who knows the problem they have but not what the
+ * component is called.
+ *
+ * Substring rather than fuzzy. A 33-item list is small enough that a
+ * substring match is predictable, and predictability beats cleverness when
+ * the result is "the thing you wanted is not on screen".
+ */
+function matchesKind(kind: NodeKind, group: KindGroup, needle: string): boolean {
+  return (
+    KIND_NAME[kind].toLowerCase().includes(needle) ||
+    KIND_HINT[kind].toLowerCase().includes(needle) ||
+    group.title.toLowerCase().includes(needle)
+  );
+}
+
 export interface PaletteProps {
   /** Add a node of `kind` to the canvas at a default position. */
   onAdd: (kind: NodeKind) => void;
@@ -235,6 +256,45 @@ export function Palette({ onAdd, onAddAnnotation }: PaletteProps) {
     [],
   );
 
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const needle = query.trim().toLowerCase();
+
+  /**
+   * The groups with non-matching kinds removed, and empty groups dropped.
+   *
+   * Filtering rather than reordering keeps the taxonomy intact while
+   * searching: a student who typed "cache" and sees it under Data has
+   * learned where to find it next time without the search box.
+   */
+  const groups = useMemo(() => {
+    if (!needle) return KIND_GROUPS;
+    return KIND_GROUPS.map((g) => ({
+      ...g,
+      kinds: g.kinds.filter((k) => matchesKind(k, g, needle)),
+    })).filter((g) => g.kinds.length > 0);
+  }, [needle]);
+
+  const matchCount = useMemo(
+    () => groups.reduce((n, g) => n + g.kinds.length, 0),
+    [groups],
+  );
+
+  const onSearchChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setQuery(e.target.value);
+  }, []);
+
+  /** Escape clears the box, then gives it up. The usual contract for search. */
+  const onSearchKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    setQuery((q) => {
+      if (q) return '';
+      searchRef.current?.blur();
+      return q;
+    });
+  }, []);
+
   /**
    * Enter and Space both activate a row. A <button> already does this,
    * but the row is also draggable, and Firefox drops the implicit Space
@@ -264,9 +324,87 @@ export function Palette({ onAdd, onAddAnnotation }: PaletteProps) {
             disclosure in a 224px rail is a filing cabinet, not a tool. */}
         <div className="pal-section">
           <p className="label pal-heading">
-            Components <span className="pal-heading-count">{totalKinds}</span>
+            Components{' '}
+            <span className="pal-heading-count">
+              {needle ? `${matchCount} of ${totalKinds}` : totalKinds}
+            </span>
           </p>
-          {KIND_GROUPS.map((group) => (
+
+          {/* Thirty-three rows is more than a person scans, and the rail had
+              no way to ask for one by name. A plain text input rather than a
+              combobox: it filters a list that stays visible and keeps its
+              grouping, so there is no popup, no active-descendant and nothing
+              to announce beyond the count, which the live region below does. */}
+          <div className="pal-search">
+            <svg
+              className="pal-search-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.2-3.2" />
+            </svg>
+            <input
+              ref={searchRef}
+              type="search"
+              className="pal-search-input"
+              placeholder="Search components"
+              aria-label="Search components"
+              value={query}
+              onChange={onSearchChange}
+              onKeyDown={onSearchKeyDown}
+            />
+            {query && (
+              <button
+                type="button"
+                className="pal-search-clear"
+                aria-label="Clear search"
+                onClick={() => {
+                  setQuery('');
+                  searchRef.current?.focus();
+                }}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* The count is announced, not just shown: a filter that silently
+              empties the list leaves a screen reader user with no idea it
+              did anything. */}
+          <p className="sr-only" role="status">
+            {needle
+              ? `${matchCount} of ${totalKinds} components match ${query.trim()}`
+              : ''}
+          </p>
+
+          {needle && matchCount === 0 && (
+            <p className="pal-empty">
+              Nothing matches {'\u201c'}
+              {query.trim()}
+              {'\u201d'}. Searching what a component does works too, like {'\u201c'}
+              stale{'\u201d'} or {'\u201c'}refuse{'\u201d'}.
+            </p>
+          )}
+
+          {groups.map((group) => (
             <div className="pal-group" key={group.id}>
               <p className="label pal-group-title">{group.title}</p>
               <ul className="pal-list">

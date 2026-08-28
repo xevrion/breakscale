@@ -2,9 +2,9 @@
 
 ## Now
 
-- [ ] Annotate the 23 examples with sections and notes (see HANDOFF)
+- [x] Annotate the 23 examples with sections and notes
 - [x] Pen / touch / smartboard input
-- [x] Canvas notes and sections (built; NOT yet used by any example)
+- [x] Canvas notes and sections (built, and used by all 23 examples)
 
 ## Before going public
 
@@ -41,7 +41,9 @@
 
 ## UI ideas (from a competitor's build, worth taking)
 
-- [ ] Search box over the 33 components
+- [x] Search box over the 33 components
+- [ ] Adjustable size for the rail, the inspector and the charts strip
+      (drag the edge to resize; remember it)
 - [ ] Minimap for large diagrams
 - [ ] Name the design + a "saved" indicator, so people know work persists
 - [ ] Canvas toggles surfaced in the inspector: snap, grid, minimap, edge labels

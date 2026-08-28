@@ -171,6 +171,93 @@
   color: var(--text-faint);
 }
 
+/* --------------------------------------------------------------------------
+   Search.
+
+   Sits under the heading rather than above it, so the rail still opens with
+   its own name. The field is the full width of the rail minus its padding;
+   at 224px there is no room for anything beside it.
+   -------------------------------------------------------------------------- */
+
+.pal-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 var(--sp-4) var(--sp-2);
+}
+
+.pal-search-icon {
+  position: absolute;
+  left: var(--sp-2);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.pal-search-input {
+  width: 100%;
+  height: 30px;
+  /* Room for the icon on the left and the clear button on the right, so
+     neither can ever sit on top of the text. */
+  padding: 0 26px 0 calc(var(--sp-2) + 14px + var(--sp-2));
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-btn);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.pal-search-input::placeholder {
+  color: var(--text-faint);
+}
+
+.pal-search-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+/* The type=search decorations differ per browser and none of them match
+   this control, so they are removed and replaced by the button below. */
+.pal-search-input::-webkit-search-decoration,
+.pal-search-input::-webkit-search-cancel-button,
+.pal-search-input::-webkit-search-results-button {
+  appearance: none;
+}
+
+.pal-search-clear {
+  position: absolute;
+  right: var(--sp-1);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.pal-search-clear:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.pal-search-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.pal-empty {
+  padding: var(--sp-2) var(--sp-4) var(--sp-4);
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
 .pal-group-title {
   padding: var(--sp-2) var(--sp-4) var(--sp-1) calc(var(--sp-4) + 22px + var(--sp-3));
   color: var(--text-faint);
