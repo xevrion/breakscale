@@ -1,0 +1,40 @@
+# Breakscale
+
+> A discrete-event system design simulator for learning how distributed systems
+> behave under load. Build a topology, push traffic through it, and watch real
+> queueing behaviour: latency percentiles, queue backlogs, and failure cascades.
+
+Everything runs in the browser. No account, no backend, nothing leaves the page.
+
+## What it is for
+
+Most system design material is static diagrams and rules of thumb. Breakscale
+runs the experiment instead. Load an example, drag the traffic up, and watch a
+system fail in the specific way that example is about.
+
+## What makes the numbers trustworthy
+
+- Requests are real objects moving through the topology, occupying finite
+  server slots and waiting in real FIFO queues.
+- Latency percentiles come from measured request latencies, never from a mean
+  multiplied by a constant.
+- Abandoned work still burns capacity: when a caller times out, the downstream
+  keeps working on a request nobody is waiting for. That is why retry storms
+  are visible here rather than theoretical.
+- The simulation is deterministic. The same seed and topology replay exactly.
+
+## What is in it
+
+- 33 components: load balancers, caches, databases, queues, workers, CDNs,
+  rate limiters, circuit breakers, read replicas, sharded stores, autoscalers,
+  stream brokers, WebSocket gateways, serverless functions, bulkheads and more.
+- 23 worked examples, each isolating one failure mode, including reconstructions
+  of Netflix, Spotify, Discord, Uber, Twitter/X, Stripe and WhatsApp.
+- Chaos controls: crash a component, slow it, force errors, or cut a link.
+- A 100-term glossary explaining every metric and what it means in practice.
+
+## Links
+
+- App: https://breakscale.vercel.app/
+- Source: https://github.com/xevrion/breakscale
+- Licence: MIT

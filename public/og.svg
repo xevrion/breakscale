@@ -1,0 +1,81 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 1200 630"
+  width="1200"
+  height="630"
+  role="img"
+  aria-label="Breakscale: build a system, load it until it breaks, and watch why"
+>
+  <title>Breakscale</title>
+
+  <!--
+    Social card. 1200x630 is the size every scraper crops to, so nothing
+    important goes within 60px of an edge.
+
+    Same palette as the app so the card and the product look like one thing:
+    warm paper ground, the escalation colours on the bars, ink for the words.
+    No screenshot, deliberately, because a screenshot of a dense simulator
+    scaled to a timeline thumbnail is illegible; the mark plus one sentence
+    survives the crop.
+  -->
+  <rect width="1200" height="630" fill="#faf7f3" />
+
+  <!-- The faint grid the canvas itself uses, so the card reads as the app. -->
+  <g stroke="#efe9e1" stroke-width="1">
+    <path d="M0 90.5h1200M0 180.5h1200M0 270.5h1200M0 360.5h1200M0 450.5h1200M0 540.5h1200" />
+    <path
+      d="M90.5 0v630M180.5 0v630M270.5 0v630M360.5 0v630M450.5 0v630M540.5 0v630M630.5 0v630M720.5 0v630M810.5 0v630M900.5 0v630M990.5 0v630M1080.5 0v630"
+    />
+  </g>
+
+  <!-- The mark, scaled up from the favicon. -->
+  <g transform="translate(96, 150) scale(3.2)">
+    <rect x="3" y="20" width="5" height="9" rx="1.2" fill="#187a3b" />
+    <rect x="10.5" y="14" width="5" height="15" rx="1.2" fill="#187a3b" />
+    <rect x="18" y="8" width="5" height="21" rx="1.2" fill="#945500" />
+    <rect x="25.5" y="22" width="5" height="7" rx="1.2" fill="#c52b30" />
+    <rect
+      x="24.9"
+      y="4.2"
+      width="5"
+      height="11"
+      rx="1.2"
+      fill="#c52b30"
+      transform="rotate(24 27.4 9.7)"
+    />
+  </g>
+
+  <text
+    x="96"
+    y="360"
+    font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-size="86"
+    font-weight="600"
+    fill="#1e242e"
+    letter-spacing="-2"
+  >
+    Breakscale
+  </text>
+
+  <text
+    x="96"
+    y="424"
+    font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-size="34"
+    font-weight="400"
+    fill="#525862"
+  >
+    Build a system, load it until it breaks, and watch why.
+  </text>
+
+  <text
+    x="96"
+    y="510"
+    font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace"
+    font-size="24"
+    fill="#646972"
+    letter-spacing="1"
+  >
+    33 components · 23 worked examples · real discrete-event simulation
+  </text>
+</svg>

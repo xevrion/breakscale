@@ -9,8 +9,8 @@
 
 - [x] Deploy (breakscale.vercel.app)
 - [ ] Custom domain (breakscale.dev?)
-- [ ] Logo + favicon
-- [ ] OG image (tags done, image missing)
+- [x] Logo + favicon
+- [x] OG image
 - [ ] README banner + screenshots
 - [ ] Seed 5-10 good-first-issues
 - [x] Enable Discussions
@@ -23,10 +23,10 @@
 - [x] robots.txt
 - [x] sitemap.xml
 - [x] canonical + og:url
-- [ ] JSON-LD: SoftwareApplication, LearningResource
+- [x] JSON-LD: SoftwareApplication, LearningResource
 - [ ] Glossary as crawlable HTML, not locked in the bundle
 - [ ] Per-example pages
-- [ ] llms.txt
+- [x] llms.txt
 
 ## Save / share (excalidraw parity)
 

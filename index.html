@@ -13,9 +13,7 @@
 
     <!-- Social preview. Without these a shared link renders as a bare URL,
          which for a visual tool throws away the one thing most likely to make
-         somebody click it. og:image is intentionally absent until a real one
-         exists: pointing it at a missing file is worse than omitting it, since
-         a broken image is what gets cached. See TODO.md. -->
+         somebody click it. -->
     <link rel="canonical" href="https://breakscale.vercel.app/" />
     <meta property="og:url" content="https://breakscale.vercel.app/" />
     <meta property="og:type" content="website" />
@@ -25,12 +23,63 @@
       property="og:description"
       content="Build a system, load it until it breaks, and watch why. A system design simulator for learning distributed systems."
     />
+    <meta property="og:image" content="https://breakscale.vercel.app/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Breakscale: bars rising until the last one breaks."
+    />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://breakscale.vercel.app/og.png" />
     <meta name="twitter:title" content="Breakscale" />
     <meta
       name="twitter:description"
       content="Build a system, load it until it breaks, and watch why. A system design simulator for learning distributed systems."
     />
+
+    <!--
+      Structured data. SoftwareApplication is what a search engine expects for
+      a tool; LearningResource is what actually describes this one, and almost
+      nothing in the system design space claims it. Both are declared because
+      the two answer different questions: "what is this" and "who is it for".
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "SoftwareApplication",
+            "name": "Breakscale",
+            "url": "https://breakscale.vercel.app/",
+            "applicationCategory": "EducationalApplication",
+            "operatingSystem": "Any browser",
+            "description": "A discrete-event system design simulator. Build a topology, push traffic through it, and watch latency percentiles, queue backlogs and failure cascades respond in real time.",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "license": "https://opensource.org/licenses/MIT",
+            "isAccessibleForFree": true
+          },
+          {
+            "@type": "LearningResource",
+            "name": "Breakscale",
+            "url": "https://breakscale.vercel.app/",
+            "learningResourceType": "simulation",
+            "educationalLevel": "undergraduate",
+            "teaches": [
+              "distributed systems",
+              "queueing theory",
+              "latency percentiles",
+              "load balancing",
+              "caching",
+              "circuit breakers",
+              "sharding",
+              "autoscaling"
+            ],
+            "isAccessibleForFree": true
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
