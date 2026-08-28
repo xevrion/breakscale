@@ -295,7 +295,20 @@ const MINIMAL_ZOOM = 0.5;
  * suppressed, presenting the flagship preset as a row of empty boxes. The
  * floor and the legibility threshold are the same number by definition:
  * never auto-fit to a zoom at which the diagram stops showing its data. */
-const FIT_MARGIN = 64;
+/* The auto-fit margin, in CSS px of the visible rect.
+ *
+ * 64 is generous on a desktop and expensive on a phone: it spends 128 of a
+ * 390px width on air, which is a third of the screen, and the fit clamps at
+ * FIT_MIN anyway so that air buys nothing. A narrow viewport gets a tighter
+ * frame; the diagram still has room to breathe, and more of it lands on
+ * screen before the reader has to pan. */
+const FIT_MARGIN_WIDE = 64;
+const FIT_MARGIN_NARROW = 24;
+const NARROW_FIT_WIDTH = 720;
+
+function fitMarginFor(viewWidth: number): number {
+  return viewWidth <= NARROW_FIT_WIDTH ? FIT_MARGIN_NARROW : FIT_MARGIN_WIDE;
+}
 const FIT_MIN = DETAIL_ZOOM;
 const FIT_MAX = 1.5;
 
@@ -5130,12 +5143,10 @@ export default function Canvas({
       }
       const bw = Math.max(1, maxX - minX);
       const bh = Math.max(1, maxY - minY);
+      const margin = fitMarginFor(vr.width);
       const k = clamp(
         Math.round(
-          Math.min(
-            (vr.width - FIT_MARGIN * 2) / bw,
-            (vr.height - FIT_MARGIN * 2) / bh,
-          ) * 1000,
+          Math.min((vr.width - margin * 2) / bw, (vr.height - margin * 2) / bh) * 1000,
         ) / 1000,
         FIT_MIN,
         FIT_MAX,

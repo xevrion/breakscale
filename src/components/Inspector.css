@@ -788,6 +788,43 @@
    query cannot match the container it measures against). Purely spacing,
    so a coarse viewport step is honest here: by 1000px every bar
    configuration has this control tight for room. */
+/* --------------------------------------------------------------------------
+   Phone.
+
+   The bar gives this control its own full-width row, so the pieces that were
+   competing for space on a desktop can all be shown; what changes is that
+   they must be allowed to SHRINK. `.traffic-headline` is flex: none, which
+   is right on a desktop where it must not be squeezed by a growing slider,
+   and wrong here: at 390px it pushed p99 five pixels past the island and the
+   number was clipped mid-glyph.
+
+   The spacer goes entirely. Its job is to hold the cause and the effect
+   apart on a wide bar; on a phone row that space is the thing in shortest
+   supply, and the gap between them is enough separation.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .traffic {
+    gap: var(--sp-3);
+  }
+
+  .traffic-spacer {
+    display: none;
+  }
+
+  .traffic-headline {
+    flex: 0 1 auto;
+    gap: var(--sp-4);
+  }
+
+  /* The slider is what a thumb reaches for, so it keeps the room it needs
+     and the readouts take what is left. */
+  .traffic-load {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
 @media (max-width: 1000px) {
   .traffic {
     gap: var(--sp-4);

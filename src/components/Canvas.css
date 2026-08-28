@@ -2011,3 +2011,41 @@
   line-height: 1;
   outline: none;
 }
+
+/* --------------------------------------------------------------------------
+   Phone.
+
+   Two pieces of canvas chrome stop making sense at this width. The idle hint
+   teaches mouse gestures, "Scroll to pan", "Ctrl+scroll to zoom",
+   "Shift+drag to select", none of which a finger can perform; it is also
+   nowrap and 425px wide, so on a 390px screen it ran off both edges at once.
+   Touch has its own vocabulary and the canvas already implements it, so the
+   honest move is to say nothing rather than to say the wrong thing.
+
+   The ledger keeps its counts but drops the elapsed clock: three facts do
+   not fit, and how long the simulation has run is the one a reader can also
+   get from watching it.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .cv-hint-idle {
+    display: none;
+  }
+
+  .cv-ledger {
+    gap: var(--sp-3);
+  }
+
+  .cv-ledger-time {
+    display: none;
+  }
+}
+
+/* A coarse pointer means the mouse hints are wrong whatever the window size:
+   a tablet in landscape is past the width breakpoint and still has no
+   scroll wheel. */
+@media (pointer: coarse) {
+  .cv-hint-idle {
+    display: none;
+  }
+}
