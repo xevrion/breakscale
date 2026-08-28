@@ -26,6 +26,11 @@
 - [x] canonical + og:url
 - [x] JSON-LD: SoftwareApplication, LearningResource
 - [ ] Glossary as crawlable HTML, not locked in the bundle
+- [ ] Run the SEO / AEO skills (/seo-audit, /seo-geo, /seo-schema) for a full
+      pass. AFTER the custom art lands, not before: the audit checks the OG
+      image, favicon and logo, so running it against the code-drawn
+      placeholders would just generate findings that the real assets fix.
+- [ ] Replace the generated art with custom OG image, favicon and logo
 - [ ] Per-example pages
 - [x] llms.txt
 

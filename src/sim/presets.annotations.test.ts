@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { PRESETS } from './presets';
+import { Engine } from './engine';
 import { isNote, isSection } from './annotations';
 import type { Annotation, Note, Section } from './annotations';
 import { layoutNote } from '../components/annotationLayout';
@@ -209,6 +210,30 @@ describe.each(annotated)('preset %s annotations', (_id, preset, annotations) => 
       const text = a.kind === 'note' ? a.text : a.label;
       expect(text.includes('—'), `${a.id} uses an em dash`).toBe(false);
       expect(text.trim(), `${a.id} is blank`).not.toBe('');
+    }
+  });
+});
+
+describe('annotations are inert', () => {
+  it('produces byte-identical snapshots with and without them', () => {
+    // The engine must never read an annotation. This is the assertion that
+    // makes "adding a note cannot change a number" a fact rather than a
+    // claim: same seed, same topology, one with its annotations stripped,
+    // and the two snapshots compared in full.
+    for (const preset of PRESETS) {
+      const withAnns = structuredClone(preset.topology);
+      const without = structuredClone(preset.topology);
+      delete (without as { annotations?: unknown }).annotations;
+
+      const a = new Engine(withAnns, 42);
+      const b = new Engine(without, 42);
+      for (let i = 0; i < 200; i += 1) {
+        a.advance(16);
+        b.advance(16);
+      }
+      expect(JSON.stringify(a.snapshot()), preset.id).toBe(
+        JSON.stringify(b.snapshot()),
+      );
     }
   });
 });
