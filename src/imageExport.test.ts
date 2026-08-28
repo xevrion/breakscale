@@ -66,6 +66,27 @@ describe('serialiseSvg', () => {
     expect(out).not.toContain('cv-ann-sel');
   });
 
+  it('carries fill:none, so a stroked path is not filled black', () => {
+    // SVG fills a path black unless told otherwise. Treating `none` as a
+    // droppable default turned every sparkline in the export into a solid
+    // black blob, which is what this exists to stop happening again.
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', 'M0 0 L10 10');
+    path.style.fill = 'none';
+    path.style.stroke = 'rgb(1, 2, 3)';
+    svg.appendChild(path);
+    document.body.appendChild(svg);
+    const out = serialiseSvg(svg, bounds, '#fff');
+    // jsdom reports `fill: none` as `rgba(0, 0, 0, 0)` where a browser says
+    // `none`, so the assertion is on the INTENT: whatever spelling arrives,
+    // a fill declaration must be carried and it must not be opaque black.
+    const decl = /<path[^>]*style="([^"]*)"/.exec(out)?.[1] ?? '';
+    expect(decl).toMatch(/fill:/);
+    expect(decl).not.toMatch(/fill:\s*(rgb\(0,\s*0,\s*0\)|#000|black)\s*;/);
+  });
+
   it('leaves the live element untouched', () => {
     // It clones. Mutating the real canvas to export it would move the
     // reader's view out from under them.

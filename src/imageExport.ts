@@ -37,7 +37,20 @@ const CARRIED = [
   'letter-spacing',
   'color',
   'visibility',
+  // Node labels are set in small caps by a text-transform, so leaving it out
+  // exported "sent" and "p99" where the canvas reads "SENT" and "P99". The
+  // SVG carries the original casing in its text node, so the transform is
+  // the only thing making them agree.
+  'text-transform',
+  // The dotted edge is a dash pattern on a marker-tipped line; without the
+  // marker properties the arrowheads vanish.
+  'marker-start',
+  'marker-mid',
+  'marker-end',
 ] as const;
+
+/** Properties where `none` is a real instruction, not an inert default. */
+const NONE_MATTERS = new Set<string>(['fill', 'stroke', 'text-transform']);
 
 export interface ExportBounds {
   x: number;
@@ -59,9 +72,16 @@ function inlineStyles(src: Element, dst: Element): void {
   let decl = '';
   for (const prop of CARRIED) {
     const v = cs.getPropertyValue(prop);
-    // `none` and empty are the defaults for most of these; writing them adds
-    // bytes without changing the picture.
-    if (!v || v === 'none' || v === 'normal' || v === 'auto') continue;
+    if (!v) continue;
+    // `fill: none` and `stroke: none` are NOT defaults worth dropping: SVG
+    // fills a path black unless told otherwise, so skipping them turned
+    // every sparkline into a solid black blob. Only the genuinely inert
+    // keywords are skipped.
+    if (v === 'normal' || v === 'auto') continue;
+    // `none` is meaningful for these: SVG fills a path black without
+    // `fill: none`, and a child that resets `text-transform: none` needs to
+    // say so or it inherits its parent's uppercase.
+    if (v === 'none' && !NONE_MATTERS.has(prop)) continue;
     decl += `${prop}:${v};`;
   }
   if (decl) dst.setAttribute('style', decl);
@@ -106,6 +126,19 @@ export function serialiseSvg(
   const h = bounds.height + padding * 2;
 
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  // Pin the theme the picture was taken in.
+  //
+  // Every colour above is already a resolved rgb() value, but the file also
+  // carries class names, and anything that reaches a stylesheet on the far
+  // side (a preview pane, a viewer with its own CSS, this app re-opening it)
+  // would resolve those against the READER's theme instead. Stating the
+  // theme on the root means a diagram exported in light stays light wherever
+  // it is opened, which is the whole point of exporting a picture.
+  clone.setAttribute(
+    'data-theme',
+    document.documentElement.getAttribute('data-theme') ??
+      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+  );
   clone.setAttribute('viewBox', `${x} ${y} ${w} ${h}`);
   clone.setAttribute('width', String(Math.round(w)));
   clone.setAttribute('height', String(Math.round(h)));

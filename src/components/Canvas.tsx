@@ -3448,11 +3448,19 @@ export default function Canvas({
       // Annotations sit outside the node bounds by design, so a frame drawn
       // from the nodes alone would crop the notes explaining them.
       for (const a of topoRef.current.annotations ?? []) {
-        const w = isSection(a) ? a.width : a.width;
-        const h = isSection(a) ? a.height : 0;
+        // A note's height is derived from its wrapped text, so it has to be
+        // laid out to be measured. Taking zero here cropped every note that
+        // ran past the lowest node, which is most of them.
+        const h = isSection(a)
+          ? a.height
+          : layoutNote(a.text, a.width, a.size, a.font, a.bold, a.italic, a.scale)
+              .height;
         if (a.x < minX) minX = a.x;
-        if (a.y - 28 < minY) minY = a.y - 28;
-        if (a.x + w > maxX) maxX = a.x + w;
+        // A section's label plate paints ABOVE its frame.
+        if ((isSection(a) ? a.y - 28 : a.y) < minY) {
+          minY = isSection(a) ? a.y - 28 : a.y;
+        }
+        if (a.x + a.width > maxX) maxX = a.x + a.width;
         if (a.y + h > maxY) maxY = a.y + h;
       }
       const bg = getComputedStyle(document.documentElement)
