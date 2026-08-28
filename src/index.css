@@ -176,7 +176,7 @@
   /* Elevation. Neutral, low-opacity, never coloured, never glowing.
      Shadow carries a warm-neutral hue at very low alpha so it sits on paper
      rather than looking like grey dirt. */
-  --shadow-sm: 0 1px 2px rgba(60, 50, 40, 0.06);
+  --shadow-sm: 0 1px 2px rgba(60, 50, 40, 0.16);
   --shadow-md: 0 1px 2px rgba(60, 50, 40, 0.05), 0 4px 10px rgba(60, 50, 40, 0.07);
   --shadow-lg: 0 2px 4px rgba(60, 50, 40, 0.05), 0 12px 28px rgba(60, 50, 40, 0.1);
 
@@ -193,6 +193,13 @@
      can say what a lit edge means on its own surface. */
   --bevel: rgba(255, 255, 255, 0.9);
   --bevel-on-accent: rgba(255, 255, 255, 0.16);
+  /* The 1px inset line along a button's BOTTOM edge.
+     A lit top edge is what gives a control its dimension, but on a near-white
+     surface white-on-white says nothing: light mode reads the raised edge from
+     the shaded underside instead, which is the same physics seen from the
+     other side. Dark mode leaves this off, where the bright top edge already
+     carries it. */
+  --bevel-under: rgba(60, 50, 40, 0.13);
 
   /* All motion, 120-200ms: interactive transitions, the panel slides in
      App.css, and the state-change colour eases. Nothing animates longer
@@ -218,7 +225,7 @@
   --surface-2: #f7f3ee; /* inputs, recessed rows, meter troughs */
   --surface-3: #f0ece5; /* pressed states, table header bands */
   --border: #e8e2da; /* hairline divider — 1.20:1 on bg, deliberately quiet */
-  --border-strong: #d2cbc2; /* input outline, node outline — 1.51:1 on bg */
+  --border-strong: #8e8a83; /* button and input outline — 3.21:1 on bg */
 
   /* Canvas rules. Both must recede almost to invisibility: a ruled field
      reads as a workspace, a loud one competes with the diagram. */
@@ -687,7 +694,7 @@
   --surface-2: #25242b;
   --surface-3: #2f2e36;
   --border: #302f38; /* 1.37:1 on bg, matching the light theme's quiet hairline */
-  --border-strong: #454350; /* 1.87:1 on bg */
+  --border-strong: #6a6878; /* button and input outline — 3.11:1 on surface */
 
   --grid-line: #1e1d23; /* 1.08:1 on bg */
   --grid-major: #26252c; /* 1.19:1 on bg */
@@ -750,6 +757,8 @@
      light theme's 0.9 this reads as a glowing seam across every control. */
   --bevel: rgba(255, 255, 255, 0.07);
   --bevel-on-accent: rgba(255, 255, 255, 0.14);
+  /* The lit top edge already reads on a dark surface, so no shaded underside. */
+  --bevel-under: transparent;
 
   /* Per-kind colours, derived. See the note above. */
   --kind-client-fill: #261e3a;
@@ -900,7 +909,7 @@
     --surface-2: #25242b;
     --surface-3: #2f2e36;
     --border: #302f38;
-    --border-strong: #454350;
+    --border-strong: #6a6878;
 
     --grid-line: #1e1d23;
     --grid-major: #26252c;
@@ -948,6 +957,7 @@
 
     --bevel: rgba(255, 255, 255, 0.07);
     --bevel-on-accent: rgba(255, 255, 255, 0.14);
+    --bevel-under: transparent;
 
     --kind-client-fill: #261e3a;
     --kind-client-line: #7154b2;
@@ -1648,7 +1658,8 @@ h4 {
   user-select: none;
   box-shadow:
     var(--shadow-sm),
-    inset 0 1px 0 var(--bevel);
+    inset 0 1px 0 var(--bevel),
+    inset 0 -1px 0 var(--bevel-under);
   transition:
     background-color var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease),

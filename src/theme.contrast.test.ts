@@ -66,6 +66,21 @@ describe.each(THEMES)('%s theme', (_name, tokens) => {
     }
   });
 
+  it('outlines buttons and inputs above the non-text floor', () => {
+    // --border-strong is the only thing giving a button or an input its
+    // shape: both paint --surface on a --bg page, which is barely a fifth of
+    // a step of contrast, so the outline carries the whole boundary. WCAG
+    // puts non-text UI components at 3:1, and the light theme sat at 1.51
+    // until someone said the buttons were hard to see. Text contrast passing
+    // is not evidence this does, which is why it needs its own assertion.
+    for (const surface of ['--bg', '--surface']) {
+      expect(
+        ratio(colour(tokens, '--border-strong'), colour(tokens, surface)),
+        `--border-strong on ${surface}`,
+      ).toBeGreaterThanOrEqual(AA_LARGE);
+    }
+  });
+
   it('carries status colours at AA on both surfaces', () => {
     for (const status of ['--ok', '--warn', '--danger', '--accent']) {
       for (const surface of ['--bg', '--surface']) {
