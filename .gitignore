@@ -11,3 +11,6 @@ public/__harness.js
 NEXT.md
 .vercel
 .env*
+
+# Throwaway inspection scripts used while laying out the presets
+scratch-*.ts
