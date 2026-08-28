@@ -14,3 +14,6 @@ NEXT.md
 
 # Throwaway inspection scripts used while laying out the presets
 scratch-*.ts
+
+# Local Claude Code permissions, per-machine and not part of the project
+.claude/settings.local.json
