@@ -32,6 +32,7 @@ system fail in the specific way that example is about.
   of Netflix, Spotify, Discord, Uber, Twitter/X, Stripe and WhatsApp.
 - Chaos controls: crash a component, slow it, force errors, or cut a link.
 - A 100-term glossary explaining every metric and what it means in practice.
+  Readable as plain HTML at https://breakscale.vercel.app/glossary
 
 ## Links
 

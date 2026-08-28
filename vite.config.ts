@@ -1,8 +1,49 @@
 import { defineConfig } from 'vite';
+import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import { renderGlossaryPage } from './tools/glossary-page.ts';
+
+/**
+ * Emit /glossary as a static HTML page, generated from the same
+ * `src/content/glossary.ts` the app reads.
+ *
+ * A hundred plain-language definitions are exactly what a search engine or an
+ * AI assistant quotes, and all of them were locked inside the JS bundle where
+ * a crawler sees an empty div. Generating rather than hand-writing means the
+ * page cannot drift from the tooltips.
+ *
+ * Also served in dev, so the page can be opened and read without a build.
+ */
+function glossaryPage(): Plugin {
+  const ROUTE = '/glossary';
+  return {
+    name: 'breakscale-glossary-page',
+    apply: () => true,
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = (req.url ?? '').split('?')[0];
+        if (url !== ROUTE && url !== `${ROUTE}.html` && url !== `${ROUTE}/`) {
+          return next();
+        }
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.end(renderGlossaryPage());
+      });
+    },
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        // `glossary.html` rather than `glossary/index.html`: Vercel serves
+        // the clean /glossary URL for either, and one file is easier to
+        // reason about than a directory holding one thing.
+        fileName: 'glossary.html',
+        source: renderGlossaryPage(),
+      });
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), glossaryPage()],
   build: {
     /*
      * Split the dependencies out of the app chunk.
