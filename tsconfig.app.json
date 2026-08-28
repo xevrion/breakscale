@@ -4,7 +4,11 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client"],
+    /* "node" is here for the test files only: theme.contrast.test.ts reads
+       index.css off disk to check the palette that actually ships, and
+       Vite's ?raw returns an empty string under vitest because CSS goes
+       through the style pipeline instead. Application code stays DOM-only. */
+    "types": ["vite/client", "node"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 

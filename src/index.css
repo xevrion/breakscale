@@ -36,6 +36,40 @@
    No component-specific class may be defined in this file.
    ========================================================================== */
 
+/* ==========================================================================
+   Bundled webfont: Caveat.
+
+   Self-hosted rather than linked from Google Fonts, so the page makes no
+   third-party request and nothing about who is reading leaves this origin.
+
+   Licensed under the SIL Open Font License 1.1, which is NOT the repository's
+   MIT licence: the full terms travel with the binary in
+   public/fonts/Caveat/OFL.txt, as the licence requires. Verified from the
+   font's own embedded metadata rather than from a secondary source.
+
+   The latin subset only (the unicode-range below is Google's own for that
+   block), which is 75KB. `font-display: swap` because a handwriting face is
+   decoration on top of an annotation that is perfectly readable in the
+   fallback; blocking text on it would be the wrong trade.
+
+   Canvas measures text through textMetrics, which caches widths. Canvas
+   already calls resetTextMetrics from a document.fonts.ready handler, so the
+   notes re-wrap once this lands rather than keeping widths measured against
+   the fallback face.
+   ========================================================================== */
+
+@font-face {
+  font-family: 'Caveat';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/Caveat/Caveat-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+
 :root {
   /* ------------------------------------------------------------------------
      Type scale — six steps, all integers.
@@ -151,6 +185,14 @@
      hiding the running simulation, which is the thing the student opened
      that layer to understand. */
   --scrim: rgba(60, 50, 40, 0.16);
+
+  /* The 1px inset highlight along the top edge of a button.
+     A literal white was fine while there was one theme; on a dark ground the
+     same value draws a bright line across the top of every control, which is
+     the classic tell of a light theme wearing dark paint. Named so each theme
+     can say what a lit edge means on its own surface. */
+  --bevel: rgba(255, 255, 255, 0.9);
+  --bevel-on-accent: rgba(255, 255, 255, 0.16);
 
   /* All motion, 120-200ms: interactive transitions, the panel slides in
      App.css, and the state-change colour eases. Nothing animates longer
@@ -543,7 +585,459 @@
     ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
     monospace;
 
+  /* Annotation faces.
+
+     A note is commentary ABOUT the diagram, not part of it, and a different
+     face is what says so at a glance. These are offered per note; the default
+     stays --sans.
+
+     All three are system-stack only, with no webfont fetch. A hand-drawn face
+     is decoration, and blocking first paint on a font download to get it
+     would be a poor trade on a page whose point is a live simulation. Each
+     stack ends in a generic family that always resolves, so a machine with
+     none of the named faces still renders something sane rather than falling
+     back to the UI sans and quietly losing the distinction. */
+  --hand: 'Caveat', 'Segoe Print', 'Bradley Hand', Chalkboard, 'Comic Neue', cursive;
+  --marker:
+    'Permanent Marker', 'Marker Felt', 'Segoe Script', 'Comic Sans MS', 'Comic Neue',
+    cursive;
+  --serif: ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
+
   color-scheme: light;
+}
+
+/* ==========================================================================
+   DARK THEME
+   ==========================================================================
+
+   Applied by [data-theme='dark'] on the root element, and by the media query
+   below for anyone whose OS asks for dark and who has expressed no preference
+   of their own. The two are kept separate on purpose: an explicit choice must
+   beat the OS, or the toggle appears broken to someone whose system is set the
+   other way.
+
+   Only colour is redefined. Type scale, spacing, radii and timing are theme
+   independent and stay in :root, so there is exactly one place to change them.
+
+   HOW THE PER-KIND COLOURS WERE PRODUCED. The 33 component kinds carry four
+   colours each. They are not hand-written: tools/derive-dark.ts maps every
+   light value into OKLCH, holds the hue, and re-targets lightness and chroma
+   per role. OKLCH rather than HSL because HSL's lightness is not perceptual,
+   so one lightness target across 33 hues yields glaring yellows and sunken
+   blues; in OKLCH a single target per role holds evenly across the wheel.
+   That keeps a cache node recognisably "the amber one" in both themes.
+
+   Every pair is verified, not eyeballed: src/theme.contrast.test.ts recomputes
+   the ratios from this file and fails the suite if any text pair drops below
+   WCAG AA. AGENTS.md requires the ratio to be computed rather than estimated,
+   and a palette this size cannot be checked by hand.
+   -------------------------------------------------------------------------- */
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Ground and chrome. Warm-tinted neutrals rather than a cold blue-grey, so
+     the dark theme reads as the same product as the warm-paper light one. */
+  --bg: #16151a;
+  --surface: #1d1c22;
+  --surface-2: #25242b;
+  --surface-3: #2f2e36;
+  --border: #302f38; /* 1.37:1 on bg, matching the light theme's quiet hairline */
+  --border-strong: #454350; /* 1.87:1 on bg */
+
+  --grid-line: #1e1d23; /* 1.08:1 on bg */
+  --grid-major: #26252c; /* 1.19:1 on bg */
+  --grid-dot: var(--grid-line);
+
+  --line: #4a4855;
+  --line-2: #615f6e;
+  --line-3: #807d8c;
+  --line-4: #a29fae;
+  --line-5: #c4c1cf;
+  --track: #2b2a32;
+
+  /* Text ramp. Ratios on --bg / --surface:
+       --text        15.23 / 14.19
+       --text-dim     7.52 /  7.01
+       --text-faint   5.38 /  5.01
+     All three clear AA; --text and --text-dim clear AAA. */
+  --text: #eceaf2;
+  --text-dim: #a8a5b4;
+  --text-faint: #8d8a99;
+  /* Ink used ON a saturated fill, so it inverts to the dark ground. */
+  --text-on-fill: #16151a;
+
+  --cat-violet: #b491dd;
+  --cat-blue: #78aee0;
+
+  /* Accent. Lightened until it carries text on the dark ground: 6.59:1 on
+     --bg, where the light theme's blue would have been 2.4:1 and unreadable. */
+  --accent: #6f9bf0;
+  --accent-hover: #87acf5;
+  --accent-press: #5b86dc;
+  --accent-fg: #16151a;
+  --accent-soft: #1b2740;
+  --accent-ink: #a9c6ff; /* on --accent-soft = 8.65:1 */
+  --accent-ring: rgba(111, 155, 240, 0.38);
+
+  /* Status. Each clears 4.5:1 on both --bg and --surface, and each -soft
+     plate carries its own ink above 4.5:1. */
+  --ok: #4ac06e;
+  --warn: #d79a2b;
+  --danger: #f0656a;
+
+  --ok-mark: #3fae61;
+  --warn-mark: #c98a1c;
+  --danger-mark: #e2565c;
+
+  --ok-soft: #16301f;
+  --warn-soft: #332616;
+  --danger-soft: #3a1d1f;
+
+  /* Shadows read as depth on light and as noise on dark, so they become a
+     near-black spread that darkens the ground under a panel instead of a
+     grey haze over it. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.36), 0 4px 10px rgba(0, 0, 0, 0.44);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.36), 0 12px 28px rgba(0, 0, 0, 0.52);
+  --scrim: rgba(0, 0, 0, 0.56);
+
+  /* A lit edge on a dark surface is a faint lift, not a white line. At the
+     light theme's 0.9 this reads as a glowing seam across every control. */
+  --bevel: rgba(255, 255, 255, 0.07);
+  --bevel-on-accent: rgba(255, 255, 255, 0.14);
+
+  /* Per-kind colours, derived. See the note above. */
+  --kind-client-fill: #261e3a;
+  --kind-client-line: #7154b2;
+  --kind-client-stroke: #ac8ff9;
+  --kind-client-ink: #d4c7ff;
+  --kind-lb-fill: #0d263c;
+  --kind-lb-line: #056bb8;
+  --kind-lb-stroke: #50a9ff;
+  --kind-lb-ink: #a9d6ff;
+  --kind-cdn-fill: #002c29;
+  --kind-cdn-line: #00817b;
+  --kind-cdn-stroke: #00beb7;
+  --kind-cdn-ink: #90e3dc;
+  --kind-edgecompute-fill: #002c23;
+  --kind-edgecompute-line: #008265;
+  --kind-edgecompute-stroke: #00c19f;
+  --kind-edgecompute-ink: #97e3cd;
+  --kind-service-fill: #15243c;
+  --kind-service-line: #3865ba;
+  --kind-service-stroke: #6ea3ff;
+  --kind-service-ink: #b5d2ff;
+  --kind-worker-fill: #1c223c;
+  --kind-worker-line: #515ebb;
+  --kind-worker-stroke: #889bff;
+  --kind-worker-ink: #c0ceff;
+  --kind-queue-fill: #2b1d37;
+  --kind-queue-line: #824da6;
+  --kind-queue-stroke: #c287ec;
+  --kind-queue-ink: #e1c3fa;
+  --kind-retryqueue-fill: #2f1b33;
+  --kind-retryqueue-line: #8f4799;
+  --kind-retryqueue-stroke: #d182dc;
+  --kind-retryqueue-ink: #ebc0f1;
+  --kind-transcoder-fill: #22203c;
+  --kind-transcoder-line: #6558b7;
+  --kind-transcoder-stroke: #9e94ff;
+  --kind-transcoder-ink: #cbcaff;
+  --kind-db-fill: #022839;
+  --kind-db-line: #0075ab;
+  --kind-db-stroke: #00b4ee;
+  --kind-db-ink: #99dcfc;
+  --kind-cache-fill: #341f03;
+  --kind-cache-line: #9c5500;
+  --kind-cache-stroke: #e09112;
+  --kind-cache-ink: #f4c897;
+  --kind-writebehind-fill: #381b0c;
+  --kind-writebehind-line: #a74900;
+  --kind-writebehind-stroke: #ef8443;
+  --kind-writebehind-ink: #fdc2a1;
+  --kind-replica-fill: #002a35;
+  --kind-replica-line: #007aa0;
+  --kind-replica-stroke: #00b8dd;
+  --kind-replica-ink: #92def5;
+  --kind-shard-fill: #002b2f;
+  --kind-shard-line: #007e92;
+  --kind-shard-stroke: #00bbcd;
+  --kind-shard-ink: #8fe1eb;
+  --kind-objectstore-fill: #002b2c;
+  --kind-objectstore-line: #008084;
+  --kind-objectstore-stroke: #00bdbf;
+  --kind-objectstore-ink: #90e2e2;
+  --kind-searchindex-fill: #082b1a;
+  --kind-searchindex-line: #00814b;
+  --kind-searchindex-stroke: #29c184;
+  --kind-searchindex-ink: #a2e2bf;
+  --kind-timeseriesdb-fill: #012c1f;
+  --kind-timeseriesdb-line: #008258;
+  --kind-timeseriesdb-stroke: #00c292;
+  --kind-timeseriesdb-ink: #9be3c7;
+  --kind-graphdb-fill: #002c27;
+  --kind-graphdb-line: #008273;
+  --kind-graphdb-stroke: #00bfae;
+  --kind-graphdb-ink: #92e3d6;
+  --kind-vectordb-fill: #0d2b17;
+  --kind-vectordb-line: #007f3b;
+  --kind-vectordb-stroke: #4abf74;
+  --kind-vectordb-ink: #aae1b7;
+  --kind-coldstorage-fill: #002a34;
+  --kind-coldstorage-line: #007b9b;
+  --kind-coldstorage-stroke: #00b9d7;
+  --kind-coldstorage-ink: #91dff2;
+  --kind-streambroker-fill: #331a2e;
+  --kind-streambroker-line: #98438b;
+  --kind-streambroker-stroke: #dd7dcc;
+  --kind-streambroker-ink: #f3bde7;
+  --kind-pubsub-fill: #351929;
+  --kind-pubsub-line: #a1407a;
+  --kind-pubsub-stroke: #e77ab9;
+  --kind-pubsub-ink: #f9bcdc;
+  --kind-websocket-fill: #371924;
+  --kind-websocket-line: #a73e68;
+  --kind-websocket-stroke: #ee78a5;
+  --kind-websocket-ink: #febbd2;
+  --kind-lambda-fill: #39191c;
+  --kind-lambda-line: #ab3d52;
+  --kind-lambda-stroke: #f4788b;
+  --kind-lambda-ink: #ffbbc3;
+  --kind-cron-fill: #2a2402;
+  --kind-cron-line: #7e6800;
+  --kind-cron-stroke: #bba500;
+  --kind-cron-ink: #ddd395;
+  --kind-ratelimiter-fill: #122a14;
+  --kind-ratelimiter-line: #217d2d;
+  --kind-ratelimiter-stroke: #60bd66;
+  --kind-ratelimiter-ink: #b0e0b0;
+  --kind-loadshedder-fill: #1b290d;
+  --kind-loadshedder-line: #477900;
+  --kind-loadshedder-stroke: #80b84b;
+  --kind-loadshedder-ink: #bedda6;
+  --kind-breaker-fill: #391917;
+  --kind-breaker-line: #ac3f3b;
+  --kind-breaker-stroke: #f67a72;
+  --kind-breaker-ink: #ffbdb7;
+  --kind-bulkhead-fill: #391a10;
+  --kind-bulkhead-line: #ab4320;
+  --kind-bulkhead-stroke: #f37f5a;
+  --kind-bulkhead-ink: #ffbfab;
+  --kind-autoscaler-fill: #232706;
+  --kind-autoscaler-line: #637200;
+  --kind-autoscaler-stroke: #9cb12b;
+  --kind-autoscaler-ink: #ccd99c;
+  --kind-region-fill: #34192c;
+  --kind-region-line: #9c4283;
+  --kind-region-stroke: #e27bc3;
+  --kind-region-ink: #f6bde2;
+  --kind-apigateway-fill: #08273b;
+  --kind-apigateway-line: #0070b2;
+  --kind-apigateway-stroke: #2caffa;
+  --kind-apigateway-ink: #a0d9ff;
+  --kind-sidecar-fill: #2e2201;
+  --kind-sidecar-line: #8b6100;
+  --kind-sidecar-stroke: #cc9d00;
+  --kind-sidecar-ink: #e7cf93;
+}
+
+/* The OS preference, honoured only when no explicit choice has been stored.
+   [data-theme='light'] is the opt-out, so someone on a dark OS who chose the
+   light theme keeps it. Duplicating the block rather than aliasing it is the
+   price of not requiring JavaScript for the first paint: the media query has
+   to stand on its own before any script runs. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --bg: #16151a;
+    --surface: #1d1c22;
+    --surface-2: #25242b;
+    --surface-3: #2f2e36;
+    --border: #302f38;
+    --border-strong: #454350;
+
+    --grid-line: #1e1d23;
+    --grid-major: #26252c;
+    --grid-dot: var(--grid-line);
+
+    --line: #4a4855;
+    --line-2: #615f6e;
+    --line-3: #807d8c;
+    --line-4: #a29fae;
+    --line-5: #c4c1cf;
+    --track: #2b2a32;
+
+    --text: #eceaf2;
+    --text-dim: #a8a5b4;
+    --text-faint: #8d8a99;
+    --text-on-fill: #16151a;
+
+    --cat-violet: #b491dd;
+    --cat-blue: #78aee0;
+
+    --accent: #6f9bf0;
+    --accent-hover: #87acf5;
+    --accent-press: #5b86dc;
+    --accent-fg: #16151a;
+    --accent-soft: #1b2740;
+    --accent-ink: #a9c6ff;
+    --accent-ring: rgba(111, 155, 240, 0.38);
+
+    --ok: #4ac06e;
+    --warn: #d79a2b;
+    --danger: #f0656a;
+
+    --ok-mark: #3fae61;
+    --warn-mark: #c98a1c;
+    --danger-mark: #e2565c;
+
+    --ok-soft: #16301f;
+    --warn-soft: #332616;
+    --danger-soft: #3a1d1f;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.36), 0 4px 10px rgba(0, 0, 0, 0.44);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.36), 0 12px 28px rgba(0, 0, 0, 0.52);
+    --scrim: rgba(0, 0, 0, 0.56);
+
+    --bevel: rgba(255, 255, 255, 0.07);
+    --bevel-on-accent: rgba(255, 255, 255, 0.14);
+
+    --kind-client-fill: #261e3a;
+    --kind-client-line: #7154b2;
+    --kind-client-stroke: #ac8ff9;
+    --kind-client-ink: #d4c7ff;
+    --kind-lb-fill: #0d263c;
+    --kind-lb-line: #056bb8;
+    --kind-lb-stroke: #50a9ff;
+    --kind-lb-ink: #a9d6ff;
+    --kind-cdn-fill: #002c29;
+    --kind-cdn-line: #00817b;
+    --kind-cdn-stroke: #00beb7;
+    --kind-cdn-ink: #90e3dc;
+    --kind-edgecompute-fill: #002c23;
+    --kind-edgecompute-line: #008265;
+    --kind-edgecompute-stroke: #00c19f;
+    --kind-edgecompute-ink: #97e3cd;
+    --kind-service-fill: #15243c;
+    --kind-service-line: #3865ba;
+    --kind-service-stroke: #6ea3ff;
+    --kind-service-ink: #b5d2ff;
+    --kind-worker-fill: #1c223c;
+    --kind-worker-line: #515ebb;
+    --kind-worker-stroke: #889bff;
+    --kind-worker-ink: #c0ceff;
+    --kind-queue-fill: #2b1d37;
+    --kind-queue-line: #824da6;
+    --kind-queue-stroke: #c287ec;
+    --kind-queue-ink: #e1c3fa;
+    --kind-retryqueue-fill: #2f1b33;
+    --kind-retryqueue-line: #8f4799;
+    --kind-retryqueue-stroke: #d182dc;
+    --kind-retryqueue-ink: #ebc0f1;
+    --kind-transcoder-fill: #22203c;
+    --kind-transcoder-line: #6558b7;
+    --kind-transcoder-stroke: #9e94ff;
+    --kind-transcoder-ink: #cbcaff;
+    --kind-db-fill: #022839;
+    --kind-db-line: #0075ab;
+    --kind-db-stroke: #00b4ee;
+    --kind-db-ink: #99dcfc;
+    --kind-cache-fill: #341f03;
+    --kind-cache-line: #9c5500;
+    --kind-cache-stroke: #e09112;
+    --kind-cache-ink: #f4c897;
+    --kind-writebehind-fill: #381b0c;
+    --kind-writebehind-line: #a74900;
+    --kind-writebehind-stroke: #ef8443;
+    --kind-writebehind-ink: #fdc2a1;
+    --kind-replica-fill: #002a35;
+    --kind-replica-line: #007aa0;
+    --kind-replica-stroke: #00b8dd;
+    --kind-replica-ink: #92def5;
+    --kind-shard-fill: #002b2f;
+    --kind-shard-line: #007e92;
+    --kind-shard-stroke: #00bbcd;
+    --kind-shard-ink: #8fe1eb;
+    --kind-objectstore-fill: #002b2c;
+    --kind-objectstore-line: #008084;
+    --kind-objectstore-stroke: #00bdbf;
+    --kind-objectstore-ink: #90e2e2;
+    --kind-searchindex-fill: #082b1a;
+    --kind-searchindex-line: #00814b;
+    --kind-searchindex-stroke: #29c184;
+    --kind-searchindex-ink: #a2e2bf;
+    --kind-timeseriesdb-fill: #012c1f;
+    --kind-timeseriesdb-line: #008258;
+    --kind-timeseriesdb-stroke: #00c292;
+    --kind-timeseriesdb-ink: #9be3c7;
+    --kind-graphdb-fill: #002c27;
+    --kind-graphdb-line: #008273;
+    --kind-graphdb-stroke: #00bfae;
+    --kind-graphdb-ink: #92e3d6;
+    --kind-vectordb-fill: #0d2b17;
+    --kind-vectordb-line: #007f3b;
+    --kind-vectordb-stroke: #4abf74;
+    --kind-vectordb-ink: #aae1b7;
+    --kind-coldstorage-fill: #002a34;
+    --kind-coldstorage-line: #007b9b;
+    --kind-coldstorage-stroke: #00b9d7;
+    --kind-coldstorage-ink: #91dff2;
+    --kind-streambroker-fill: #331a2e;
+    --kind-streambroker-line: #98438b;
+    --kind-streambroker-stroke: #dd7dcc;
+    --kind-streambroker-ink: #f3bde7;
+    --kind-pubsub-fill: #351929;
+    --kind-pubsub-line: #a1407a;
+    --kind-pubsub-stroke: #e77ab9;
+    --kind-pubsub-ink: #f9bcdc;
+    --kind-websocket-fill: #371924;
+    --kind-websocket-line: #a73e68;
+    --kind-websocket-stroke: #ee78a5;
+    --kind-websocket-ink: #febbd2;
+    --kind-lambda-fill: #39191c;
+    --kind-lambda-line: #ab3d52;
+    --kind-lambda-stroke: #f4788b;
+    --kind-lambda-ink: #ffbbc3;
+    --kind-cron-fill: #2a2402;
+    --kind-cron-line: #7e6800;
+    --kind-cron-stroke: #bba500;
+    --kind-cron-ink: #ddd395;
+    --kind-ratelimiter-fill: #122a14;
+    --kind-ratelimiter-line: #217d2d;
+    --kind-ratelimiter-stroke: #60bd66;
+    --kind-ratelimiter-ink: #b0e0b0;
+    --kind-loadshedder-fill: #1b290d;
+    --kind-loadshedder-line: #477900;
+    --kind-loadshedder-stroke: #80b84b;
+    --kind-loadshedder-ink: #bedda6;
+    --kind-breaker-fill: #391917;
+    --kind-breaker-line: #ac3f3b;
+    --kind-breaker-stroke: #f67a72;
+    --kind-breaker-ink: #ffbdb7;
+    --kind-bulkhead-fill: #391a10;
+    --kind-bulkhead-line: #ab4320;
+    --kind-bulkhead-stroke: #f37f5a;
+    --kind-bulkhead-ink: #ffbfab;
+    --kind-autoscaler-fill: #232706;
+    --kind-autoscaler-line: #637200;
+    --kind-autoscaler-stroke: #9cb12b;
+    --kind-autoscaler-ink: #ccd99c;
+    --kind-region-fill: #34192c;
+    --kind-region-line: #9c4283;
+    --kind-region-stroke: #e27bc3;
+    --kind-region-ink: #f6bde2;
+    --kind-apigateway-fill: #08273b;
+    --kind-apigateway-line: #0070b2;
+    --kind-apigateway-stroke: #2caffa;
+    --kind-apigateway-ink: #a0d9ff;
+    --kind-sidecar-fill: #2e2201;
+    --kind-sidecar-line: #8b6100;
+    --kind-sidecar-stroke: #cc9d00;
+    --kind-sidecar-ink: #e7cf93;
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -1110,7 +1604,7 @@ h4 {
   user-select: none;
   box-shadow:
     var(--shadow-sm),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    inset 0 1px 0 var(--bevel);
   transition:
     background-color var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease),
@@ -1146,7 +1640,7 @@ h4 {
   font-weight: var(--fw-num);
   box-shadow:
     var(--shadow-sm),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    inset 0 1px 0 var(--bevel-on-accent);
 }
 
 .btn-primary:hover:not(:disabled) {
