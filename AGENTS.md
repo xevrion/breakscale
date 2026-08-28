@@ -1,116 +1,116 @@
-# Working on Breakscale with an AI assistant
+# Project coding standards
 
-Breakscale is a discrete-event system design simulator for CS students. This file is the context an
-assistant needs before touching the code. It is short on purpose; the rules that matter are few.
+Breakscale is a discrete-event system design simulator for CS students. `src/sim` is a pure
+simulation engine with no React, no DOM and no I/O; everything else is the interface around it.
 
-## The one rule
+## Communication
 
-**The numbers have to be true.**
+- Be succinct. Prefer code over prose.
+- Do not explain or teach unless asked.
+- Do not summarise your changes afterwards unless asked.
+- Do not apologise when corrected; give the correct answer.
+- State what you did not verify. An honest gap costs less than a confident wrong claim.
 
-Students learn from this. If p99 climbs as utilisation passes 80 percent, that has to be because
-the simulation queued real requests and measured their latency, not because something approximated
-a curve that looks about right.
+## Correctness
 
-In practice:
+- The numbers the simulator shows must be measured, never approximated. Percentiles come from a
+  ring buffer of real request latencies, not from a mean times a constant.
+- A component with no meaningful value for a metric shows something else, or nothing. Never a
+  plausible-looking number.
+- A behaviour is not finished until a script has printed its real output. Paste the numbers.
+- Determinism is a contract: same seed and topology means byte-identical snapshots.
+- Never modify `src/sim` to make a UI problem go away.
 
-- Percentiles come from measured latencies, never from a mean times a constant.
-- A component with no meaningful value for a metric shows something else, or nothing. It never
-  shows a plausible-looking number.
-- If you cannot verify a behaviour by running a script that prints real output, it is not finished.
+## TypeScript
 
-## Layout
+- Strict mode. No `any`, no non-null assertions without a comment saying why.
+- Prefer `const` and `readonly`. Prefer optional chaining and nullish coalescing.
+- Avoid allocation on hot paths: `advance()` runs per frame, `snapshot()` at 10Hz.
+- Discriminated unions over boolean flags for state that has more than two cases.
 
-```
-src/sim/          the engine. No React, no DOM, no I/O
-  engine.ts       the event loop
-  behaviour*.ts   one behaviour object per component kind
-  types.ts        the contract between engine and UI
-  presets.ts      the 23 worked examples
-src/components/   canvas, inspector, metrics, palette, dialogs
-src/content/      glossary text, preferences
-src/App.tsx       shell: layout, rAF loop, history, keybindings
-```
+## React
 
-`src/sim` knows nothing about the UI. That boundary is what makes it testable, so keep it.
+- Function components and hooks only. No conditional hooks.
+- The engine is mutable state outside React. Hold it in a ref or lazy `useState`, never in a
+  dependency array.
+- The rAF loop advances every frame; React re-renders at 10Hz. Never `setState` per frame.
+- `React.memo` on anything the canvas renders per node or per edge.
+- Effects synchronise with external systems. Deriving state in an effect is a bug.
+
+## Naming
+
+- PascalCase for components, interfaces and type aliases.
+- camelCase for variables, functions and methods.
+- ALL_CAPS for module constants.
+- Component kinds are lowercase string literals: `'ratelimiter'`, not `'rateLimiter'`.
+
+## Styling
+
+- All colour comes from tokens in `src/index.css`. No hardcoded hex anywhere else.
+- No emoji, glassmorphism, gradient text or glowing shadows.
+- Numbers render in the mono stack with tabular figures.
+- Transitions are interactive only, 120-200ms, and `prefers-reduced-motion` disables them.
+- Text meets WCAG AA. Compute the ratio; do not estimate it.
+
+## Canvas
+
+The pointer layer was rebuilt after capture-on-pointerdown suppressed the browser's synthesized
+click and made every overlay button inert. When touching it, preserve:
+
+- `.cv-surface` owns the handlers.
+- Hit routing is `data-hit` + `data-id` resolved in one `hitTest`.
+- `setPointerCapture` happens only at gesture promotion, wrapped in try/catch.
+- Chrome is excluded via `closest('button, input, select, textarea, a, [data-chrome]')`.
+- Any floating overlay carries `[data-chrome]` or it will swallow gestures.
+
+Per-kind colours are a specificity trap: `.cv-node` and `[data-kind='cache']` are both 0-1-0, so
+source order wins. Never declare `--k-*` in a class rule; fallbacks belong inside `var()`.
+
+## Testing
+
+- Run `bun test` after every change and fix what breaks.
+- Test interaction with real `PointerEvent` sequences. `.click()` bypasses the layer that breaks.
+- Paced moves are not enough. A three-event flick found a race a 16ms-paced drag did not.
+- A backgrounded tab suspends `requestAnimationFrame`; the simulation reads zero and looks broken.
+  Check `document.visibilityState` before diagnosing.
+- Hard-reload before concluding anything is broken. Stale HMR has caused false diagnoses here.
+
+## Adding a component
+
+1. `NodeKind` in `src/sim/types.ts`
+2. Config fields, each with meaning and units in a doc comment
+3. A behaviour object in the matching `src/sim/behaviour-*.ts`
+4. `defaultConfig` entry and label
+5. A readout in `readoutFor`, showing what an engineer would watch. Never a field that is
+   structurally always zero for that kind.
+6. A glossary entry in `src/content/glossary.ts`
+7. A test proving it behaves differently from every existing kind
+
+Step 7 is the bar. A kind that is another kind with different defaults does not get added.
+
+## Adding an example
+
+One lesson each. Stable at its default load, under 2 percent errors. Visibly degrades at 2-4x with
+the bottleneck being the lesson. No overlapping nodes. A node's ceiling is
+`capacity * instances * (1000 / serviceMs)` rps; do that arithmetic before tuning.
+
+## Copy
+
+The reader is a first-year student who has not taken a queueing theory course.
+
+- Plain language: "requests waiting in line", not `queueLimit`.
+- Sentence case. No unexplained abbreviations.
+- Say why a number matters, not only what it is.
+- No em dashes. Use a comma, a semicolon, or a second sentence.
 
 ## Commands
 
 ```bash
 bun dev            # dev server on :5173
 bun run build      # typecheck + build
-bun test           # 372 tests
+bun test
 bun run lint
 bun run format
 ```
 
-A pre-push hook runs all of it. A broken tree cannot reach `main`.
-
-## Things that will bite you
-
-**The canvas input layer is fragile and was rebuilt after a real bug.** Pointer capture used to
-happen on pointerdown, which retargeted pointerup and suppressed the browser's synthesized click,
-making every overlay button inert. Preserve: `.cv-surface` owns the handlers, hit routing goes
-through `data-hit` + `data-id` in one `hitTest`, capture happens only at gesture promotion in a
-try/catch, and chrome is excluded via `closest('button, input, select, textarea, a, [data-chrome]')`.
-
-**A backgrounded browser tab suspends `requestAnimationFrame`.** The simulation reads zero
-everywhere and looks broken. Check `document.visibilityState` before diagnosing anything.
-
-**Hard-reload before concluding something is broken.** A stale HMR module has caused at least one
-false diagnosis here.
-
-**Per-kind colours are a specificity trap.** `.cv-node` and `[data-kind='cache']` are both 0-1-0,
-so source order decides. Never declare the `--k-*` tokens in a class rule; fallbacks belong inside
-`var()`.
-
-**Test drags with real `PointerEvent` sequences, not `.click()`.** `.click()` bypasses the exact
-layer that breaks. Paced moves are also not enough: a fast three-event flick found a race that a
-16ms-paced drag did not.
-
-## Adding a component
-
-1. Add the kind to `NodeKind` in `types.ts`
-2. Config fields with doc comments stating meaning and units
-3. A behaviour object in the matching `behaviour-*.ts`
-4. `defaultConfig` entry and a label
-5. A readout in `readoutFor` in `Canvas.tsx` showing what an engineer would actually watch. Never a
-   field that is structurally always zero for that kind.
-6. A glossary entry in `content/glossary.ts`
-7. A test proving it behaves differently from everything else
-
-Step 7 is the real bar. A component that is an existing one with different defaults makes the
-palette longer and teaches nothing.
-
-## Adding an example
-
-- One lesson each, and the description says what to watch
-- Stable at its default load, under about 2 percent errors
-- Visibly degrades at 2-4x, and the bottleneck is the one the lesson is about
-- No overlapping nodes
-
-Do the arithmetic first: a node's ceiling is `capacity * instances * (1000 / serviceMs)` rps.
-
-## Writing
-
-The reader is a first-year student who has not taken a queueing theory course.
-
-- Plain language. "Requests waiting in line" beats `queueLimit`.
-- Sentence case. No unexplained abbreviations.
-- Say why something matters, not only what it is.
-- No em dashes. A comma, a semicolon, or a second sentence.
-
-## Design constraints
-
-- No emoji, glassmorphism, gradient text, or glowing shadows
-- Colour carries meaning: component colours identify a kind, status colours mean trouble
-- Numbers in the mono stack with tabular figures
-- Interactive transitions only, 120-200ms, and `prefers-reduced-motion` disables them
-- All colour from tokens in `index.css`. No hardcoded hex elsewhere.
-- WCAG AA on text. Compute the ratio, do not eyeball it.
-
-## If you are an agent working autonomously
-
-- Verify before reporting. "I ran it and goodput plateaued at 205 rps" beats "this should work".
-- Say what you did not check. A confident report on unverified work costs more than an honest gap.
-- Do not commit. Leave that to the human.
-- One logical change at a time.
+A pre-push hook runs all of it. Do not commit; leave that to the maintainer.

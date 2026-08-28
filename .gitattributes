@@ -1,0 +1,14 @@
+# Normalise line endings so a Windows checkout does not produce a diff in every
+# file. Without this, CRLF from a Windows clone fails the Prettier check.
+* text=auto eol=lf
+
+# Binary, never diffed or line-ending normalised.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# Generated. Collapsed in pull request diffs and excluded from language stats.
+bun.lock linguist-generated=true -diff
