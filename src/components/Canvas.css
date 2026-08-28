@@ -2027,6 +2027,39 @@
    get from watching it.
    -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+   Touch: the browser must not claim a press the canvas needs.
+
+   `touch-action: none` on the surface stops scroll and pinch from stealing
+   the gesture, but on a phone a press held on an element ALSO starts the
+   platform's own long-press: the callout menu on iOS, text selection and the
+   context menu on Android. Both fire pointercancel at the canvas, which drops
+   the drag exactly as a reader settles their finger to move a node. Holding a
+   node opened the inspector instead of dragging it, because the tap survived
+   and the drag did not.
+
+   These three properties turn that off. -webkit-touch-callout is the iOS
+   half, user-select the selection half; the context menu is already
+   preventDefault'd in the handler, which only works once the selection
+   gesture is not competing with it.
+   -------------------------------------------------------------------------- */
+
+.cv-surface,
+.cv-node,
+.cv-node * {
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The nodes are the drag targets, so they must not hand the press to the
+   browser's scroller either. The surface already declares this; the nodes
+   inherit `auto` without it and a touch that lands ON a node was the case
+   that failed. */
+.cv-node {
+  touch-action: none;
+}
+
 @media (max-width: 720px) {
   .cv-hint-idle {
     display: none;

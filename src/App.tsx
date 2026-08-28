@@ -10,6 +10,7 @@ import {
 import type {
   AnimationEvent,
   ChangeEvent,
+  PointerEvent as ReactPointerEvent,
   CSSProperties,
   DragEvent,
   ReactNode,
@@ -86,6 +87,15 @@ const STORAGE_KEY = 'breakscale.session.v1';
  * ------------------------------------------------------------------ */
 
 const LAYOUT_KEY = 'breakscale.layout.v1';
+
+/**
+ * How far a sheet must be pulled down before releasing closes it.
+ *
+ * 64px is roughly a thumb's comfortable travel and well past the slop of a
+ * tap that happened to move. Short of it the sheet springs back, which is
+ * the feedback that tells a reader the gesture exists at all.
+ */
+const SHEET_DISMISS_PX = 64;
 
 /** The gap between the floating bar and whatever clears it, matching --sp-3. */
 const BAR_GAP_PX = 12;
@@ -282,12 +292,78 @@ function PanelSlot({
   open,
   edge,
   children,
+  onDismiss,
 }: {
   open: boolean;
   edge: 'left' | 'right' | 'bottom';
   children: ReactNode;
+  /**
+   * Close this panel from inside it. Phone only: on a desktop a rail sits
+   * BESIDE the canvas and dismissing it by touching the canvas would fight
+   * every drag; as a sheet it sits OVER the canvas, so the canvas showing
+   * through is the obvious way out and a sheet that ignores it feels stuck.
+   * Omitted, the sheet has no scrim and no handle.
+   */
+  onDismiss?: () => void;
 }) {
   const { mounted, closing, unmount } = usePresence(open);
+
+  /**
+   * Swipe-down-to-close.
+   *
+   * Tracked on the handle only, not the whole sheet: the panels scroll
+   * internally, and a downward drag anywhere on a scrolling list means
+   * scroll, not dismiss. A grabber at the top is the one place where down
+   * can only mean "put this away", which is why every sheet on every phone
+   * puts one there.
+   *
+   * The sheet follows the finger while dragging (no transition, so it tracks
+   * exactly) and commits past a threshold; released short of it, it springs
+   * back. Distance rather than velocity: a slow deliberate pull and a flick
+   * both read as intent, and a velocity gate makes the slow one feel broken.
+   */
+  const dragRef = useRef<{ id: number; startY: number } | null>(null);
+  const [dragY, setDragY] = useState(0);
+
+  /* Escape closes a sheet, the way it closes every other temporary layer in
+     this app. Phone only, because onDismiss is what makes it a sheet: on a
+     desktop the same key would collapse a rail the reader deliberately
+     opened and left open. */
+  useEffect(() => {
+    if (!onDismiss || !open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onDismiss();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onDismiss, open]);
+
+  const onHandleDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!onDismiss) return;
+    dragRef.current = { id: e.pointerId, startY: e.clientY };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Capture is a convenience; the move handler still tracks without it.
+    }
+  };
+
+  const onHandleMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    // Down only. An upward pull is not a gesture here, and letting it lift
+    // the sheet off its edge would expose the canvas underneath it.
+    setDragY(Math.max(0, e.clientY - d.startY));
+  };
+
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    dragRef.current = null;
+    const travelled = Math.max(0, e.clientY - d.startY);
+    setDragY(0);
+    if (travelled > SHEET_DISMISS_PX) onDismiss?.();
+  };
 
   const lastChildren = useRef(children);
   if (open) lastChildren.current = children;
@@ -316,19 +392,50 @@ function PanelSlot({
   const state = closing ? ' is-closing' : toggled && !entered ? ' is-entering' : '';
 
   return (
-    <div
-      className={`app-slot app-slot-${edge}${state}`}
-      inert={closing || undefined}
-      onAnimationEnd={(e: AnimationEvent<HTMLDivElement>) => {
-        // Only the slot's own animations count. Animations on children (a
-        // chart transition, a button) bubble through here too.
-        if (e.target !== e.currentTarget) return;
-        if (closing) unmount();
-        else setEntered(true);
-      }}
-    >
-      {open ? children : lastChildren.current}
-    </div>
+    <>
+      {/* The way out. Covers the canvas the sheet is sitting on, so a tap
+          anywhere off the sheet closes it, and dims what is behind so the
+          sheet reads as the layer in front. Hidden above the breakpoint by
+          CSS, where the panels are rails and there is nothing to dismiss. */}
+      {onDismiss ? (
+        <div
+          className={`app-scrim${closing ? ' is-closing' : ''}`}
+          onPointerDown={onDismiss}
+          aria-hidden="true"
+        />
+      ) : null}
+      <div
+        className={`app-slot app-slot-${edge}${state}`}
+        inert={closing || undefined}
+        /* Following the finger is a transform, like the slide itself, so it
+           invalidates no layout and cannot move the canvas underneath. */
+        style={dragY > 0 ? { transform: `translateY(${dragY}px)` } : undefined}
+        onAnimationEnd={(e: AnimationEvent<HTMLDivElement>) => {
+          // Only the slot's own animations count. Animations on children (a
+          // chart transition, a button) bubble through here too.
+          if (e.target !== e.currentTarget) return;
+          if (closing) unmount();
+          else setEntered(true);
+        }}
+      >
+        {onDismiss ? (
+          <div
+            className="app-grabber"
+            onPointerDown={onHandleDown}
+            onPointerMove={onHandleMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            role="button"
+            tabIndex={-1}
+            aria-label="Close panel"
+            onClick={onDismiss}
+          >
+            <span className="app-grabber-bar" />
+          </div>
+        ) : null}
+        {open ? children : lastChildren.current}
+      </div>
+    </>
   );
 }
 
@@ -572,24 +679,30 @@ export default function App() {
      other: two stacked sheets would cover the diagram they exist to explain,
      and the reader would have no way to see the effect of what they changed.
      On a desktop the two are rails on opposite edges and coexist happily. */
-  const toggleLibrary = useCallback(
-    () =>
-      setLayout((l) => ({
-        ...l,
-        library: !l.library,
-        metrics: !l.library && phone ? false : l.metrics,
-      })),
-    [phone],
-  );
-  const toggleMetrics = useCallback(
-    () =>
-      setLayout((l) => ({
-        ...l,
-        metrics: !l.metrics,
-        library: !l.metrics && phone ? false : l.library,
-      })),
-    [phone],
-  );
+  const [inspectorHidden, setInspectorHidden] = useState(false);
+
+  /* On a phone the three panels are SHEETS stacked over the canvas, so only
+     one may be open: two of them cover the diagram they exist to explain,
+     and the reader loses the thing they changed it to see. The inspector is
+     part of this too, and was not before, which is how three could stack.
+     On a desktop they are rails on three different edges and coexist. */
+  const toggleLibrary = useCallback(() => {
+    setLayout((l) => ({
+      ...l,
+      library: !l.library,
+      metrics: !l.library && phone ? false : l.metrics,
+    }));
+    if (phone) setInspectorHidden(true);
+  }, [phone]);
+
+  const toggleMetrics = useCallback(() => {
+    setLayout((l) => ({
+      ...l,
+      metrics: !l.metrics,
+      library: !l.metrics && phone ? false : l.library,
+    }));
+    if (phone) setInspectorHidden(true);
+  }, [phone]);
 
   useEffect(() => {
     saveLayout(layout);
@@ -606,7 +719,6 @@ export default function App() {
    * has to remember: selecting something is always enough to bring the
    * settings back. Deliberately not persisted, for the same reason.
    */
-  const [inspectorHidden, setInspectorHidden] = useState(false);
 
   useEffect(() => {
     if (selectedIds.size > 0) setInspectorHidden(false);
@@ -2496,7 +2608,11 @@ export default function App() {
           } as CSSProperties
         }
       >
-        <PanelSlot open={layout.library} edge="left">
+        <PanelSlot
+          open={layout.library}
+          edge="left"
+          onDismiss={phone ? toggleLibrary : undefined}
+        >
           <Palette
             onAdd={handlePaletteAdd}
             onAddAnnotation={handlePaletteAnnotation}
@@ -2621,7 +2737,11 @@ export default function App() {
               <PanelGlyph edge="bottom" />
             </button>
           </div>
-          <PanelSlot open={metricsVisible} edge="bottom">
+          <PanelSlot
+            open={metricsVisible}
+            edge="bottom"
+            onDismiss={phone ? toggleMetrics : undefined}
+          >
             {snapshot ? (
               <Metrics
                 snapshot={snapshot}
@@ -2644,7 +2764,11 @@ export default function App() {
           </PanelSlot>
         </main>
 
-        <PanelSlot open={inspectorVisible} edge="right">
+        <PanelSlot
+          open={inspectorVisible}
+          edge="right"
+          onDismiss={phone ? toggleInspector : undefined}
+        >
           <Inspector
             node={selectedNode}
             stats={selectedStats}

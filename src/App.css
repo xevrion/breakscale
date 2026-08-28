@@ -1100,21 +1100,34 @@
 
   /* --- Sheets ----------------------------------------------------- */
 
+  /* FIXED, not absolute.
+
+     Absolutely positioned they resolve against .app-stage, which carries
+     padding for the header and the tab bar, so `bottom: var(--tabbar-h)`
+     was measured from the padded edge and the sheet rendered starting at
+     the bottom of the screen and running 464px below it. The grabber ended
+     up at the very edge of the display and there was no visible way to
+     close the thing. Fixed, they resolve against the viewport, which is
+     what "sits above the tab bar" actually means.
+
+     Height is capped BOTH ways: never taller than the room between the
+     header and the tab bar, so a sheet can never cover the header or run
+     under the bar, and never more than 62vh, so the canvas it explains is
+     always partly visible behind it. */
   .app-slot-left,
-  .app-slot-right {
+  .app-slot-right,
+  .app-slot-bottom {
+    position: fixed;
     top: auto;
-    bottom: var(--tabbar-h);
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
     left: 0;
     right: 0;
     width: auto;
-    max-height: min(64vh, 520px);
-  }
-
-  .app-slot-bottom {
-    left: 0;
-    right: 0;
-    bottom: var(--tabbar-h);
-    height: min(var(--strip-h), 44vh);
+    height: auto;
+    max-height: min(
+      62vh,
+      calc(100vh - var(--bar-clear) - var(--tabbar-h) - var(--sp-3))
+    );
   }
 
   .app-slot-left > .pal,
@@ -1243,5 +1256,115 @@
 
   .app-tab svg {
     flex: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Sheet dismissal: the scrim and the grabber.
+
+   Both exist only at phone widths, where a panel is a sheet sitting OVER the
+   canvas. On a desktop the same panels are rails sitting BESIDE it: there is
+   nothing to dismiss by tapping past, and a scrim over the diagram would be
+   actively wrong.
+   -------------------------------------------------------------------------- */
+
+.app-scrim,
+.app-grabber {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  /* Dims the canvas and catches the tap that closes the sheet. Below the
+     slot (z-index 10) and above everything else on the stage. */
+  .app-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    display: block;
+    background: var(--scrim);
+    animation: app-scrim-in var(--dur-base) var(--ease-out);
+  }
+
+  /* Fades with the sheet it belongs to rather than vanishing a frame early,
+     which read as the dimming "snapping off" before the panel had gone. */
+  .app-scrim.is-closing {
+    animation: app-scrim-out var(--dur-base) var(--ease) forwards;
+  }
+
+  /* The grab handle. A 44px target for a 4px mark: the bar is the signal,
+     the padding around it is what a thumb actually lands on. */
+  .app-grabber {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    padding: 12px 0;
+    /* The browser must not claim the vertical drag for scrolling, or the
+       sheet never sees the move events it needs to follow the finger. */
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .app-grabber-bar {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-strong);
+  }
+
+  .app-grabber:active .app-grabber-bar {
+    background: var(--text-dim);
+  }
+
+  /* The spring back. Applied only when the sheet is NOT being dragged (the
+     inline transform is absent), so the sheet tracks the finger exactly
+     while held and eases home when released. A transition during the drag
+     would make it lag behind the thumb. */
+  .app-slot-left:not([style*='translateY']),
+  .app-slot-right:not([style*='translateY']),
+  .app-slot-bottom:not([style*='translateY']) {
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+
+  /* An entering or closing slot is driven by keyframes; a transition on the
+     same property fights them. */
+  .app-slot.is-entering,
+  .app-slot.is-closing {
+    transition: none;
+  }
+
+  /* The sheet's own surface starts under the grabber, so the handle sits on
+     the panel rather than floating above it. */
+  .app-slot-left > .pal,
+  .app-slot-right > .ins,
+  .app-slot-bottom > .met {
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  .app-slot-left,
+  .app-slot-right,
+  .app-slot-bottom {
+    display: flex;
+    flex-direction: column;
+    border: var(--bw) solid var(--border);
+    border-bottom: 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    background: var(--surface);
+    overflow: hidden;
+  }
+}
+
+@keyframes app-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes app-scrim-out {
+  to {
+    opacity: 0;
   }
 }
