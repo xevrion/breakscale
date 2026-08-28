@@ -122,37 +122,54 @@
 }
 
 /* --------------------------------------------------------------------------
-   The reference cluster degrades gracefully as the bar narrows, because the
-   traffic control beside it shrinks (flex 1 1 auto, min-width 0) and a bar
-   out of room lets later chrome paint over the run controls. The shortcut
-   annotations go first (they are annotations, and the shortcuts dialog now
-   documents every one of them), then the labels collapse to the icons. The
-   buttons keep their accessible names via aria-label at every width, and
-   their titles still name the keys.
+   The bar's width cascade. What gives way, in order:
+
+     1. 1780  the printed shortcut keys and the widest gaps. Annotations,
+              and the shortcuts dialog documents every binding.
+     2. 1620  the tagline. Charm, not information — and it goes BEFORE the
+              reference labels do, because "Glossary" is a teaching word
+              and "Build it, load it, watch it break" is a slogan.
+     3. 1460  the reference labels collapse to their icons. aria-label and
+              the titles keep the names at every width.
+     4. 1360  the rails narrow and the bar's padding tightens (below).
+     5. ~T860 the secondary readouts (Goodput / Errors / Dropped) go —
+              but that step lives on the TRAFFIC CONTROL'S OWN WIDTH as a
+              container query in Inspector.css, not on the viewport,
+              because what the readouts actually compete with is the
+              slider beside them, not the window.
+     6. 1000  the bar's remaining gaps tighten.
+
+   What never gives way: the load slider (the cause), the p99 hero (the
+   effect), and the transport. They are the app.
 
    THE THRESHOLDS SIT ABOVE THE BAR'S MEASURED MIN-CONTENT, not below it.
-   Measured: the full bar's min-content is ~1728px (brand 170 + undo 68 +
-   traffic 860 + three labelled buttons 390 + five 40px gaps + padding).
-   The old 1680/1500 pair both fired BELOW that, so from ~1710 down the
-   reference cluster painted over Reset. Each step here lands before the
-   width it rescues: keys go at 1780 (min-content drops to ~1672), labels
-   and the wide gaps go together at 1700 (min-content ~1390), and the 1360
-   block below takes it to ~1250, safely under a 1280 window.
+   Measured with the icon transport (118px): brand 170 + undo 68 + traffic
+   at its 800px floor + labelled buttons 329 + gaps + padding puts the
+   min-content at ~1507 once the keys are gone, ~1412 once the tagline is
+   too. Each step below lands before the width it rescues: keys at 1780,
+   tagline at 1620 (min-content ~1412), labels at 1460 (~1200), and from
+   there the container query in Inspector.css takes over.
    -------------------------------------------------------------------------- */
 
 @media (max-width: 1780px) {
   .app-glossary-key {
     display: none;
   }
-}
-
-@media (max-width: 1700px) {
-  .app-glossary-label {
-    display: none;
-  }
 
   .app-bar {
     gap: var(--sp-5);
+  }
+}
+
+@media (max-width: 1620px) {
+  .app-tagline {
+    display: none;
+  }
+}
+
+@media (max-width: 1460px) {
+  .app-glossary-label {
+    display: none;
   }
 }
 
@@ -570,13 +587,12 @@
 }
 
 /* --------------------------------------------------------------------------
-   The single layout media query.
+   The rail step.
 
    Below this the rails narrow, so the strip and the safe area they inset
-   keep enough width for three charts. The strip then reflows on its own
-   through container queries in Metrics.css. Three unrelated breakpoints
-   (1180 / 1100 / 1000) collapsed to this one plus those two container
-   queries.
+   keep enough width for the charts, and a half-screen split keeps a usable
+   band of uncovered canvas between two open rails. The strip then reflows
+   on its own through container queries in Metrics.css.
    -------------------------------------------------------------------------- */
 
 @media (max-width: 1360px) {
@@ -589,12 +605,42 @@
   .app-bar {
     padding: var(--sp-3) var(--sp-4);
   }
+}
 
-  /* The tagline goes with the rails: it is charm, not information, and at
-     this width the ~90px it holds is what keeps the bar's min-content under
-     a 1280 window. */
-  .app-tagline {
-    display: none;
+/* --------------------------------------------------------------------------
+   The last width step: a half-screen split (~960 CSS px) and below.
+
+   Everything wordy is already gone; what remains is spacing. The bar's
+   gaps come down to sp-3 and its padding with them, which together with
+   the traffic control's own container steps (Inspector.css) keeps every
+   control on screen down to ~840px, comfortably past a 960 split. Below
+   that a browser window is narrower than any desktop half-screen and the
+   slider is at its floor; there is nothing left to give that the user
+   still needs.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1000px) {
+  .app-bar {
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-3);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Short windows.
+
+   Height has a cascade too, or a 1600x700 window loses its canvas to the
+   chrome. The strip is the only region that can honestly give height back:
+   the bar is already sized by its type, and the canvas is the app. Its
+   charts scroll internally by contract (see --strip-h above), so a shorter
+   clamp costs scrolling, never clipping. 24vh of a 700px window is 168px:
+   the p99 chart and the ledger row stay readable, and the canvas keeps
+   ~450px, still the dominant region.
+   -------------------------------------------------------------------------- */
+
+@media (max-height: 720px) {
+  .app-body {
+    --strip-h: clamp(150px, 24vh, 196px);
   }
 }
 

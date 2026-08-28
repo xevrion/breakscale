@@ -1,4 +1,4 @@
-import { createElement, useCallback, useMemo, useState } from 'react';
+import { createElement, useCallback, useMemo } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import type { NodeKind } from '../sim/types';
 import {
@@ -164,84 +164,6 @@ function Glyph({ kind }: { kind: NodeKind }) {
   );
 }
 
-/**
- * A disclosure chevron. Rotates 90deg when open — a transform, which is
- * an interactive transition and therefore allowed; it is not an entrance
- * animation and the content itself never animates.
- */
-function Chevron() {
-  return (
-    <svg
-      className="pal-chev"
-      width="8"
-      height="8"
-      viewBox="0 0 8 8"
-      role="presentation"
-      aria-hidden="true"
-    >
-      <path
-        d="M2.5 1L5.5 4L2.5 7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.4}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * Collapsible section
- *
- * A real <button> with aria-expanded and aria-controls, so the rail is
- * navigable and announced correctly. The count rides in the header, so
- * a collapsed section still tells you how much is inside it.
- * ------------------------------------------------------------------ */
-
-function Section({
-  id,
-  title,
-  count,
-  open,
-  onToggle,
-  children,
-}: {
-  id: string;
-  title: string;
-  count: number;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  const bodyId = `pal-body-${id}`;
-  return (
-    <section className="pal-section">
-      <h2 className="pal-h">
-        <button
-          type="button"
-          className="pal-toggle"
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={onToggle}
-        >
-          <Chevron />
-          <span className="label pal-toggle-title">{title}</span>
-          <span className="num pal-count">{count}</span>
-        </button>
-      </h2>
-      {/* Collapsed content is unmounted rather than hidden: 27 rows of
-          hidden DOM is 27 rows the screen reader and the tab order still
-          have to walk past. */}
-      {open ? (
-        <div id={bodyId} className="pal-body">
-          {children}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 export interface PaletteProps {
   /** Add a node of `kind` to the canvas at a default position. */
   onAdd: (kind: NodeKind) => void;
@@ -264,27 +186,6 @@ export function Palette({ onAdd }: PaletteProps) {
    * silently extended the document's scroll box by ~634px.
    */
   const hintsOn = usePreference('tooltips');
-
-  /**
-   * Which sections are open. Local UI state — the shell has no business
-   * knowing whether a disclosure is expanded, and persisting it would
-   * mean a student who collapsed everything once opens the app to an
-   * empty rail.
-   */
-  // Everything open by default. The rail used to collapse a "Keys" section
-  // here; that list is gone, because it duplicated ten of the thirty-one
-  // bindings the shortcuts dialog now owns and quietly implied those ten were
-  // all of them.
-  const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set<string>());
-
-  const toggle = useCallback((id: string) => {
-    setClosed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
 
   const totalKinds = useMemo(
     () => KIND_GROUPS.reduce((n, g) => n + g.kinds.length, 0),
@@ -310,16 +211,18 @@ export function Palette({ onAdd }: PaletteProps) {
   return (
     <nav className="pal" aria-label="Components and examples">
       <div className="pal-scroll scroll">
-        <Section
-          id="components"
-          title="Components"
-          count={totalKinds}
-          open={!closed.has('components')}
-          onToggle={() => toggle('components')}
-        >
-          {/* Groups inside the section are NOT separately collapsible —
-              two levels of disclosure in a 224px rail is a filing
-              cabinet, not a tool. They are a caption plus a list. */}
+        {/* Not a disclosure. The rail itself already hides and shows with one
+            button and a keyboard shortcut, so wrapping its only remaining
+            section in a second collapse gave the same content two ways to
+            disappear and made the components one extra click away for no gain.
+            A heading and a list is the whole of it now.
+
+            Groups inside are not separately collapsible either: two levels of
+            disclosure in a 224px rail is a filing cabinet, not a tool. */}
+        <div className="pal-section">
+          <p className="label pal-heading">
+            Components <span className="pal-heading-count">{totalKinds}</span>
+          </p>
           {KIND_GROUPS.map((group) => (
             <div className="pal-group" key={group.id}>
               <p className="label pal-group-title">{group.title}</p>
@@ -379,7 +282,7 @@ export function Palette({ onAdd }: PaletteProps) {
               </ul>
             </div>
           ))}
-        </Section>
+        </div>
       </div>
     </nav>
   );
