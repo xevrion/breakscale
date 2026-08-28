@@ -8,27 +8,29 @@
 >
   <title>Breakscale</title>
   <!--
-    Two components and the wire between them: one healthy, one past its
-    limit. The smallest true picture of what this tool shows, and the same
-    object the canvas and the social card draw, so the tab icon and the
-    product read as one thing.
+    The load slider, pushed into the red.
 
-    Colours are the app's own dark palette: service blue for the caller,
-    danger red for the one in trouble. The wire steps down rather than
-    running straight, which is what puts the failing box lower and gives the
-    mark a diagonal at 16px instead of a flat pair.
+    This is the single gesture the whole product is built around: drag the
+    traffic up and watch a system leave the green, pass through the warning,
+    and fail. A bar chart or a node diagram says "some tool about systems";
+    this says what you DO here.
 
-    Four shapes, no gradients, no filters, nothing finer than 1.6px: it has
-    to survive being scaled to 16px in a browser tab.
+    Colours are the app's own status ramp (the ok, warn and danger tokens),
+    in the order a reader meets them. The thumb takes the danger colour rather than
+    a neutral white: a white thumb sat on top of the red segment and hid the
+    very thing the mark is about, which was visible only once it was rendered
+    at 16px and compared.
+
+    The ring around the thumb is the tile colour, not a stroke. It separates
+    the thumb from the track at small sizes, where a 1px outline would either
+    vanish or bloom into a smudge.
+
+    Five shapes, no gradients, no filters: it survives a browser tab.
   -->
   <rect width="32" height="32" rx="7" fill="#1d1c22" />
-  <rect x="4" y="7" width="10" height="8" rx="2" fill="#15243c" stroke="#6ea3ff" stroke-width="1.6" />
-  <rect x="18" y="17" width="10" height="8" rx="2" fill="#3a1d1f" stroke="#f0656a" stroke-width="1.6" />
-  <path
-    d="M14 11 H17 a1 1 0 0 1 1 1 V17"
-    fill="none"
-    stroke="#5a5866"
-    stroke-width="1.6"
-    stroke-linecap="round"
-  />
+  <path d="M9 11 H15 V21 H9 A5 5 0 0 1 4 16 A5 5 0 0 1 9 11 Z" fill="#4ac06e" />
+  <rect x="15" y="11" width="5" height="10" fill="#d79a2b" />
+  <path d="M20 11 H23 A5 5 0 0 1 28 16 A5 5 0 0 1 23 21 H20 Z" fill="#f0656a" />
+  <circle cx="24.5" cy="16" r="8" fill="#1d1c22" />
+  <circle cx="24.5" cy="16" r="6" fill="#f0656a" />
 </svg>

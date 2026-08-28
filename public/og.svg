@@ -34,6 +34,14 @@
     <path d="M0 90.5h1200M0 180.5h1200M0 270.5h1200M0 360.5h1200M0 450.5h1200M0 540.5h1200"/>
     <path d="M90.5 0v630M180.5 0v630M270.5 0v630M360.5 0v630M450.5 0v630M540.5 0v630M630.5 0v630M720.5 0v630M810.5 0v630M900.5 0v630M990.5 0v630M1080.5 0v630"/>
   </g>
+  <!-- The mark: the load slider pushed into the red. See public/favicon.svg. -->
+  <g transform="translate(94, 112) scale(1.9)">
+    <path d="M9 11 H15 V21 H9 A5 5 0 0 1 4 16 A5 5 0 0 1 9 11 Z" fill="#4ac06e"/>
+    <rect x="15" y="11" width="5" height="10" fill="#d79a2b"/>
+    <path d="M20 11 H23 A5 5 0 0 1 28 16 A5 5 0 0 1 23 21 H20 Z" fill="#f0656a"/>
+    <circle cx="24.5" cy="16" r="8" fill="#151419"/>
+    <circle cx="24.5" cy="16" r="6" fill="#f0656a"/>
+  </g>
   <text x="96" y="248" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="82" font-weight="700" letter-spacing="-1.8" fill="#f3f1f5">Breakscale</text>
   <text x="98" y="300" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="32" fill="#a5a1b0">Build a system. Load it until it breaks. Watch why.</text>
   <g transform="translate(236, 356)">
