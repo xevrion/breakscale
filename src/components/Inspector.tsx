@@ -2710,6 +2710,7 @@ function SingleInspector({
             to change capacity and service time; what the thing is called at
             a cloud vendor is worth knowing and worth reading after. */}
         <VendorPanel
+          nodeId={node.id}
           kind={node.kind}
           config={node.config}
           onChange={(patch) => onChange(node.id, patch)}

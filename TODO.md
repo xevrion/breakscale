@@ -69,7 +69,7 @@
   - [x] Vendor pricing gathered and cited (43 hourly prices, all sourced)
 - [ ] Challenges ("5k rps under 200ms p99")
 - [x] Request tracer (queued vs service time)
-- [ ] Cost model
+- [x] Cost model
 - [ ] Traffic scenarios: ramp, spike, diurnal, thundering herd
 - [ ] Networking layer (bandwidth + loss; latency already works)
 

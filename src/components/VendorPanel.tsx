@@ -3,6 +3,7 @@ import type { NodeConfig, NodeKind } from '../sim/types';
 import { useVendor } from '../content/vendors/useVendor';
 import { mappingFor } from '../content/vendors/lookup';
 import { DERIVED_NOTE, applySize, isSizedKind } from '../content/vendors/derive';
+import { setSize, sizeKey, useSizes } from '../content/vendors/sizing';
 import './VendorPanel.css';
 
 /* ==========================================================================
@@ -20,14 +21,17 @@ import './VendorPanel.css';
    ========================================================================== */
 
 export interface VendorPanelProps {
+  nodeId: string;
   kind: NodeKind;
   config: NodeConfig;
   onChange: (patch: Partial<NodeConfig>) => void;
 }
 
-export function VendorPanel({ kind, config, onChange }: VendorPanelProps) {
+export function VendorPanel({ nodeId, kind, config, onChange }: VendorPanelProps) {
   const vendor = useVendor();
   const mapping = useMemo(() => mappingFor(kind, vendor), [kind, vendor]);
+  const sizes_ = useSizes();
+  const chosen = vendor ? (sizes_[sizeKey(vendor.id, nodeId)] ?? null) : null;
 
   if (!vendor || !mapping) return null;
 
@@ -52,10 +56,14 @@ export function VendorPanel({ kind, config, onChange }: VendorPanelProps) {
                 it, and neither is true. */}
             <select
               className="vp-select"
-              defaultValue=""
+              value={chosen ?? ''}
               onChange={(e) => {
                 const picked = sizes.find((s) => s.name === e.target.value);
                 if (!picked) return;
+                // Remembered so the design can be priced and so the choice
+                // survives a reload. The engine never sees this: it only
+                // ever learns the capacity written below.
+                setSize(vendor.id, nodeId, picked.name);
                 // Only the fields the derivation is willing to speak to.
                 // applySize returns the config untouched for a kind or a
                 // size it cannot honestly size, so an unsizeable pick is a

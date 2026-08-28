@@ -1,0 +1,71 @@
+/* ==========================================================================
+   Estimated monthly cost.
+
+   Shares the charts strip's header shapes (.mx-head and friends) so it
+   reads as another panel in that row rather than as a visitor.
+   ========================================================================== */
+
+.ct {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ct-empty,
+.ct-note,
+.ct-unpriced {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+.ct-note {
+  margin-top: var(--sp-2);
+}
+
+/* The gap in the total, marked rather than left as body text: it is the one
+   line here that changes how the number above should be read. */
+.ct-unpriced {
+  margin-top: var(--sp-2);
+  color: var(--warn);
+}
+
+.ct-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.ct-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.ct-name {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The size is the receipt for the number beside it, so it is present but
+   never competes with the name or the money. */
+.ct-size {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+}
+
+.ct-money {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}

@@ -2493,7 +2493,13 @@ export default function App() {
             </button>
           </div>
           <PanelSlot open={metricsVisible} edge="bottom">
-            {snapshot ? <Metrics snapshot={snapshot} nodeNames={nodeNames} /> : null}
+            {snapshot ? (
+              <Metrics
+                snapshot={snapshot}
+                nodeNames={nodeNames}
+                nodes={topology.nodes}
+              />
+            ) : null}
             <PanelResizer
               edge="bottom"
               property="--strip-h"
