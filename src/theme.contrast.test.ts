@@ -165,6 +165,58 @@ describe.each(THEMES)('%s theme', (_name, tokens) => {
   });
 });
 
+describe('annotation shades', () => {
+  // The shades are declared once, in :root, as aliases of component kinds.
+  // They are deliberately NOT redeclared for dark: the kind tokens are, so
+  // an alias resolves to the dark trio on its own. That indirection is the
+  // whole reason a section keeps its identity across a theme switch, so the
+  // check has to resolve each alias against the theme being tested rather
+  // than expecting an --ann-* block to exist in both.
+  const light = THEMES[0]![1];
+  const dark = THEMES[1]![1];
+
+  const shades = [
+    ...new Set(
+      Object.keys(light)
+        .map((k) => /^--ann-(\d+)-ink$/.exec(k)?.[1])
+        .filter((k): k is string => Boolean(k)),
+    ),
+  ];
+
+  it('offers the full palette', () => {
+    expect(shades.length).toBe(13);
+  });
+
+  /** Follow --ann-N-role through its kind alias into `theme`. */
+  function shadeColour(theme: Tokens, tone: string, role: string): string {
+    const aliased = light[`--ann-${tone}-${role}`];
+    if (!aliased) throw new Error(`missing --ann-${tone}-${role}`);
+    const m = /^var\((--[a-z0-9-]+)\)$/i.exec(aliased.trim());
+    if (!m) return aliased.trim();
+    const v = resolve(theme, m[1]!);
+    if (!v) throw new Error(`${m[1]} is not defined in this theme`);
+    return v;
+  }
+
+  it.each([
+    ['light', light],
+    ['dark', dark],
+  ])('reads in the %s theme, every shade', (_name, theme) => {
+    // A shade that is unreadable in one theme is worse than not offering it:
+    // a student picks it in light mode and loses the label in dark.
+    for (const tone of shades) {
+      expect(
+        ratio(shadeColour(theme, tone, 'ink'), shadeColour(theme, tone, 'fill')),
+        `shade ${tone} ink on fill`,
+      ).toBeGreaterThanOrEqual(AA);
+      expect(
+        ratio(shadeColour(theme, tone, 'line'), shadeColour(theme, tone, 'fill')),
+        `shade ${tone} border on fill`,
+      ).toBeGreaterThanOrEqual(AA_LARGE);
+    }
+  });
+});
+
 describe('theme parity', () => {
   it('defines the same colour tokens in both themes', () => {
     // A token present in light and missing in dark silently falls back to the

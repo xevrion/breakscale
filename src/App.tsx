@@ -924,10 +924,38 @@ export default function App() {
     [history, setAnnotations],
   );
 
+  const handleSetSectionTone = useCallback(
+    (id: string, tone: number) => {
+      const anns = topoLiveRef.current.annotations ?? [];
+      const cur = anns.find((a) => a.id === id);
+      if (!cur || cur.kind !== 'section' || cur.tone === tone) return;
+      // Wrapped rather than clamped, matching sanitizeAnnotations, so a shade
+      // index can never land outside the palette and render an unstyled frame.
+      const next =
+        ((Math.floor(tone) % SECTION_TONE_COUNT) + SECTION_TONE_COUNT) %
+        SECTION_TONE_COUNT;
+      history.commit('section shade', snapRef.current);
+      setAnnotations(anns.map((a) => (a.id === id ? { ...a, tone: next } : a)));
+    },
+    [history, setAnnotations],
+  );
+
   /** Palette click (no drop point): place at the centre of the current
    *  view, the same aim handlePaletteAdd uses for components. */
   const handlePaletteAnnotation = useCallback(
     (tool: AnnotationTool) => {
+      // Arm the tool; do not place a shape. A section dropped at the view
+      // centre lands on whatever is already there, and a node that ends up
+      // inside its bounds is silently carried along the next time the frame
+      // is dragged. Arming lets the student draw the frame around what they
+      // meant, which is the only way the canvas can know what they meant.
+      if (armToolRef.current) {
+        armToolRef.current(tool);
+        return;
+      }
+      // No canvas mounted to arm (the rail can outlive it during a layout
+      // change). Falling back to placing one is better than the click doing
+      // nothing at all.
       const centre = viewCenterRef.current?.() ?? { x: 240, y: 200 };
       const gx = (v: number) => Math.round(v / GRID) * GRID;
       if (tool === 'note') {
@@ -961,6 +989,8 @@ export default function App() {
    * palette clicks on the company preset created nodes at screen y ≈ -257.
    */
   const viewCenterRef = useRef<(() => { x: number; y: number }) | null>(null);
+  const armToolRef = useRef<((tool: AnnotationTool) => void) | null>(null);
+  const [armedTool, setArmedTool] = useState<AnnotationTool | null>(null);
 
   /** Palette click (no drop point): place at the centre of the current view. */
   const handlePaletteAdd = useCallback(
@@ -1846,7 +1876,11 @@ export default function App() {
         }
       >
         <PanelSlot open={layout.library} edge="left">
-          <Palette onAdd={handlePaletteAdd} onAddAnnotation={handlePaletteAnnotation} />
+          <Palette
+            onAdd={handlePaletteAdd}
+            onAddAnnotation={handlePaletteAnnotation}
+            armedTool={armedTool}
+          />
         </PanelSlot>
 
         <main className="app-stage">
@@ -1884,8 +1918,11 @@ export default function App() {
               onEditNote={handleEditNote}
               onEditSectionLabel={handleEditSectionLabel}
               onSetNoteSize={handleSetNoteSize}
+              onSetSectionTone={handleSetSectionTone}
               spark={spark}
               viewCenterRef={viewCenterRef}
+              armToolRef={armToolRef}
+              onToolChange={setArmedTool}
               fitSignal={fitNonce}
               visibleRef={stageSafeRef}
             />

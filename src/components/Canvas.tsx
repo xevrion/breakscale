@@ -406,6 +406,8 @@ export interface CanvasProps {
   onEditNote?: (id: string, text: string) => void;
   onEditSectionLabel?: (id: string, label: string) => void;
   onSetNoteSize?: (id: string, size: Note['size']) => void;
+  /** Recolour a section. `tone` is a palette index, never a colour. */
+  onSetSectionTone?: (id: string, tone: number) => void;
   /** Optional: per-node sparkline history. Omitted -> no sparklines. */
   spark?: SparkData;
   /**
@@ -416,6 +418,19 @@ export interface CanvasProps {
    * view changes every pan/zoom frame, and nothing should re-render for it.
    */
   viewCenterRef?: MutableRefObject<(() => { x: number; y: number }) | null>;
+  /**
+   * Arms the note or section tool from outside, so the palette rows can put
+   * the canvas into "draw the next one" instead of spawning a shape.
+   *
+   * A section that appears at the view centre lands on whatever is already
+   * there, and every node inside its bounds is then carried along when it is
+   * dragged. The student did not ask for that and gets no warning, so the
+   * palette arms the same tool the B key does and the frame is drawn where
+   * it was actually wanted.
+   */
+  armToolRef?: MutableRefObject<((tool: 'note' | 'section') => void) | null>;
+  /** Fires when a tool is armed or disarmed, including by the N and B keys. */
+  onToolChange?: (tool: 'note' | 'section' | null) => void;
   /**
    * Bumped by the shell when the diagram was replaced wholesale (a preset
    * load) and the camera should re-frame the new content. Node edits never
@@ -1986,10 +2001,29 @@ const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewPro
  * divided back into world units, so a handle is the same size under the
  * finger at every zoom instead of shrinking into an untouchable speck.
  */
-function SectionChrome({ section: s, ui }: { section: Section; ui: number }) {
+function SectionChrome({
+  section: s,
+  ui,
+  flipTones,
+}: {
+  section: Section;
+  ui: number;
+  /** Put the shade row above the frame; set when below is off screen. */
+  flipTones?: boolean;
+}) {
   const rect = { x: s.x, y: s.y, w: s.width, h: s.height };
   const hs = 9 * ui;
   const hit = 36 * ui;
+  // The shade row sits BELOW the frame by default, because ABOVE is where
+  // the label plate lives and the two would fight for the same strip. It
+  // flips above when there is no room below: a section near the bottom of
+  // the viewport would otherwise put its own picker under the charts strip,
+  // where it cannot be clicked at all. When it flips it clears the plate.
+  const sw = 15 * ui;
+  const swGap = 4 * ui;
+  const below = s.y + s.height + 10 * ui;
+  const flip = flipTones ?? false;
+  const swY = flip ? s.y - SEC_LABEL_H - 12 * ui - sw : below;
   return (
     <g className="cv-ann-sel">
       <rect
@@ -2000,6 +2034,28 @@ function SectionChrome({ section: s, ui }: { section: Section; ui: number }) {
         height={s.height + 6 * ui}
         rx={8 + 3 * ui}
       />
+
+      {/* Shade swatches. An index per swatch, not a colour: the stylesheet
+          resolves it per theme, so a shade chosen here survives a switch to
+          dark instead of becoming an unreadable pale plate. */}
+      <g className="cv-sec-tones">
+        {Array.from({ length: SECTION_TONE_COUNT }, (_, i) => (
+          <rect
+            key={i}
+            className={`cv-sec-tone${s.tone === i ? ' is-active' : ''}`}
+            data-hit="section-tone"
+            data-id={s.id}
+            data-tone={i}
+            role="button"
+            aria-label={`Section shade ${i + 1}`}
+            x={s.x + i * (sw + swGap)}
+            y={swY}
+            width={sw}
+            height={sw}
+            rx={3 * ui}
+          />
+        ))}
+      </g>
       {RESIZE_DIRS.map((dir) => {
         const a = handleAnchor(rect, dir);
         return (
@@ -2946,7 +3002,8 @@ type HitKind =
   | 'note'
   | 'section'
   | 'section-resize'
-  | 'note-size';
+  | 'note-size'
+  | 'section-tone';
 
 interface Hit {
   kind: HitKind;
@@ -2955,9 +3012,17 @@ interface Hit {
   dir: string | null;
   /** Requested size, for 'note-size' hits. */
   size: string | null;
+  /** Requested shade index, for 'section-tone' hits. */
+  tone: string | null;
 }
 
-const BACKGROUND_HIT: Hit = { kind: 'background', id: null, dir: null, size: null };
+const BACKGROUND_HIT: Hit = {
+  kind: 'background',
+  id: null,
+  dir: null,
+  size: null,
+  tone: null,
+};
 
 interface Pending {
   pointerId: number;
@@ -3044,8 +3109,11 @@ export default function Canvas({
   onEditNote,
   onEditSectionLabel,
   onSetNoteSize,
+  onSetSectionTone,
   spark,
   viewCenterRef,
+  armToolRef,
+  onToolChange,
   fitSignal = 0,
   visibleRef,
 }: CanvasProps) {
@@ -3215,6 +3283,25 @@ export default function Canvas({
    * with the rail open by definition, and a node placed at the centre of
    * the full surface would land offset toward, or under, that very rail.
    */
+  // Reported from an effect rather than at each call site, so the keyboard
+  // shortcuts, the palette and the tool clearing itself after a draw all
+  // reach the shell through one path.
+  useEffect(() => {
+    onToolChange?.(tool);
+  }, [tool, onToolChange]);
+
+  useEffect(() => {
+    if (!armToolRef) return;
+    armToolRef.current = (t) => {
+      setPendingLink(null);
+      // Re-arming the tool already armed disarms it, matching the keyboard.
+      setTool((cur) => (cur === t ? null : t));
+    };
+    return () => {
+      armToolRef.current = null;
+    };
+  }, [armToolRef]);
+
   useEffect(() => {
     if (!viewCenterRef) return;
     viewCenterRef.current = () => {
@@ -3422,6 +3509,7 @@ export default function Canvas({
       id: found.getAttribute('data-id'),
       dir: found.getAttribute('data-dir'),
       size: found.getAttribute('data-size'),
+      tone: found.getAttribute('data-tone'),
     };
   }, []);
 
@@ -3589,7 +3677,7 @@ export default function Canvas({
             const dup = onDuplicateForDrag(id);
             if (dup) {
               const cw = toWorld(clientX, clientY);
-              p.hit = { kind: 'node', id: dup.id, dir: null, size: null };
+              p.hit = { kind: 'node', id: dup.id, dir: null, size: null, tone: null };
               p.worldX = cw.x;
               p.worldY = cw.y;
               p.grabDx = node.x - cw.x;
@@ -3714,7 +3802,9 @@ export default function Canvas({
         }
 
         case 'note-size':
-          // Dragging a size button means nothing; the click path handles it.
+        case 'section-tone':
+          // Dragging a size button or a swatch means nothing; the click path
+          // handles both.
           p.mode = 'pan';
           break;
 
@@ -4080,6 +4170,14 @@ export default function Canvas({
             }
             break;
 
+          case 'section-tone': {
+            const tone = Number(p.hit.tone);
+            if (p.hit.id && Number.isInteger(tone)) {
+              onSetSectionTone?.(p.hit.id, tone);
+            }
+            break;
+          }
+
           default:
             if (!additive) clearSelection();
             break;
@@ -4161,6 +4259,7 @@ export default function Canvas({
       onCreateNote,
       onCreateSection,
       onSetNoteSize,
+      onSetSectionTone,
       clearSelection,
       selectOne,
       setSelection,
@@ -4714,6 +4813,26 @@ export default function Canvas({
     [visibleRect],
   );
 
+  /**
+   * Would a section's shade row fall outside what the student can see?
+   *
+   * Measured against the visible rect rather than the surface, because the
+   * charts strip floats over the canvas: a row inside the surface but under
+   * that strip is just as unclickable as one off the bottom of the window.
+   */
+  const toneRowWouldClip = useCallback(
+    (s: Section) => {
+      const rects = visibleRect();
+      if (!rects) return false;
+      const { surface, view: vis } = rects;
+      // Screen y of the frame's bottom, plus the row and its gap.
+      const bottom =
+        surface.top + (s.y + s.height) * viewRef.current.k + viewRef.current.y;
+      return bottom + 34 > vis.bottom;
+    },
+    [visibleRect],
+  );
+
   const fitToContent = useCallback(
     () => fitTo(topology.nodes),
     [fitTo, topology.nodes],
@@ -5251,7 +5370,16 @@ export default function Canvas({
                   .filter((a) => selectedIds.has(a.id))
                   .map((a) =>
                     isSection(a) ? (
-                      <SectionChrome key={a.id} section={a} ui={1 / view.k} />
+                      <SectionChrome
+                        key={a.id}
+                        section={a}
+                        ui={1 / view.k}
+                        // Flip when the row would land outside the UNCOVERED
+                        // area. visibleRect already knows where the floating
+                        // panels are, so a section near the bottom does not
+                        // hide its own picker under the charts strip.
+                        flipTones={toneRowWouldClip(a)}
+                      />
                     ) : (
                       <NoteChrome key={a.id} note={a} ui={1 / view.k} />
                     ),

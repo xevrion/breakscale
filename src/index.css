@@ -549,6 +549,22 @@
      -fill tints the frame's interior, -line strokes its border, -ink is the
      label text on the fill.
      ------------------------------------------------------------------------ */
+  /* Twelve shades round the hue wheel, plus a neutral.
+
+     Every one is an ALIAS of a component kind's trio, never a literal. That
+     is what makes a shade theme-aware for free: the dark palette redefines
+     the kind tokens, so a section picked in light mode arrives in dark mode
+     as the dark version of the same shade rather than as a pale plate nobody
+     can read. It is also why there is no colour picker. An arbitrary hex
+     pinned into a saved design is a colour that cannot follow the theme, and
+     the reason `tone` is an index in the first place.
+
+     Ordered so that adjacent indices are visibly different, rather than by
+     hue, because the picker shows them in a row and two neighbouring blues
+     read as one repeated swatch.
+
+     Contrast is asserted in theme.contrast.test.ts alongside the kinds they
+     alias; measured, the worst ink-on-fill of the set is 6.90:1. */
   --ann-0-fill: var(--kind-lb-fill);
   --ann-0-line: var(--kind-lb-stroke);
   --ann-0-ink: var(--kind-lb-ink);
@@ -569,9 +585,40 @@
   --ann-4-line: var(--kind-pubsub-stroke);
   --ann-4-ink: var(--kind-pubsub-ink);
 
-  --ann-5-fill: var(--surface-2);
-  --ann-5-line: var(--line-3);
-  --ann-5-ink: var(--text-dim);
+  --ann-5-fill: var(--kind-cdn-fill);
+  --ann-5-line: var(--kind-cdn-stroke);
+  --ann-5-ink: var(--kind-cdn-ink);
+
+  --ann-6-fill: var(--kind-breaker-fill);
+  --ann-6-line: var(--kind-breaker-stroke);
+  --ann-6-ink: var(--kind-breaker-ink);
+
+  --ann-7-fill: var(--kind-cron-fill);
+  --ann-7-line: var(--kind-cron-stroke);
+  --ann-7-ink: var(--kind-cron-ink);
+
+  --ann-8-fill: var(--kind-client-fill);
+  --ann-8-line: var(--kind-client-stroke);
+  --ann-8-ink: var(--kind-client-ink);
+
+  --ann-9-fill: var(--kind-writebehind-fill);
+  --ann-9-line: var(--kind-writebehind-stroke);
+  --ann-9-ink: var(--kind-writebehind-ink);
+
+  --ann-10-fill: var(--kind-vectordb-fill);
+  --ann-10-line: var(--kind-vectordb-stroke);
+  --ann-10-ink: var(--kind-vectordb-ink);
+
+  --ann-11-fill: var(--kind-transcoder-fill);
+  --ann-11-line: var(--kind-transcoder-stroke);
+  --ann-11-ink: var(--kind-transcoder-ink);
+
+  /* The neutral. Last so it is the far end of the row, and aliased to the
+     surface tokens rather than to a kind: a section that should not claim a
+     colour at all still has to be one of the choices. */
+  --ann-12-fill: var(--surface-2);
+  --ann-12-line: var(--line-3);
+  --ann-12-ink: var(--text-dim);
 
   /* ------------------------------------------------------------------------
      Type stacks. System-first: the OS UI font is the one a student's eye is

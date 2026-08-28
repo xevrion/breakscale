@@ -136,6 +136,41 @@ export function measureText(text: string, style: TextStyle): number {
 }
 
 /**
+ * Where the first baseline sits inside a line box of `lineH`, in CSS px.
+ *
+ * CSS centres the font's own box (ascent + descent) in the line box and puts
+ * the baseline an ascent below the top. A single constant cannot stand in for
+ * that across faces: measured at 16px, fontBoundingBoxAscent is 1.063em for
+ * the UI sans and 0.938em for Caveat, so text set in one and positioned for
+ * the other sits visibly high or low. That mattered as soon as notes gained a
+ * choice of typeface.
+ *
+ * Falls back to the old 0.8em approximation where there is no canvas to
+ * measure with (jsdom), which keeps the pure layout functions testable.
+ */
+export function baselineIn(lineH: number, style: TextStyle): number {
+  const c = context();
+  if (!c) return (lineH - style.size) / 2 + style.size * 0.8;
+  const key = `bl|${style.size}|${style.weight}|${style.family}|${lineH}`;
+  const hit = cache.get(key);
+  if (hit !== undefined) return hit;
+
+  c.font = `${style.weight} ${style.size}px ${stack(style.family)}`;
+  // Both halves are measured. Deriving the descent from the ascent would put
+  // an invented number back into the arithmetic this function exists to fix.
+  const m = c.measureText('Hxg');
+  const asc = m.fontBoundingBoxAscent;
+  const desc = m.fontBoundingBoxDescent;
+  const usable =
+    Number.isFinite(asc) && Number.isFinite(desc) && asc > 0 && asc + desc > 0;
+  const v = usable
+    ? (lineH - (asc + desc)) / 2 + asc
+    : (lineH - style.size) / 2 + style.size * 0.8;
+  cache.set(key, v);
+  return v;
+}
+
+/**
  * Longest prefix of `text` that fits `budget` px in `style`, with a single
  * U+2026 appended when anything was dropped.
  *

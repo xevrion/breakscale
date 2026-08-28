@@ -7,7 +7,7 @@
  * DOM. Canvas.tsx consumes these; it does not restate them.
  */
 
-import { measureText } from './textMetrics';
+import { baselineIn, measureText } from './textMetrics';
 import type { TextStyle } from './textMetrics';
 import type { AnnotationFont, Note } from '../sim/annotations';
 
@@ -124,16 +124,19 @@ export function layoutNote(
   font?: AnnotationFont,
 ): NoteLayout {
   const spec = NOTE_SIZES[size];
-  const lines = wrapText(text, width, noteStyle(size, font));
+  const style = noteStyle(size, font);
+  const lines = wrapText(text, width, style);
   return {
     lines,
     font: spec.font,
     lineH: spec.line,
     weight: spec.weight,
     height: Math.max(spec.line, lines.length * spec.line),
-    // Centre the glyphs in their line box the way CSS line-height does:
-    // half the leading above, then the ascent (~0.8em for the UI stack).
-    baseline: (spec.line - spec.font) / 2 + spec.font * 0.8,
+    // Centre the glyphs in their line box the way CSS line-height does, from
+    // the face's OWN measured ascent and descent. A fixed 0.8em was close
+    // enough while every note was set in the UI sans; Caveat's box is a tenth
+    // of an em shallower, which is a visible drop at the `lg` size.
+    baseline: baselineIn(spec.line, style),
   };
 }
 

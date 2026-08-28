@@ -250,6 +250,19 @@
   outline-offset: -2px;
 }
 
+/* An armed annotation tool. The canvas already switches to a crosshair, but
+   that is only visible where the pointer is; a student who looks back at the
+   rail to ask "did that do anything?" needs the answer there too. */
+.pal-row.is-armed {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.pal-row.is-armed .pal-glyph {
+  color: var(--accent);
+}
+
 .pal-empty {
   padding: var(--sp-2) var(--sp-4) var(--sp-4);
   margin: 0;

@@ -107,8 +107,15 @@ export const NOTE_DEFAULT_WIDTH = 220;
 export const SECTION_MIN_WIDTH = 120;
 export const SECTION_MIN_HEIGHT = 90;
 
-/** How many tones the section palette offers. Kept small on purpose. */
-export const SECTION_TONE_COUNT = 6;
+/**
+ * How many shades the section palette offers.
+ *
+ * Each is an index, never a colour. The stylesheet resolves an index to a
+ * trio that is redefined per theme, so a section keeps its identity across a
+ * theme switch instead of carrying a hex that was only readable in one of
+ * them. Thirteen: twelve hues plus a neutral.
+ */
+export const SECTION_TONE_COUNT = 13;
 
 let counter = 0;
 

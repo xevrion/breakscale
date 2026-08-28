@@ -183,14 +183,14 @@ const ANN_ROWS: {
   {
     tool: 'note',
     name: 'Note',
-    hint: 'Free text placed anywhere (N)',
+    hint: 'Click, then click the canvas to place text (N)',
     // Lucide "type": text as text.
     icon: ['M4 7V5h16v2', 'M9 20h6', 'M12 5v15'],
   },
   {
     tool: 'section',
     name: 'Section',
-    hint: 'A labelled frame around a group (B)',
+    hint: 'Click, then drag on the canvas to frame a group (B)',
     // A frame with a label notch: the thing it draws.
     icon: [
       'M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
@@ -223,8 +223,17 @@ function matchesKind(kind: NodeKind, group: KindGroup, needle: string): boolean 
 export interface PaletteProps {
   /** Add a node of `kind` to the canvas at a default position. */
   onAdd: (kind: NodeKind) => void;
-  /** Place an annotation at the centre of the current view. */
+  /**
+   * Arm the note or section tool. The next drag on the canvas draws the
+   * shape; clicking the row again disarms.
+   */
   onAddAnnotation?: (tool: AnnotationTool) => void;
+  /**
+   * Which tool is armed, so the row can say so. A control that puts the app
+   * into a mode has to show the mode is on, or the changed cursor is the only
+   * evidence and the student who looks back at the rail sees nothing.
+   */
+  armedTool?: AnnotationTool | null;
 }
 
 function handleDragStart(event: DragEvent<HTMLButtonElement>, kind: NodeKind) {
@@ -240,7 +249,7 @@ function handleAnnDragStart(event: DragEvent<HTMLButtonElement>, tool: Annotatio
   dt.effectAllowed = 'copy';
 }
 
-export function Palette({ onAdd, onAddAnnotation }: PaletteProps) {
+export function Palette({ onAdd, onAddAnnotation, armedTool }: PaletteProps) {
   /**
    * Whether the hover explanations are on. With them OFF (the default) the
    * per-row "?" mark is not rendered at all: <Term> degrades to its bare
@@ -479,7 +488,8 @@ export function Palette({ onAdd, onAddAnnotation }: PaletteProps) {
                   <li key={row.tool} className="pal-item">
                     <button
                       type="button"
-                      className="pal-row"
+                      className={`pal-row${armedTool === row.tool ? ' is-armed' : ''}`}
+                      aria-pressed={armedTool === row.tool}
                       draggable
                       onDragStart={(e) => handleAnnDragStart(e, row.tool)}
                       onClick={() => onAddAnnotation(row.tool)}

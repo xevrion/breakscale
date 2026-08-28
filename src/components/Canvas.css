@@ -1304,6 +1304,48 @@
   --sec-ink: var(--ann-5-ink);
 }
 
+.cv-section[data-tone='6'] {
+  --sec-fill: var(--ann-6-fill);
+  --sec-line: var(--ann-6-line);
+  --sec-ink: var(--ann-6-ink);
+}
+
+.cv-section[data-tone='7'] {
+  --sec-fill: var(--ann-7-fill);
+  --sec-line: var(--ann-7-line);
+  --sec-ink: var(--ann-7-ink);
+}
+
+.cv-section[data-tone='8'] {
+  --sec-fill: var(--ann-8-fill);
+  --sec-line: var(--ann-8-line);
+  --sec-ink: var(--ann-8-ink);
+}
+
+.cv-section[data-tone='9'] {
+  --sec-fill: var(--ann-9-fill);
+  --sec-line: var(--ann-9-line);
+  --sec-ink: var(--ann-9-ink);
+}
+
+.cv-section[data-tone='10'] {
+  --sec-fill: var(--ann-10-fill);
+  --sec-line: var(--ann-10-line);
+  --sec-ink: var(--ann-10-ink);
+}
+
+.cv-section[data-tone='11'] {
+  --sec-fill: var(--ann-11-fill);
+  --sec-line: var(--ann-11-line);
+  --sec-ink: var(--ann-11-ink);
+}
+
+.cv-section[data-tone='12'] {
+  --sec-fill: var(--ann-12-fill);
+  --sec-line: var(--ann-12-line);
+  --sec-ink: var(--ann-12-ink);
+}
+
 /* THE INTERIOR IS GRABBABLE, BUT ONLY WHERE IT IS EMPTY.
    Sections paint behind everything, so a node, edge or port sitting on top of
    the frame receives the press first and a section can never make its own
@@ -1509,6 +1551,91 @@
 .cv-handle-hit[data-dir='ne'],
 .cv-handle-hit[data-dir='sw'] {
   cursor: nesw-resize;
+}
+
+/* Shade swatches under a selected section. Each paints its own tone's fill
+   and border, so the row is a preview of the result rather than a legend
+   that has to be learned. Screen-constant like every other piece of
+   selection chrome: the geometry arrives already divided by the zoom. */
+.cv-sec-tone {
+  cursor: pointer;
+  stroke-width: 1;
+}
+
+.cv-sec-tone[data-tone='0'] {
+  fill: var(--ann-0-fill);
+  stroke: var(--ann-0-line);
+}
+
+.cv-sec-tone[data-tone='1'] {
+  fill: var(--ann-1-fill);
+  stroke: var(--ann-1-line);
+}
+
+.cv-sec-tone[data-tone='2'] {
+  fill: var(--ann-2-fill);
+  stroke: var(--ann-2-line);
+}
+
+.cv-sec-tone[data-tone='3'] {
+  fill: var(--ann-3-fill);
+  stroke: var(--ann-3-line);
+}
+
+.cv-sec-tone[data-tone='4'] {
+  fill: var(--ann-4-fill);
+  stroke: var(--ann-4-line);
+}
+
+.cv-sec-tone[data-tone='5'] {
+  fill: var(--ann-5-fill);
+  stroke: var(--ann-5-line);
+}
+
+.cv-sec-tone[data-tone='6'] {
+  fill: var(--ann-6-fill);
+  stroke: var(--ann-6-line);
+}
+
+.cv-sec-tone[data-tone='7'] {
+  fill: var(--ann-7-fill);
+  stroke: var(--ann-7-line);
+}
+
+.cv-sec-tone[data-tone='8'] {
+  fill: var(--ann-8-fill);
+  stroke: var(--ann-8-line);
+}
+
+.cv-sec-tone[data-tone='9'] {
+  fill: var(--ann-9-fill);
+  stroke: var(--ann-9-line);
+}
+
+.cv-sec-tone[data-tone='10'] {
+  fill: var(--ann-10-fill);
+  stroke: var(--ann-10-line);
+}
+
+.cv-sec-tone[data-tone='11'] {
+  fill: var(--ann-11-fill);
+  stroke: var(--ann-11-line);
+}
+
+.cv-sec-tone[data-tone='12'] {
+  fill: var(--ann-12-fill);
+  stroke: var(--ann-12-line);
+}
+
+/* The chosen one, marked with its own ink so the cue survives a theme
+   switch along with the shade it marks. */
+.cv-sec-tone.is-active {
+  stroke: var(--text);
+  stroke-width: 2.5;
+}
+
+.cv-sec-tone:hover {
+  stroke-width: 2;
 }
 
 .cv-note-size rect {
