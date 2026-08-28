@@ -280,9 +280,11 @@ export function Palette({
    * mean a student who collapsed everything once opens the app to an
    * empty rail.
    */
-  const [closed, setClosed] = useState<ReadonlySet<string>>(
-    () => new Set<string>(['keys']),
-  );
+  // Everything open by default. The rail used to collapse a "Keys" section
+  // here; that list is gone, because it duplicated ten of the thirty-one
+  // bindings the shortcuts dialog now owns and quietly implied those ten were
+  // all of them.
+  const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set<string>());
 
   const toggle = useCallback((id: string) => {
     setClosed((prev) => {
@@ -317,6 +319,43 @@ export function Palette({
   return (
     <nav className="pal" aria-label="Components and examples">
       <div className="pal-scroll scroll">
+        <Section
+          id="examples"
+          title="Examples"
+          count={presets.length}
+          open={!closed.has('examples')}
+          onToggle={() => toggle('examples')}
+        >
+          <ul className="pal-list">
+            {presets.map((preset) => {
+              const active = preset.id === activePresetId;
+              return (
+                <li key={preset.id}>
+                  <button
+                    type="button"
+                    className="pal-row pal-row-preset"
+                    data-active={active || undefined}
+                    aria-current={active ? 'true' : undefined}
+                    onClick={() => onLoadPreset(preset)}
+                    title={preset.description}
+                  >
+                    {/* The active marker is a glyph slot, not a border on
+                        the row: a coloured edge plus a radius is the shape
+                        the design rules forbid, and the slot also keeps
+                        every preset name on one left axis whether or not
+                        it is the active one. */}
+                    <span className="pal-mark" aria-hidden="true" />
+                    <span className="pal-preset-text">
+                      <span className="pal-name">{preset.name}</span>
+                      <span className="pal-note">{preset.tagline}</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+
         <Section
           id="components"
           title="Components"
@@ -386,94 +425,6 @@ export function Palette({
               </ul>
             </div>
           ))}
-        </Section>
-
-        <Section
-          id="examples"
-          title="Examples"
-          count={presets.length}
-          open={!closed.has('examples')}
-          onToggle={() => toggle('examples')}
-        >
-          <ul className="pal-list">
-            {presets.map((preset) => {
-              const active = preset.id === activePresetId;
-              return (
-                <li key={preset.id}>
-                  <button
-                    type="button"
-                    className="pal-row pal-row-preset"
-                    data-active={active || undefined}
-                    aria-current={active ? 'true' : undefined}
-                    onClick={() => onLoadPreset(preset)}
-                    title={preset.description}
-                  >
-                    {/* The active marker is a glyph slot, not a border on
-                        the row: a coloured edge plus a radius is the shape
-                        the design rules forbid, and the slot also keeps
-                        every preset name on one left axis whether or not
-                        it is the active one. */}
-                    <span className="pal-mark" aria-hidden="true" />
-                    <span className="pal-preset-text">
-                      <span className="pal-name">{preset.name}</span>
-                      <span className="pal-note">{preset.tagline}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </Section>
-
-        <Section
-          id="keys"
-          title="Keys"
-          count={10}
-          open={!closed.has('keys')}
-          onToggle={() => toggle('keys')}
-        >
-          <dl className="pal-keylist">
-            <div className="pal-keyrow">
-              <dt className="pal-key">Space</dt>
-              <dd className="pal-keydesc">Pause / resume</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">S</dt>
-              <dd className="pal-keydesc">Step one tick</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">Del</dt>
-              <dd className="pal-keydesc">Remove selected</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">Drag</dt>
-              <dd className="pal-keydesc">Port to port connects</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">Shift</dt>
-              <dd className="pal-keydesc">Add to selection</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">Esc</dt>
-              <dd className="pal-keydesc">Cancel / deselect</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">?</dt>
-              <dd className="pal-keydesc">Open the glossary</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">C</dt>
-              <dd className="pal-keydesc">Components rail</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">I</dt>
-              <dd className="pal-keydesc">Inspector panel</dd>
-            </div>
-            <div className="pal-keyrow">
-              <dt className="pal-key">M</dt>
-              <dd className="pal-keydesc">Metrics charts</dd>
-            </div>
-          </dl>
         </Section>
       </div>
     </nav>

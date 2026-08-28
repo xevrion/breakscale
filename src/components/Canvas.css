@@ -1093,6 +1093,18 @@
   font-feature-settings: 'tnum' 1;
   color: var(--text-faint);
   pointer-events: none;
+
+  /* A surface of its own, because this text floats OVER the canvas and a node
+     panned underneath it left both unreadable: two sets of glyphs at similar
+     weight occupying the same pixels. The other floating chrome in this corner
+     (the metrics toggle, the zoom cluster) already sits on --surface, so the
+     ledger was the one overlay asserting it could be read against anything.
+     Padding and radius match the 32px controls beside it so the row reads as
+     one strip rather than a label that happens to be nearby. */
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  border: var(--bw) solid var(--border);
 }
 
 /* The elapsed clock. Units print lowercase ("1.5s", "2m 05s"): the ledger's
@@ -1116,6 +1128,15 @@
   align-items: center;
   white-space: nowrap;
   pointer-events: none;
+
+  /* Same reasoning as the ledger below: quiet text is still unreadable with a
+     node panned behind it, and this row sits top-centre where nodes pass
+     constantly. The surface is what makes "quiet" survive contact with the
+     diagram; without it the text is only quiet until something moves. */
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  border: var(--bw) solid var(--border);
 }
 
 .cv-zoom {
