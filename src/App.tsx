@@ -16,6 +16,7 @@ import type {
   ReactNode,
 } from 'react';
 import type { NodeConfig, NodeKind, SimNode, SimSnapshot, Topology } from './sim/types';
+import { useCoarsePointer } from './useCoarsePointer';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
 import type { Preset } from './sim/presets';
@@ -646,6 +647,7 @@ export default function App() {
   const [layout, setLayout] = useState<LayoutPrefs>(loadLayout);
 
   const phone = useSyncExternalStore(subscribePhone, isPhone, isPhoneServer);
+  const coarse = useCoarsePointer();
 
   /**
    * The bar's real height, so everything that must clear it can.
@@ -824,22 +826,30 @@ export default function App() {
       {
         label: 'Glossary',
         icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z',
-        hint: '?',
+        ...(coarse ? {} : { hint: '?' }),
         onSelect: () => openGlossary(),
       },
-      {
-        label: 'Keyboard shortcuts',
-        icon: 'M2 5.5A2.5 2.5 0 0 1 4.5 3h15A2.5 2.5 0 0 1 22 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18.5zM6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6M7 17h10',
-        hint: 'Ctrl+/',
-        onSelect: () => setShortcutsOpen(true),
-      },
+      /* Dropped entirely on a touch device: a list of key bindings is not
+         "less useful" without a keyboard, it is inapplicable, and a menu
+         that offers it is describing an app the reader does not have. The
+         binding printed beside the Glossary row goes for the same reason. */
+      ...(coarse
+        ? []
+        : [
+            {
+              label: 'Keyboard shortcuts',
+              icon: 'M2 5.5A2.5 2.5 0 0 1 4.5 3h15A2.5 2.5 0 0 1 22 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18.5zM6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6M7 17h10',
+              hint: 'Ctrl+/',
+              onSelect: () => setShortcutsOpen(true),
+            },
+          ]),
       {
         label: 'Settings',
         icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
         onSelect: () => setSettingsOpen(true),
       },
     ],
-    [openGlossary],
+    [openGlossary, coarse],
   );
 
   /**

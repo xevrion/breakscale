@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { usePresence } from './presence';
+import { useCoarsePointer } from '../useCoarsePointer';
 import {
   setPreference,
   togglePreference,
@@ -39,28 +40,43 @@ interface ToggleRow {
   hint: string;
 }
 
-const TOGGLES: ToggleRow[] = [
-  {
-    key: 'tooltips',
-    label: 'Explain metric names',
-    hint: 'Underline terms like p99 and show what they mean on hover.',
-  },
-  {
-    key: 'sparklines',
-    label: 'Trend lines on components',
-    hint: 'Draw the recent history of each component on its box.',
-  },
-  {
-    key: 'snapToGrid',
-    label: 'Snap to the grid',
-    hint: 'Keep components aligned while dragging. Hold Ctrl to bypass it.',
-  },
-  {
-    key: 'minimap',
-    label: 'Minimap',
-    hint: 'A small map of the whole diagram, for finding your way around a big one.',
-  },
-];
+/**
+ * The toggles, with copy that matches the device.
+ *
+ * Two of these described a mouse. "show what they mean on hover" names a
+ * gesture a finger cannot perform, and "Hold Ctrl to bypass it" names a key
+ * a phone does not have; a reader on a phone is told to do something
+ * impossible and reasonably concludes the feature is broken. The touch
+ * wording says what the same setting does with the input they actually have.
+ */
+function toggles(coarse: boolean): ToggleRow[] {
+  return [
+    {
+      key: 'tooltips',
+      label: 'Explain metric names',
+      hint: coarse
+        ? 'Underline terms like p99, and explain them when you tap one.'
+        : 'Underline terms like p99 and show what they mean on hover.',
+    },
+    {
+      key: 'sparklines',
+      label: 'Trend lines on components',
+      hint: 'Draw the recent history of each component on its box.',
+    },
+    {
+      key: 'snapToGrid',
+      label: 'Snap to the grid',
+      hint: coarse
+        ? 'Keep components aligned while dragging.'
+        : 'Keep components aligned while dragging. Hold Ctrl to bypass it.',
+    },
+    {
+      key: 'minimap',
+      label: 'Minimap',
+      hint: 'A small map of the whole diagram, for finding your way around a big one.',
+    },
+  ];
+}
 
 const THEMES: Array<{ value: ThemeChoice; label: string }> = [
   { value: 'light', label: 'Light' },
@@ -126,6 +142,8 @@ export function Settings({
   const { mounted, closing, unmount } = usePresence(open);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const prefs = usePreferences();
+
+  const rows = toggles(useCoarsePointer());
 
   /* Focus lands on the card and returns to the opener, the same contract the
      shortcuts dialog and the glossary both keep. */
@@ -372,7 +390,7 @@ export function Settings({
 
           <section className="st-group">
             <h3 className="st-group-title">Canvas</h3>
-            {TOGGLES.map((row) => (
+            {rows.map((row) => (
               <div key={row.key} className="st-row">
                 <button
                   type="button"

@@ -48,6 +48,7 @@ import {
 import type { Health } from './format';
 import type { TextStyle } from './textMetrics';
 import { measureText, resetTextMetrics, truncateToWidth } from './textMetrics';
+import { useCoarsePointer } from '../useCoarsePointer';
 import { buildClipboardText, parseClipboardText } from '../clipboard';
 import type { ClipboardSubgraph } from '../clipboard';
 import { arrowPath, previewPath, routeEdge } from './edgeRoute';
@@ -5194,6 +5195,11 @@ export default function Canvas({
     return ann && isNote(ann) ? ann : null;
   }, [selectedIds, topology.annotations]);
 
+  /* Instruction copy names the gesture the reader can actually perform: a
+     hint telling a phone to "click" and press "Esc" describes an app they do
+     not have. */
+  const coarsePointer = useCoarsePointer();
+
   const fitToContent = useCallback(
     () => fitTo(topology.nodes),
     [fitTo, topology.nodes],
@@ -6009,7 +6015,9 @@ export default function Canvas({
           clicked a port has no other way to learn what happens next. */}
       {pendingLink !== null && (
         <p className="cv-hint" role="status">
-          Click a component to connect · Esc to cancel
+          {coarsePointer
+            ? 'Tap a component to connect'
+            : 'Click a component to connect · Esc to cancel'}
         </p>
       )}
 
@@ -6018,8 +6026,12 @@ export default function Canvas({
       {tool !== null && pendingLink === null && (
         <p className="cv-hint" role="status">
           {tool === 'note'
-            ? 'Click the canvas to place a note · Esc to cancel'
-            : 'Drag to draw a section · Esc to cancel'}
+            ? coarsePointer
+              ? 'Tap the canvas to place a note'
+              : 'Click the canvas to place a note · Esc to cancel'
+            : coarsePointer
+              ? 'Drag to draw a section'
+              : 'Drag to draw a section · Esc to cancel'}
         </p>
       )}
 
