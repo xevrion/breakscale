@@ -804,90 +804,82 @@
    -------------------------------------------------------------------------- */
 
 @media (max-width: 720px) {
-  /* The load control, rebuilt for one hand.
+  /* Two rows, not three.
 
-     On a desktop this is a row: caption and figure, then the track beside
-     them, then the readouts and the transport. At 412px that row left the
-     track 42px wide, which is two thumb-widths of travel on the app's
-     primary control, and the pieces that survived were scattered across a
-     224px bar with dead space between them.
+     The load control is the only thing in the phone header besides the
+     wordmark, so its height IS the header's height, and the header is
+     height taken from the diagram. Stacked as caption / slider / readouts
+     it stood 146px tall; paired down to a value line and a slider line it
+     is a little over half that, and nothing has been dropped: the p99 and
+     the transport move onto the value line beside the load.
 
-     Here it is three deliberate rows instead. The figure sits WITH its
-     caption on the first, the track owns the second, and the effect and the
-     transport share the third. Nothing is centred by accident and nothing
-     is left hanging in a gap. */
+     What survives is the reading order that matters. The number you are
+     setting and the number it causes sit on the same line, which is the
+     entire lesson of this control, and the slider is directly beneath the
+     figure it changes. */
   .traffic {
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--sp-3);
+    gap: var(--sp-1) var(--sp-3);
   }
 
   .traffic-spacer {
     display: none;
   }
 
+  /* `display: contents` lifts the head and the track OUT of this wrapper
+     and into the .traffic flex line, so the load figure can share a row
+     with p99 and the transport while the track still claims a full line of
+     its own beneath them. Nested, the wrapper had to take 100% and the
+     three items could never sit together. */
   .traffic-load {
-    flex: 1 1 100%;
-    flex-wrap: wrap;
-    min-width: 0;
-    gap: var(--sp-2) var(--sp-3);
+    display: contents;
   }
 
-  /* Caption on the left, figure and unit together on the right.
-  
-     Reading order matters here: "OFFERED LOAD" then "30 requests / sec" is
-     a caption and its value. Sitting the bare number between the caption and
-     its unit instead gave three competing pieces on one line with the
-     largest thing in the middle, which is why it read as debris rather than
-     as a measurement. */
   .traffic-load-head {
-    /* Spans the row so the value can be pushed to the far end. Shrink-wrapped
-       (flex: none) there is no free space for the readout's auto margin to
-       consume, and caption and value sit jammed together mid-row. */
-    flex: 1 1 100%;
+    flex: 0 1 auto;
     flex-direction: row;
     align-items: baseline;
     gap: var(--sp-2);
+    min-width: 0;
+    order: 0;
   }
 
-  /* The unit comes back. A container query drops it at 560px because the
-     desktop row has no space; this row does, and "30" with no unit is a
-     number without a meaning. */
+  /* The caption is the one thing that goes. "OFFERED LOAD" above a slider
+     whose scale is printed in requests per second is a label for something
+     already labelled, and it was costing a third of the row. */
+  .traffic-load-head > .label {
+    display: none;
+  }
+
   .traffic-load-unit {
     display: inline;
   }
 
-  /* The value and its unit are ONE thing and sit together, tight, with the
-     slack between them and the caption rather than inside them. Split by
-     the flex slack they read as three separate items on a line and the
-     number lost its unit again by distance instead of by display:none. */
   .traffic-load-readout {
     display: flex;
     flex: none;
     align-items: baseline;
     gap: var(--sp-1);
     min-width: 0;
-    margin-left: auto;
   }
 
   .traffic-load-track {
     flex: 1 1 100%;
     min-width: 0;
+    order: 1;
   }
 
-  /* The third row: p99 on the left reading as a normal label-and-value
-     pair, the transport right where a thumb rests. */
+  /* p99 and the transport share the load figure's line, pushed right. */
   .traffic-headline {
-    flex: 1 1 auto;
-    align-items: center;
-    justify-content: flex-start;
-    gap: var(--sp-4);
+    flex: 0 1 auto;
+    align-items: baseline;
+    gap: var(--sp-3);
     min-width: 0;
+    margin-left: auto;
+    order: 0;
   }
 
-  /* Label beside value, not stacked and right-aligned: at this size the
-     stack put a small caption over an indented number and read as a
-     mistake. */
   .traffic-metric {
     flex-direction: row;
     align-items: baseline;
@@ -895,16 +887,13 @@
   }
 
   .traffic-metric .num-hero {
-    font-size: var(--fs-xl);
+    font-size: var(--fs-lg);
   }
 
   .traffic-actions {
     flex: none;
-    margin-left: auto;
-    /* The segmented block is a desktop affordance. Separated, each control
-       is its own 44px target and the group stops reading as one wide
-       button with three glyphs on it. */
-    gap: var(--sp-2);
+    order: 0;
+    gap: var(--sp-1);
   }
 
   .traffic-actions .btn {

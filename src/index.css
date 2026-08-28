@@ -170,6 +170,11 @@
      across two vendor-prefixed pseudo-elements, and the thumb's centring
      offset and the scale rail's inset are both DERIVED from them. Naming
      them once is what stops the four copies drifting apart. */
+  /* The phone tab bar's height. On :root rather than on .app-body because
+     the tab bar is a SIBLING of the body, not a descendant, and the stage's
+     bottom padding and every sheet's offset both read it. */
+  --tabbar-h: 56px;
+
   --track-h: 6px;
   --thumb: 18px;
 

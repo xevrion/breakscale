@@ -2670,6 +2670,50 @@ export default function App() {
       </div>
 
       {/*
+        The phone tab bar.
+
+        CSS decides whether this is visible, not JS: it reads the same panel
+        state the desktop's edge toggles read, so the two can never disagree
+        about whether a panel is open. Above the breakpoint it is
+        display:none and costs a reader nothing.
+
+        The inspector tab is disabled rather than hidden when nothing is
+        selected. A tab bar whose tabs come and go moves the others under
+        the thumb mid-tap, and the disabled state teaches what the tab is
+        for: select something and it lights up.
+      */}
+      <nav className="app-tabbar" aria-label="Panels">
+        <button
+          type="button"
+          className="app-tab"
+          aria-expanded={layout.library}
+          onClick={toggleLibrary}
+        >
+          <PanelGlyph edge="left" />
+          Build
+        </button>
+        <button
+          type="button"
+          className="app-tab"
+          aria-expanded={inspectorVisible}
+          disabled={!hasSelection}
+          onClick={toggleInspector}
+        >
+          <PanelGlyph edge="right" />
+          Inspect
+        </button>
+        <button
+          type="button"
+          className="app-tab"
+          aria-expanded={layout.metrics}
+          onClick={toggleMetrics}
+        >
+          <PanelGlyph edge="bottom" />
+          Charts
+        </button>
+      </nav>
+
+      {/*
         Mounted ONCE for the whole app. Every <Term> anywhere in the tree is a
         stateless trigger that this single layer renders the panel for, so the
         cost of an explanation is paid per tooltip OPEN rather than per term

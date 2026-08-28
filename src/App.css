@@ -1004,22 +1004,50 @@
    -------------------------------------------------------------------------- */
 
 @media (max-width: 720px) {
-  /* Two rows, because three islands cannot share 390px and stay legible.
-     Brand and menu ride the first row; the load control takes the whole of
-     the second, which is what it needs: the slider is the one control a
-     reader touches constantly and a thumb wants the full width for it. */
+  /* ------------------------------------------------------------------
+     A phone is a different application shape, not a narrow desktop.
+
+     The desktop is a canvas with chrome FLOATING over it: islands, edge
+     toggles, a zoom cluster, a ledger. That works when the canvas is
+     1600px and the chrome costs a tenth of it. On a 400px screen the same
+     chrome covered a quarter of the screen with the bar, another quarter
+     with the strip, and scattered five more controls over what was left,
+     so the diagram was a band in the middle with things on top of it.
+
+     So the phone gets the layout phones actually use: a fixed header of
+     known height, the canvas taking everything below it, and a tab bar at
+     the bottom where the thumb is. Nothing floats over the canvas except
+     the sheets the tab bar opens. What the reader looks at is the
+     diagram, and every control is on an edge.
+     ------------------------------------------------------------------ */
+
+  /* --- Header: fixed, compact, not an island ---------------------- */
+
   .app-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
     flex-wrap: wrap;
-    gap: var(--sp-2);
+    gap: 0;
+    padding: 0;
+    /* It is a bar again, not three things floating: at this width the gaps
+       between islands were not canvas you could use, just holes. */
+    background: var(--surface);
+    border-bottom: var(--bw) solid var(--border);
+    pointer-events: auto;
   }
 
   .app-island {
-    min-height: 48px;
+    min-height: 0;
     gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
   }
 
-  /* Order is explicit rather than source order: the load control must break
-     to its own row, and it sits AFTER the menu in the markup. */
   .app-island-brand {
     order: 1;
     flex: 1 1 auto;
@@ -1028,37 +1056,22 @@
   .app-island-menu {
     order: 2;
     margin-left: 0;
+    padding-left: 0;
   }
 
+  /* The load control is the one thing a reader touches constantly, so it
+     gets its own full-width row under the identity row, with a rule
+     between them. */
   .app-island-load {
     order: 3;
     flex: 1 1 100%;
     max-width: none;
+    border-top: var(--bw) solid var(--border);
   }
 
-  /* The tagline is the first thing to go: the wordmark alone identifies the
-     app, and the row is competing for width with two buttons. */
-  .app-tagline {
-    display: none;
-  }
-
-  /* The saved indicator holds its width even when it has faded to nothing,
-     which on a phone row reads as a hole between the wordmark and the undo
-     pair. It says the same thing the menu's own designs list does, so on
-     this width it goes rather than reserving space to say nothing. */
+  .app-tagline,
   .app-saved {
     display: none;
-  }
-
-  /* The two button clusters become one visual group.
-  
-     Undo and redo sat in the brand island while the source link and the menu
-     sat in another, so four buttons of the same size and weight appeared in
-     two boxes with a gap between them, for no reason a reader could see.
-     The brand island keeps the wordmark alone and the buttons gather on the
-     right where a thumb reaches. */
-  .app-island-brand {
-    gap: var(--sp-2);
   }
 
   .app-history {
@@ -1066,41 +1079,44 @@
     gap: var(--sp-2);
   }
 
-  /* Undo and redo are ghost buttons, which on a desktop sit quietly inside a
-     busy bar. Beside the bordered source link and menu they read as a
-     different species of control, so on a phone they take the same outline
-     as their neighbours and the four become one row of peers. */
   .app-history .btn {
     border-color: var(--border-strong);
     background: var(--surface);
-    box-shadow:
-      var(--shadow-sm),
-      inset 0 1px 0 var(--bevel),
-      inset 0 -1px 0 var(--bevel-under);
   }
 
-  /* Sheets: full width, bottom-anchored, capped so the canvas is always
-     partly visible behind them. A sheet that covered the screen would hide
-     the change it was made to explain. */
+  /* --- Stage: everything below the header ------------------------- */
+
+  .app-body {
+    top: 0;
+  }
+
+  /* The canvas starts under the fixed header and runs to the tab bar. The
+     stage is a flex child, not positioned, so this is padding: the canvas
+     surface stays full bleed and only its content is held clear. */
+  .app-stage {
+    padding-top: var(--bar-clear);
+    padding-bottom: var(--tabbar-h);
+  }
+
+  /* --- Sheets ----------------------------------------------------- */
+
   .app-slot-left,
   .app-slot-right {
     top: auto;
-    bottom: 0;
+    bottom: var(--tabbar-h);
     left: 0;
     right: 0;
     width: auto;
-    max-height: min(68vh, 560px);
+    max-height: min(64vh, 520px);
   }
 
   .app-slot-bottom {
     left: 0;
     right: 0;
-    bottom: 0;
-    height: min(var(--strip-h), 46vh);
+    bottom: var(--tabbar-h);
+    height: min(var(--strip-h), 44vh);
   }
 
-  /* Square off the bottom corners: a sheet sits ON the window edge, and a
-     radius there reads as a panel that failed to reach it. */
   .app-slot-left > .pal,
   .app-slot-right > .ins,
   .app-slot-bottom > .met {
@@ -1108,9 +1124,6 @@
     border-bottom: 0;
   }
 
-  /* Sheets rise from the bottom, whichever edge they belong to on desktop.
-     The keyframes stay named per edge so PanelSlot's animationend contract
-     is untouched; only the transform they interpolate changes. */
   .app-slot-left.is-entering,
   .app-slot-right.is-entering {
     animation-name: app-sheet-in;
@@ -1121,47 +1134,29 @@
     animation-name: app-sheet-out;
   }
 
-  /* Nothing sits beside a sheet, so every clearance offset collapses back
-     to the canvas's own edge. Without these the zoom cluster, the ledger
-     and the toggles all jump 224 or 320px sideways to clear a panel that
-     is no longer there. */
-  .app-body.has-library .stage-toggle-library,
-  .app-body.has-library .stage-toggle-metrics,
-  .app-body.has-library .cv-ledger {
-    left: var(--sp-3);
-  }
+  /* --- Chrome that has no place on a phone ------------------------ */
 
-  .app-body.has-inspector .stage-toggle-inspector,
-  .app-body.has-inspector .cv-zoom,
-  .app-body.has-inspector .mm {
-    right: var(--sp-3);
-  }
-
-  /* An open sheet covers the foot of the canvas, so the chrome that lives
-     there lifts above it rather than hiding underneath. */
-  .app-body.has-metrics .stage-toggle-metrics,
-  .app-body.has-metrics .cv-ledger,
-  .app-body.has-metrics .cv-zoom {
-    bottom: calc(min(var(--strip-h), 46vh) + var(--sp-3));
-  }
-
-  .app-body.has-metrics .cv-format {
-    bottom: calc(min(var(--strip-h), 46vh) + var(--sp-3) + 32px + var(--sp-3));
-  }
-
-  /* Dragging a panel edge is a mouse affordance, and on a phone the handle
-     is a 44px target sitting on top of content it cannot usefully resize. */
-  .pr {
+  /* The zoom cluster, the ledger and the panel resizers are desktop
+     affordances. Pinch zooms, the tab bar opens the panels, and a drag
+     handle cannot resize a full-width sheet. Every one of them was a
+     floating box competing with the diagram for the same pixels. */
+  .pr,
+  .cv-zoom,
+  .cv-ledger,
+  .stage-toggle {
     display: none;
   }
+}
 
-  /* The stage toggles are 32px squares, which is under the touch floor and
-     the only way to reach the components rail or the charts on a phone.
-     The coarse-pointer rule in index.css raises .btn, but these carry their
-     own width, so they are raised here too. */
-  .stage-toggle {
-    width: 44px;
-    height: 44px;
+@keyframes app-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes app-sheet-out {
+  to {
+    transform: translateY(100%);
   }
 }
 
@@ -1179,5 +1174,74 @@
 @keyframes app-sheet-out {
   to {
     transform: translateY(100%);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   The phone tab bar.
+
+   Three edge toggles floating at three canvas corners is a desktop pattern:
+   it works with a mouse, which reaches a corner as cheaply as a centre, and
+   it fails on a phone, where a thumb does not and where each floating button
+   sits ON the diagram. Collected into a bar at the bottom they are where the
+   hand already is, they cover nothing, and the app gains the one structural
+   affordance a phone reader expects to find.
+
+   Rendered at every width and hidden above the breakpoint rather than
+   conditionally mounted: it reflects the same panel state the desktop edge
+   toggles read, and two sources for that would drift.
+   -------------------------------------------------------------------------- */
+
+.app-tabbar {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .app-tabbar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 45;
+    display: flex;
+    align-items: stretch;
+    /* Notched phones: the bar grows by the inset so its buttons sit above
+       the home indicator rather than under it. */
+    height: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--surface);
+    border-top: var(--bw) solid var(--border);
+  }
+
+  .app-tab {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-dim);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-med);
+    letter-spacing: var(--tr-label);
+    cursor: pointer;
+  }
+
+  .app-tab[aria-expanded='true'] {
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+  }
+
+  .app-tab:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .app-tab svg {
+    flex: none;
   }
 }
