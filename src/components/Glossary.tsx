@@ -9,6 +9,7 @@ import {
   type GlossaryEntry,
 } from '../content/glossary';
 import { closeTooltip } from './Tooltip';
+import { usePresence } from './presence';
 import './Glossary.css';
 
 /* ==========================================================================
@@ -98,6 +99,16 @@ function group(entries: GlossaryEntry[]): Section[] {
  * simulation is running.
  */
 export function Glossary({ open, onClose, focusId }: GlossaryProps) {
+  /**
+   * Exit presence. The sheet stays in the DOM while it slides out (the exit
+   * animation lives in Glossary.css), marked inert so the leaving panel can
+   * neither take focus nor be read by a screen reader, and unmounts on the
+   * sheet's animationend. Focus is returned to the opener at close START
+   * (the `open` effect below), not at unmount, so the student's focus never
+   * sits inside an inert subtree.
+   */
+  const { mounted, closing, unmount } = usePresence(open);
+
   const [query, setQuery] = useState('');
   /** The entry the arrow keys are currently on. */
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -192,19 +203,25 @@ export function Glossary({ open, onClose, focusId }: GlossaryProps) {
     };
   }, [open]);
 
+  /* Reset between visits, so reopening does not resume a stale search. This
+     runs on the way IN rather than at close: the sheet stays mounted while
+     it slides out, and clearing the query at close START would visibly blank
+     the filtered list mid-exit. Clearing at open is invisible (the sheet is
+     only just appearing) and also covers a reopen that interrupts the exit.
+     Declared BEFORE the focusId effect below, so on a shared open transition
+     the reset runs first and cannot wipe the jump target. */
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setActiveId(null);
+    setLandedId(null);
+  }, [open]);
+
   /* Opening with a target, or being handed a new one while already open. */
   useEffect(() => {
     if (!open || !focusId) return;
     jumpTo(focusId);
   }, [open, focusId, jumpTo]);
-
-  /* Reset between visits, so reopening does not resume a stale search. */
-  useEffect(() => {
-    if (open) return;
-    setQuery('');
-    setActiveId(null);
-    setLandedId(null);
-  }, [open]);
 
   /* ---------------------------------------------------------------- *
    * Keyboard
@@ -299,13 +316,16 @@ export function Glossary({ open, onClose, focusId }: GlossaryProps) {
     [move, onClose, ordered, jumpTo],
   );
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   const total = GLOSSARY.length;
   const shown = results.length;
 
   return createPortal(
-    <div className="gl-root">
+    <div
+      className={`gl-root${closing ? ' is-closing' : ''}`}
+      inert={closing || undefined}
+    >
       {/*
         The scrim marks the sheet as the active layer and gives the pointer a
         large, obvious way out. It is not a focus boundary — the Tab handler
@@ -320,6 +340,11 @@ export function Glossary({ open, onClose, focusId }: GlossaryProps) {
         aria-modal="true"
         aria-labelledby="gl-title"
         onKeyDown={onKeyDown}
+        onAnimationEnd={(e) => {
+          // The SHEET drives unmount, not the scrim: both animate on close,
+          // and unmounting on whichever ended first would cut the other off.
+          if (closing && e.target === e.currentTarget) unmount();
+        }}
       >
         <header className="gl-head">
           <div className="gl-head-row">

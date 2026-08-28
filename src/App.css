@@ -121,6 +121,28 @@
   line-height: 1;
 }
 
+/* --------------------------------------------------------------------------
+   The reference cluster degrades gracefully as the bar narrows, because the
+   traffic control beside it shrinks (flex 1 1 auto, min-width 0) and a bar
+   out of room lets later chrome paint over the run controls. The shortcut
+   annotations go first (they are annotations, and the shortcuts dialog now
+   documents every one of them), then the labels collapse to the icons. The
+   buttons keep their accessible names via aria-label at every width, and
+   their titles still name the keys.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1680px) {
+  .app-glossary-key {
+    display: none;
+  }
+}
+
+@media (max-width: 1500px) {
+  .app-glossary-label {
+    display: none;
+  }
+}
+
 /* Pressed state. The sheet is open and this is what closes it, so the button
    reads as engaged rather than as an inert label beside its own panel. */
 .app-glossary[aria-expanded='true'] {
@@ -153,19 +175,51 @@
   overflow: hidden;
 }
 
+/* --------------------------------------------------------------------------
+   Panel slots.
+
+   Each collapsible panel sits inside a slot div owned by PanelSlot in
+   App.tsx. The SLOT is the flex item and owns the panel's layout size; the
+   panel fills it and paints its own surface. Motion is a TRANSFORM on the
+   slot, sliding it in from the edge it lives on, so the slide itself never
+   invalidates layout: the canvas beside it reflows exactly once per toggle
+   (when the slot mounts or unmounts), never once per animation frame. That
+   is what keeps a drag on the canvas from drifting while a panel moves.
+
+   A slot translated off its edge is clipped by .app-body / .app-stage
+   (both overflow: hidden), so no state of this animation can make the page
+   scrollable.
+   -------------------------------------------------------------------------- */
+
+.app-slot {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* Both rails scroll internally via the shared .scroll primitive and paint
    their own surface. The body only supplies the separating hairline, so
    the rule that draws it lives with the layout that needs it. */
-.app-body > .pal {
+.app-slot-left {
   flex: none;
   width: 224px;
+}
+
+.app-slot-left > .pal {
+  flex: 1 1 auto;
+  min-width: 0;
   border-right: var(--bw) solid var(--border);
   background: var(--surface);
 }
 
-.app-body > .ins {
+.app-slot-right {
   flex: none;
   width: 320px;
+}
+
+.app-slot-right > .ins {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -251,17 +305,103 @@
 
    40vh is deliberately below half the stage's height at every window size
    the app is used at, so the diagram always dominates. */
-.app-stage > .mx {
+.app-slot-bottom {
   /* Sized by its own content between the floor and ceiling below; the
      canvas flexes, the strip does not. */
   flex: none;
+  flex-direction: column;
   min-height: clamp(196px, 26vh, 260px);
   max-height: 40vh;
+}
+
+.app-slot-bottom > .mx {
+  flex: 1 1 auto;
+  min-height: 0;
   /* The cap can only be honoured if the strip is allowed to scroll rather
      than spill its charts over the canvas above it. */
   overflow-y: auto;
   border-top: var(--bw) solid var(--border);
   background: var(--surface);
+}
+
+/* --------------------------------------------------------------------------
+   Panel motion.
+
+   Slide from the panel's own edge, never a fade in place: a fade reads as
+   an overlay arriving, a slide from the edge reads as part of the frame
+   moving. Entrances take --ease-out (fast start, settled landing), exits
+   take --ease. Nothing here exceeds 200ms.
+
+   These are keyframe animations rather than transitions because the exit
+   needs a completion event: PanelSlot unmounts the panel on animationend,
+   which is also why the reduced-motion block below shortens durations to
+   near zero instead of setting animation: none. With no animation there is
+   no animationend, and a closing panel would wait out the JS fallback
+   timeout before leaving the DOM.
+   -------------------------------------------------------------------------- */
+
+@keyframes app-slot-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes app-slot-out-left {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes app-slot-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes app-slot-out-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes app-slot-in-bottom {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes app-slot-out-bottom {
+  to {
+    transform: translateY(100%);
+  }
+}
+
+.app-slot-left.is-entering {
+  animation: app-slot-in-left var(--dur-base) var(--ease-out);
+}
+
+.app-slot-right.is-entering {
+  animation: app-slot-in-right var(--dur-base) var(--ease-out);
+}
+
+.app-slot-bottom.is-entering {
+  animation: app-slot-in-bottom var(--dur-base) var(--ease-out);
+}
+
+/* Exits hold their end frame (forwards): the slot stays parked off its edge
+   for the handful of milliseconds between animationend and React removing
+   it, instead of snapping back visible. The .is-closing rules sit after the
+   .is-entering rules so they win the tie when both classes could apply. */
+.app-slot-left.is-closing {
+  animation: app-slot-out-left var(--dur-base) var(--ease) forwards;
+}
+
+.app-slot-right.is-closing {
+  animation: app-slot-out-right var(--dur-base) var(--ease) forwards;
+}
+
+.app-slot-bottom.is-closing {
+  animation: app-slot-out-bottom var(--dur-base) var(--ease) forwards;
 }
 
 /* --------------------------------------------------------------------------
@@ -274,11 +414,11 @@
    -------------------------------------------------------------------------- */
 
 @media (max-width: 1360px) {
-  .app-body > .pal {
+  .app-slot-left {
     width: 200px;
   }
 
-  .app-body > .ins {
+  .app-slot-right {
     width: 288px;
   }
 
@@ -294,5 +434,89 @@
 @media (max-width: 1180px) {
   .app-tagline {
     display: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Undo / redo cluster.
+
+   Two icon buttons set as one visual unit beside the wordmark. flex:none for
+   the same reason the glossary button is: the slider gives up width first.
+   -------------------------------------------------------------------------- */
+
+.app-history {
+  display: flex;
+  flex: none;
+  gap: var(--sp-1);
+}
+
+/* --------------------------------------------------------------------------
+   Undo / redo receipt.
+
+   Bottom center, floating over the stage: the top bar is where the ACTION
+   lives, but the change it reverted happened on the canvas, so the receipt
+   appears near the work. Plain panel surface and a hairline, no translucency.
+   z-index above the stage chrome (5) and below the tooltip layer (400): a
+   receipt must never cover an explanation the student asked for.
+
+   Motion: entrance only, 160ms, opacity plus a few px of rise; the exit is
+   an unmount because a receipt that lingers while fading invites reading it
+   twice. Under prefers-reduced-motion it simply appears.
+   -------------------------------------------------------------------------- */
+
+.app-toast {
+  position: fixed;
+  bottom: var(--sp-5);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  padding: var(--sp-2) var(--sp-4);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-med);
+  line-height: var(--lh-label);
+  box-shadow: var(--shadow-sm);
+  animation: app-toast-in 160ms var(--ease-out);
+}
+
+@keyframes app-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-toast {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Reduced motion.
+
+   The panels must still open and close CORRECTLY with the motion removed,
+   which is why this shortens the slide to effectively zero duration rather
+   than setting animation: none. PanelSlot unmounts a closing panel on
+   animationend; an animation that never runs never ends, and the panel
+   would sit inert until the JS fallback timeout. At 0.01ms the event still
+   fires and the panel appears and disappears in place, instantly.
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .app-slot-left.is-entering,
+  .app-slot-right.is-entering,
+  .app-slot-bottom.is-entering,
+  .app-slot-left.is-closing,
+  .app-slot-right.is-closing,
+  .app-slot-bottom.is-closing {
+    animation-duration: 0.01ms;
   }
 }

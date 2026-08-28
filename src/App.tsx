@@ -1,15 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import type { AnimationEvent, ReactNode } from 'react';
 import type { NodeConfig, NodeKind, SimNode, SimSnapshot, Topology } from './sim/types';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
 import type { Preset } from './sim/presets';
-import Canvas, { SPARK_LEN, readoutFor, sourceBacklogs } from './components/Canvas';
+import Canvas, {
+  GRID,
+  NODE_H,
+  NODE_W,
+  SPARK_LEN,
+  readoutFor,
+  sourceBacklogs,
+} from './components/Canvas';
 import { Inspector, TrafficControl } from './components/Inspector';
 import { Metrics } from './components/Metrics';
 import { Palette } from './components/Palette';
 import { Glossary } from './components/Glossary';
+import { Shortcuts } from './components/Shortcuts';
+import { cloneSubgraph, isTopology, selectionSubgraph } from './clipboard';
+import type { ClipboardSubgraph } from './clipboard';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
 import { togglePreference, usePreference } from './content/preferences';
+import { usePresence } from './components/presence';
+import { SessionHistory, syncEngine } from './history';
+import type { HistoryEntry, HistorySnapshot } from './history';
 import './App.css';
 
 /* ------------------------------------------------------------------ *
@@ -98,6 +119,79 @@ function PanelGlyph({ edge }: { edge: 'left' | 'right' | 'bottom' }) {
   );
 }
 
+/**
+ * Presence wrapper for one collapsible shell panel.
+ *
+ * THE STRUCTURAL FIX for panel motion. The shell used to render each panel
+ * conditionally, so a closing panel was out of the DOM a frame before any
+ * transition could run; there was literally nothing left to animate. This
+ * wrapper keeps the panel mounted through its exit (usePresence), and the
+ * panel slides from its own edge via TRANSFORM keyframes in App.css.
+ *
+ * Why transform, not an animated width or grid track: the canvas's
+ * world-to-screen maths reads its viewport rect, so a layout that changes on
+ * every animation frame would make an in-progress node drag drift and force
+ * a re-fit per frame. With this design the slot's layout size changes in ONE
+ * step per toggle (on open it appears at full size and the panel slides into
+ * it; on close the panel slides out first and the slot collapses at
+ * animationend), so the canvas reflows exactly once, never per frame, and a
+ * transform invalidates no layout at all.
+ *
+ * While closing the slot is `inert`: the leaving panel cannot take focus and
+ * is invisible to a screen reader, and at animationend it unmounts outright,
+ * so nothing hidden lingers in the DOM and an idle shell pays nothing.
+ *
+ * Children are FROZEN during the exit: the last element rendered while open
+ * keeps rendering until unmount. The inspector needs this, because the
+ * selection that justified its content is often already gone by the time it
+ * slides out, and re-rendering it empty mid-exit would flash a blank panel.
+ *
+ * The entrance animation is skipped on the slot's very first appearance at
+ * app boot (a panel restored from the saved layout is simply present, and
+ * content that is simply present does not get an entrance), and plays on
+ * every toggle after that.
+ */
+function PanelSlot({
+  open,
+  edge,
+  children,
+}: {
+  open: boolean;
+  edge: 'left' | 'right' | 'bottom';
+  children: ReactNode;
+}) {
+  const { mounted, closing, unmount } = usePresence(open);
+
+  const lastChildren = useRef(children);
+  if (open) lastChildren.current = children;
+
+  // "Has this slot ever been toggled": false until `open` first differs from
+  // its value at mount, true forever after. A slot that has never toggled is
+  // showing boot state and gets no entrance; one that has animates every
+  // appearance. Render-phase adjustment, same pattern as usePresence.
+  const [bootOpen] = useState(open);
+  const [toggled, setToggled] = useState(false);
+  if (!toggled && open !== bootOpen) setToggled(true);
+
+  if (!mounted) return null;
+
+  const state = closing ? ' is-closing' : toggled ? ' is-entering' : '';
+
+  return (
+    <div
+      className={`app-slot app-slot-${edge}${state}`}
+      inert={closing || undefined}
+      onAnimationEnd={(e: AnimationEvent<HTMLDivElement>) => {
+        // Only the slot's own exit animation may unmount it. Animations on
+        // children (a chart transition, a button) bubble through here too.
+        if (closing && e.target === e.currentTarget) unmount();
+      }}
+    >
+      {open ? children : lastChildren.current}
+    </div>
+  );
+}
+
 /** Snapshot rate for React. The engine still advances every animation frame. */
 const SNAPSHOT_HZ = 10;
 const SNAPSHOT_INTERVAL_MS = 1000 / SNAPSHOT_HZ;
@@ -138,107 +232,11 @@ interface Session {
   presetId: string | null;
 }
 
-const NODE_KINDS: readonly NodeKind[] = [
-  'client',
-  'lb',
-  'service',
-  'cache',
-  'db',
-  'queue',
-  'worker',
-  'replica',
-  'shard',
-  'autoscaler',
-  'region',
-  // This list gates what loads back out of localStorage, so every kind the
-  // registry knows must appear here or a student's saved topology that uses
-  // it is silently thrown away on reload. The three edge kinds below were
-  // missing since they shipped; the rest arrived with their tiers.
-  'cdn',
-  'ratelimiter',
-  'breaker',
-  'objectstore',
-  'searchindex',
-  'timeseriesdb',
-  'graphdb',
-  'coldstorage',
-  'vectordb',
-  'streambroker',
-  'pubsub',
-  'websocket',
-  'apigateway',
-  'sidecar',
-  'lambda',
-  'cron',
-  'bulkhead',
-  'retryqueue',
-  'transcoder',
-  'edgecompute',
-  'writebehind',
-  'loadshedder',
-];
-
-/**
- * Structural validation of anything coming out of localStorage. A stored
- * value can be stale from an older build or hand-edited, so every field the
- * engine will dereference is checked before it is trusted.
+/*
+ * Structural validation of the stored session lives in clipboard.ts
+ * (isTopology), because the clipboard paste path validates the exact same
+ * shape and two hand-maintained copies of a 33-kind allowlist would drift.
  */
-function isTopology(value: unknown): value is Topology {
-  if (typeof value !== 'object' || value === null) return false;
-  const t = value as { nodes?: unknown; edges?: unknown };
-  if (!Array.isArray(t.nodes) || !Array.isArray(t.edges)) return false;
-
-  const ids = new Set<string>();
-  for (const raw of t.nodes) {
-    if (typeof raw !== 'object' || raw === null) return false;
-    const n = raw as Partial<{
-      id: unknown;
-      kind: unknown;
-      label: unknown;
-      x: unknown;
-      y: unknown;
-      config: unknown;
-    }>;
-    if (typeof n.id !== 'string' || n.id === '') return false;
-    if (typeof n.label !== 'string') return false;
-    if (!NODE_KINDS.includes(n.kind as NodeKind)) return false;
-    if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) return false;
-    if (typeof n.config !== 'object' || n.config === null) return false;
-    const cfg = n.config as Record<string, unknown>;
-    for (const key of [
-      'capacity',
-      'serviceMs',
-      'serviceCv',
-      'queueLimit',
-      'hitRate',
-      'errorRate',
-      'timeoutMs',
-      'retries',
-      'rps',
-    ]) {
-      if (!Number.isFinite(cfg[key])) return false;
-    }
-    if (ids.has(n.id)) return false;
-    ids.add(n.id);
-  }
-
-  for (const raw of t.edges) {
-    if (typeof raw !== 'object' || raw === null) return false;
-    const e = raw as Partial<{
-      id: unknown;
-      from: unknown;
-      to: unknown;
-      weight: unknown;
-    }>;
-    if (typeof e.id !== 'string' || e.id === '') return false;
-    if (typeof e.from !== 'string' || typeof e.to !== 'string') return false;
-    // A dangling edge would make the engine route into nothing.
-    if (!ids.has(e.from) || !ids.has(e.to)) return false;
-    if (!Number.isFinite(e.weight)) return false;
-  }
-
-  return true;
-}
 
 function loadSession(): Session {
   const fallback: Session = {
@@ -321,6 +319,9 @@ export default function App() {
   const tooltipsOn = usePreference('tooltips');
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [glossaryFocusId, setGlossaryFocusId] = useState<string | undefined>(undefined);
+
+  /** The keyboard shortcuts dialog. Ctrl+/ and the top-bar button. */
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   /* ---------------- panel layout ---------------- */
 
@@ -513,6 +514,82 @@ export default function App() {
     return () => window.clearTimeout(id);
   }, [topology, rps, presetId]);
 
+  /* ---------------- undo / redo ---------------- */
+
+  /**
+   * History of full `{ topology, selectedIds, rps, presetId }` snapshots.
+   * The stacks live in SessionHistory (a plain object, unit-tested on its
+   * own); this state cell exists only to re-render when they change, and
+   * canUndo/canRedo below are DERIVED from the stacks on every render, never
+   * cached, so the buttons can never disagree with the stack contents.
+   */
+  const [, setHistVersion] = useState(0);
+  const [history] = useState(
+    () => new SessionHistory({ onChange: () => setHistVersion((v) => v + 1) }),
+  );
+  const canUndo = history.canUndo;
+  const canRedo = history.canRedo;
+
+  /**
+   * The state a history entry captures, as of the LAST COMMITTED RENDER.
+   * Written in an effect, so inside an event handler this is still the
+   * pre-edit state: exactly what a baseline snapshot wants.
+   */
+  const snapRef = useRef<HistorySnapshot>({
+    topology: initial.topology,
+    selectedIds: new Set<string>(),
+    rps: initial.rps,
+    presetId: initial.presetId,
+  });
+  // Layout effect, not a passive one: the mirror must be current before the
+  // NEXT event handler runs (a pointerup reading the final drag position),
+  // and passive effects offer no such ordering guarantee.
+  useLayoutEffect(() => {
+    snapRef.current = { topology, selectedIds, rps, presetId };
+  }, [topology, selectedIds, rps, presetId]);
+
+  /**
+   * Toast naming what was undone or redone. On a large canvas the reverted
+   * change can be off screen (a preset load, a node deleted at the far
+   * edge), and without the toast an off-screen undo is indistinguishable
+   * from a dead keypress; a two-second label is the cheapest possible proof
+   * that something happened. `id` keys the element so consecutive undos
+   * restart the entrance animation instead of freezing on one message.
+   */
+  const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
+  const toastSeq = useRef(0);
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 2200);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  const applyEntry = useCallback(
+    (entry: HistoryEntry, verb: 'Undid' | 'Redid') => {
+      // The engine first, via the same non-resetting paths a forward edit
+      // uses: updateNodeConfig for a config-only difference, setTopology for
+      // structure. Nothing here resets the simulation or its metrics.
+      syncEngine(engine, snapRef.current.topology, entry.topology);
+      setTopology(entry.topology);
+      setSelectedIds(new Set(entry.selectedIds));
+      setRps(entry.rps);
+      setPresetId(entry.presetId);
+      toastSeq.current += 1;
+      setToast({ text: `${verb} ${entry.label}`, id: toastSeq.current });
+    },
+    [engine],
+  );
+
+  const handleUndo = useCallback(() => {
+    const entry = history.undo(snapRef.current);
+    if (entry) applyEntry(entry, 'Undid');
+  }, [history, applyEntry]);
+
+  const handleRedo = useCallback(() => {
+    const entry = history.redo(snapRef.current);
+    if (entry) applyEntry(entry, 'Redid');
+  }, [history, applyEntry]);
+
   /* ---------------- structural edits ---------------- */
 
   /**
@@ -529,25 +606,45 @@ export default function App() {
     [engine],
   );
 
-  const handleMoveNode = useCallback((id: string, x: number, y: number) => {
-    // Position is presentation only — the engine does not care, so this
-    // skips setTopology and avoids clearing the active preset badge.
-    setTopology((t) => ({
-      ...t,
-      nodes: t.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)),
-    }));
-  }, []);
+  const handleMoveNode = useCallback(
+    (id: string, x: number, y: number) => {
+      // Inside a pointer drag the history baseline was captured at promotion
+      // (handleMoveStart below) and will commit at gesture end, so the
+      // per-frame stream stays out of history entirely. A move arriving
+      // OUTSIDE a gesture is an arrow-key nudge; key-repeat makes that a
+      // stream too, so it takes the debounced path and one nudge burst
+      // settles into one entry.
+      if (!history.inGesture) history.touch('move', snapRef.current);
+      // Position is presentation only — the engine does not care, so this
+      // skips setTopology and avoids clearing the active preset badge.
+      setTopology((t) => ({
+        ...t,
+        nodes: t.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)),
+      }));
+    },
+    [history],
+  );
+
+  /** One drag is ONE history entry: baseline at promotion, commit at end. */
+  const handleMoveStart = useCallback(() => {
+    history.beginGesture('move', snapRef.current);
+  }, [history]);
+
+  const handleMoveEnd = useCallback(() => {
+    history.endGesture(snapRef.current);
+  }, [history]);
 
   const handleAddNode = useCallback(
     (kind: NodeKind, x: number, y: number) => {
       const node = makeNode(kind, x, y);
+      history.commit('add', snapRef.current);
       applyTopology({
         ...topology,
         nodes: [...topology.nodes, node],
       });
       setSelectedIds(new Set([node.id]));
     },
-    [applyTopology, topology],
+    [applyTopology, topology, history],
   );
 
   /** Palette click (no drop point): place into open space near the middle. */
@@ -564,12 +661,13 @@ export default function App() {
       if (fromId === toId) return;
       const id = `${fromId}->${toId}`;
       if (topology.edges.some((e) => e.id === id)) return;
+      history.commit('connection', snapRef.current);
       applyTopology({
         ...topology,
         edges: [...topology.edges, { id, from: fromId, to: toId, weight: 1 }],
       });
     },
-    [applyTopology, topology],
+    [applyTopology, topology, history],
   );
 
   /**
@@ -585,6 +683,9 @@ export default function App() {
       if (nodeIds.length === 0 && edgeIds.length === 0) return;
       const dropNodes = new Set(nodeIds);
       const dropEdges = new Set(edgeIds);
+      // ONE entry for the whole selection, orphaned edges included: the
+      // filter below is a single topology edit, so its baseline is too.
+      history.commit('delete', snapRef.current);
       applyTopology({
         nodes: topology.nodes.filter((n) => !dropNodes.has(n.id)),
         edges: topology.edges.filter(
@@ -601,7 +702,7 @@ export default function App() {
         return next;
       });
     },
-    [applyTopology, topology],
+    [applyTopology, topology, history],
   );
 
   /** The Inspector's single-node delete routes through the same path. */
@@ -619,6 +720,108 @@ export default function App() {
     [handleDeleteSelection],
   );
 
+  /* ---------------- duplicate & paste ---------------- */
+
+  /**
+   * Append a cloned subgraph in ONE topology edit and make the clones the
+   * new selection (nodes and internal edges both), which is what lets a
+   * repeated Ctrl+D walk copies across the canvas. Shared by Ctrl+D,
+   * alt-drag and paste so the three cannot disagree about what a copy is.
+   */
+  const appendClones = useCallback(
+    (clones: ClipboardSubgraph) => {
+      applyTopology({
+        nodes: [...topology.nodes, ...clones.nodes],
+        edges: [...topology.edges, ...clones.edges],
+      });
+      const next = new Set<string>();
+      for (const n of clones.nodes) next.add(n.id);
+      for (const e of clones.edges) next.add(e.id);
+      setSelectedIds(next);
+    },
+    [applyTopology, topology],
+  );
+
+  /**
+   * Ctrl+D: duplicate the selection two grid steps down-right. The offset is
+   * small enough that the copy reads as "yours, here" and large enough that
+   * it never lands exactly on its source and looks like nothing happened.
+   */
+  const handleDuplicate = useCallback(() => {
+    const sub = selectionSubgraph(topology, selectedIds);
+    if (!sub) return;
+    // ONE entry for the whole duplicate, selection included.
+    history.commit('duplicate', snapRef.current);
+    appendClones(cloneSubgraph(sub, topology, GRID * 2, GRID * 2));
+  }, [topology, selectedIds, history, appendClones]);
+
+  /**
+   * Alt+drag: the same duplication as Ctrl+D, but born under the pointer as
+   * a drag. Called by the canvas once at drag promotion; clones are placed
+   * exactly on their sources (offset 0) because the drag itself supplies the
+   * displacement, and the return value tells the canvas which clones the
+   * gesture now carries. History: this opens a gesture the canvas's
+   * onMoveEnd closes, so the entire duplicate-and-drag is one undo step
+   * whose baseline predates the clones.
+   */
+  const handleDuplicateForDrag = useCallback(
+    (primaryId: string) => {
+      if (!topology.nodes.some((n) => n.id === primaryId)) return null;
+      // Same scope rule as a plain drag: grabbing a member of a
+      // multi-selection copies the whole selection, anything else copies
+      // just the grabbed node.
+      const scope: ReadonlySet<string> =
+        selectedIds.has(primaryId) && selectedIds.size > 1
+          ? selectedIds
+          : new Set([primaryId]);
+      const sub = selectionSubgraph(topology, scope);
+      if (!sub) return null;
+      const clones = cloneSubgraph(sub, topology, 0, 0);
+      // cloneSubgraph preserves order, so source i maps to clone i.
+      let primary: string | null = null;
+      const group: { id: string; x: number; y: number }[] = [];
+      for (let i = 0; i < sub.nodes.length; i++) {
+        const clone = clones.nodes[i]!;
+        if (sub.nodes[i]!.id === primaryId) primary = clone.id;
+        else group.push({ id: clone.id, x: clone.x, y: clone.y });
+      }
+      if (!primary) return null;
+      history.beginGesture('duplicate', snapRef.current);
+      appendClones(clones);
+      return { id: primary, group };
+    },
+    [topology, selectedIds, history, appendClones],
+  );
+
+  /**
+   * Ctrl+V: a validated subgraph off the system clipboard, aimed at the
+   * pointer. The payload's ids are whatever the copy carried (possibly from
+   * another tab) and are never trusted: cloneSubgraph mints fresh ones
+   * against the live topology. The bounding-box centre lands on the pointer,
+   * moved by a grid-snapped delta so the subgraph's internal offsets survive
+   * exactly and grid-aligned content stays aligned.
+   */
+  const handlePaste = useCallback(
+    (sub: ClipboardSubgraph, at: { x: number; y: number }) => {
+      if (sub.nodes.length === 0) return;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const n of sub.nodes) {
+        if (n.x < minX) minX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.x + NODE_W > maxX) maxX = n.x + NODE_W;
+        if (n.y + NODE_H > maxY) maxY = n.y + NODE_H;
+      }
+      const dx = Math.round((at.x - (minX + maxX) / 2) / GRID) * GRID;
+      const dy = Math.round((at.y - (minY + maxY) / 2) / GRID) * GRID;
+      history.commit('paste', snapRef.current);
+      appendClones(cloneSubgraph(sub, topology, dx, dy));
+    },
+    [topology, history, appendClones],
+  );
+
   /* ---------------- live config edits ---------------- */
 
   /**
@@ -627,6 +830,10 @@ export default function App() {
    */
   const handleConfigChange = useCallback(
     (id: string, patch: Partial<NodeConfig>) => {
+      // A slider fires this every frame, so the history side is debounced:
+      // the first frame captures the pre-edit baseline, and the entry lands
+      // once the value settles. One knob gesture, one undo step.
+      history.touch('setting change', snapRef.current);
       engine.updateNodeConfig(id, patch);
       setTopology((t) => ({
         ...t,
@@ -637,7 +844,7 @@ export default function App() {
       // The load slider and the client's rps knob are the same value.
       if (patch.rps !== undefined) setRps(patch.rps);
     },
-    [engine],
+    [engine, history],
   );
 
   /**
@@ -651,6 +858,7 @@ export default function App() {
   const handleConfigChangeMany = useCallback(
     (ids: readonly string[], patch: Partial<NodeConfig>) => {
       if (ids.length === 0) return;
+      history.touch('setting change', snapRef.current);
       const targets = new Set(ids);
       for (const id of targets) engine.updateNodeConfig(id, patch);
       setTopology((t) => ({
@@ -666,15 +874,21 @@ export default function App() {
         if (client && targets.has(client.id)) setRps(patch.rps);
       }
     },
-    [engine, topology],
+    [engine, topology, history],
   );
 
-  const handleRename = useCallback((id: string, label: string) => {
-    setTopology((t) => ({
-      ...t,
-      nodes: t.nodes.map((n) => (n.id === id ? { ...n, label } : n)),
-    }));
-  }, []);
+  const handleRename = useCallback(
+    (id: string, label: string) => {
+      // Fired per keystroke; debounced the same way a slider is, so one
+      // typed name settles into one entry.
+      history.touch('rename', snapRef.current);
+      setTopology((t) => ({
+        ...t,
+        nodes: t.nodes.map((n) => (n.id === id ? { ...n, label } : n)),
+      }));
+    },
+    [history],
+  );
 
   /** The top-bar slider writes straight through to the client node. */
   const handleRpsChange = useCallback(
@@ -690,6 +904,9 @@ export default function App() {
 
   const handleLoadPreset = useCallback(
     (preset: Preset) => {
+      // ONE entry, captured before the load, so a student who loads an
+      // example over a half-built system can undo back to what they had.
+      history.commit('example load', snapRef.current);
       // Deep copy: presets are module-level constants and must never be
       // mutated by editing the loaded system.
       const fresh = structuredClone(preset.topology);
@@ -701,7 +918,7 @@ export default function App() {
       engine.reset();
       setSnapshot(engine.snapshot());
     },
-    [engine],
+    [engine, history],
   );
 
   const handleReset = useCallback(() => {
@@ -739,6 +956,49 @@ export default function App() {
         ) {
           return;
         }
+      }
+
+      /*
+       * Undo / redo. Bound by e.code, not e.key: KeyZ is the physical key in
+       * the Z position, so the chord works on layouts (Cyrillic, Greek) where
+       * pressing that key produces no letter "z" at all — the exact bug
+       * Excalidraw shipped and fixed. Ctrl+Shift+Z and Ctrl+Y are both redo,
+       * matching the two conventions users arrive with. Inert in text fields
+       * via the guard above, so the browser keeps its own text undo.
+       */
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyZ') {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'KeyY') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      /*
+       * Duplicate. By e.code for the same layout reasons as undo, and
+       * preventDefault matters doubly here: Ctrl+D is the browser's
+       * bookmark chord.
+       */
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'KeyD') {
+        e.preventDefault();
+        handleDuplicate();
+        return;
+      }
+
+      /*
+       * The shortcuts dialog, on Ctrl+/ — the settled convention for "show
+       * me the keys" in tools whose "?" is already spoken for, and ours is:
+       * "?" has toggled the glossary since it shipped, and stealing a taught
+       * binding to advertise the other bindings would be self-defeating.
+       */
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'Slash') {
+        e.preventDefault();
+        setShortcutsOpen((o) => !o);
+        return;
       }
 
       if (e.code === 'Space') {
@@ -816,6 +1076,9 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     handleStep,
+    handleUndo,
+    handleRedo,
+    handleDuplicate,
     glossaryOpen,
     openGlossary,
     closeGlossary,
@@ -932,6 +1195,66 @@ export default function App() {
           <h1 className="app-title">Breakscale</h1>
           <p className="app-tagline">Build it, load it, watch it break</p>
         </div>
+
+        {/*
+          Undo / redo. Beside the wordmark, at the editing end of the bar,
+          away from the run/pause cluster: these operate on the DIAGRAM, not
+          on the simulation. Disabled state is derived from the history
+          stacks on every render, so the buttons can never claim emptiness
+          while entries exist (the cached-boolean regression Excalidraw
+          shipped). Icon-only, because "curved arrow left" is one of the few
+          icons with a universally settled meaning, and the title carries the
+          shortcut for anyone hovering to check.
+        */}
+        <div className="app-history">
+          <button
+            type="button"
+            className="btn btn-sm btn-icon"
+            disabled={!canUndo}
+            aria-label="Undo"
+            title="Undo (Ctrl+Z)"
+            onClick={handleUndo}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 14 4 9l5-5" />
+              <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-icon"
+            disabled={!canRedo}
+            aria-label="Redo"
+            title="Redo (Ctrl+Shift+Z)"
+            onClick={handleRedo}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m15 14 5-5-5-5" />
+              <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+            </svg>
+          </button>
+        </div>
+
         <TrafficControl
           rps={rps}
           onRpsChange={handleRpsChange}
@@ -974,6 +1297,7 @@ export default function App() {
           type="button"
           className="btn app-glossary"
           aria-pressed={tooltipsOn}
+          aria-label={tooltipsOn ? 'Hints on' : 'Hints off'}
           title={
             tooltipsOn
               ? 'Hide the explanations on metric names'
@@ -996,13 +1320,53 @@ export default function App() {
             <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
             <path d="M12 17h.01" />
           </svg>
-          {tooltipsOn ? 'Hints on' : 'Hints off'}
+          <span className="app-glossary-label">
+            {tooltipsOn ? 'Hints on' : 'Hints off'}
+          </span>
+        </button>
+
+        {/*
+          The way into the keyboard shortcuts dialog. Labelled, beside the
+          glossary, for the same reason the glossary is: the two are the
+          app's reference surfaces, and a student who knows no shortcuts is
+          exactly the person an icon-only affordance would lose. The printed
+          chord makes the binding learnable from the button itself.
+        */}
+        <button
+          type="button"
+          className="btn app-glossary"
+          aria-haspopup="dialog"
+          aria-expanded={shortcutsOpen}
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts (Ctrl+/)"
+          onClick={() => setShortcutsOpen((o) => !o)}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="2" y="5" width="20" height="14" rx="2.5" />
+            <path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6M7 17h10" />
+          </svg>
+          <span className="app-glossary-label">Shortcuts</span>
+          <kbd className="app-glossary-key" aria-hidden="true">
+            Ctrl+/
+          </kbd>
         </button>
 
         <button
           type="button"
           className="btn app-glossary"
           aria-expanded={glossaryOpen}
+          aria-label="Glossary"
+          title="Glossary (?)"
           onClick={() => (glossaryOpen ? closeGlossary() : openGlossary())}
         >
           <svg
@@ -1019,7 +1383,7 @@ export default function App() {
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
             <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
           </svg>
-          Glossary
+          <span className="app-glossary-label">Glossary</span>
           <kbd className="app-glossary-key" aria-hidden="true">
             ?
           </kbd>
@@ -1027,14 +1391,14 @@ export default function App() {
       </header>
 
       <div className="app-body">
-        {layout.library ? (
+        <PanelSlot open={layout.library} edge="left">
           <Palette
             onAdd={handlePaletteAdd}
             presets={PRESETS}
             activePresetId={presetId}
             onLoadPreset={handleLoadPreset}
           />
-        ) : null}
+        </PanelSlot>
 
         <main className="app-stage">
           {/*
@@ -1056,9 +1420,14 @@ export default function App() {
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}
               onMoveNode={handleMoveNode}
+              onMoveStart={handleMoveStart}
+              onMoveEnd={handleMoveEnd}
               onConnect={handleConnect}
               onDeleteSelection={handleDeleteSelection}
               onDropNode={handleAddNode}
+              onRename={handleRename}
+              onDuplicateForDrag={handleDuplicateForDrag}
+              onPaste={handlePaste}
               spark={spark}
             />
             <button
@@ -1104,10 +1473,12 @@ export default function App() {
               <PanelGlyph edge="bottom" />
             </button>
           </div>
-          {layout.metrics && snapshot ? <Metrics snapshot={snapshot} /> : null}
+          <PanelSlot open={layout.metrics && snapshot !== null} edge="bottom">
+            {snapshot ? <Metrics snapshot={snapshot} /> : null}
+          </PanelSlot>
         </main>
 
-        {inspectorVisible ? (
+        <PanelSlot open={inspectorVisible} edge="right">
           <Inspector
             node={selectedNode}
             stats={selectedStats}
@@ -1119,7 +1490,7 @@ export default function App() {
             onChangeMany={handleConfigChangeMany}
             onDeleteMany={handleDeleteMany}
           />
-        ) : null}
+        </PanelSlot>
       </div>
 
       {/*
@@ -1129,8 +1500,21 @@ export default function App() {
         present. Both of these portal to <body>, so their position here is
         about ownership, not stacking.
       */}
+      {/*
+        Undo/redo receipt. role="status" (polite live region) so a screen
+        reader hears the same confirmation a sighted user sees; keyed by id so
+        rapid consecutive undos restart the entrance rather than sitting
+        still on a message that appears not to change.
+      */}
+      {toast ? (
+        <div key={toast.id} className="app-toast" role="status">
+          {toast.text}
+        </div>
+      ) : null}
+
       <TooltipLayer />
       <Glossary open={glossaryOpen} onClose={closeGlossary} focusId={glossaryFocusId} />
+      <Shortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 }

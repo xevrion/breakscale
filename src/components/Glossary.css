@@ -65,6 +65,62 @@
 }
 
 /* --------------------------------------------------------------------------
+   Motion.
+
+   The sheet slides in from the right edge it belongs to; the scrim only
+   fades, because a scrim has no edge to arrive from. On close the same pair
+   runs in reverse (Glossary.tsx keeps the sheet mounted until the exit
+   animation ends, inert the whole way out). Entrance on --ease-out, exit on
+   --ease, and nothing longer than --dur-slow.
+
+   Exits are keyframes with `forwards` because the component unmounts on
+   animationend: the end state holds for the few ms between the event and
+   React removing the node. Under prefers-reduced-motion the global rule in
+   index.css collapses these durations to 0.01ms, so the sheet appears and
+   disappears in place and the animationend that unmounts it still fires.
+   -------------------------------------------------------------------------- */
+
+@keyframes gl-sheet-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes gl-sheet-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes gl-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes gl-scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.gl-sheet {
+  animation: gl-sheet-in var(--dur-slow) var(--ease-out);
+}
+
+.gl-scrim {
+  animation: gl-scrim-in var(--dur-slow) var(--ease-out);
+}
+
+.gl-root.is-closing .gl-sheet {
+  animation: gl-sheet-out var(--dur-base) var(--ease) forwards;
+}
+
+.gl-root.is-closing .gl-scrim {
+  animation: gl-scrim-out var(--dur-base) var(--ease) forwards;
+}
+
+/* --------------------------------------------------------------------------
    Header — title, search, count. Fixed; only the list below it scrolls.
    -------------------------------------------------------------------------- */
 

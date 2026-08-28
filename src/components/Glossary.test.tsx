@@ -165,6 +165,13 @@ describe('search', () => {
     render(<Glossary open onClose={() => {}} />);
     type('p99');
     render(<Glossary open={false} onClose={() => {}} />);
+    // The sheet now stays mounted through its exit animation and resets its
+    // search at unmount. jsdom runs no CSS animations, so deliver the
+    // animationend the exit would fire; presence unmounts on it, exactly as
+    // in a browser.
+    act(() => {
+      sheet()?.dispatchEvent(new Event('animationend', { bubbles: true }));
+    });
     render(<Glossary open onClose={() => {}} />);
     expect(search().value).toBe('');
     expect(entries().length).toBe(GLOSSARY.length);

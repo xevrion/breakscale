@@ -21,7 +21,10 @@
        single-side border.
      - Every number renders in --mono with tabular-nums.
      - No gradients, no backdrop-filter, no glow, no serif headline, no
-       coloured shadow, no entrance animation.
+       coloured shadow. Motion is 120-200ms on the shared tokens, and an
+       entrance animation exists only for a surface the user just summoned
+       (a panel toggled open, a node dropped, a selection made), never for
+       content that is simply present.
 
    COLOUR DERIVATION. Every colour in this file was generated in OKLCH and
    its contrast measured numerically, not chosen by eye. OKLCH is used rather
@@ -149,8 +152,9 @@
      that layer to understand. */
   --scrim: rgba(60, 50, 40, 0.16);
 
-  /* Interactive transitions only, 120-200ms. There are no entrance
-     animations anywhere in this application. */
+  /* All motion, 120-200ms: interactive transitions, the panel slides in
+     App.css, and the state-change colour eases. Nothing animates longer
+     than --dur-slow. */
   --dur-fast: 120ms;
   --dur-base: 160ms;
   --dur-slow: 200ms;
@@ -977,6 +981,26 @@ h4 {
 .is-danger {
   --status-ink: var(--danger);
   color: var(--status-ink);
+}
+
+/* A readout crossing a threshold eases into its new colour instead of
+   snapping. The 10Hz refresh only changes the digits; `color` moves at the
+   moment a state class flips, which is exactly the change worth a beat of
+   motion, and the ease also absorbs the flicker of a value hovering on a
+   boundary. Colour only: a status background (the pills) still switches
+   with its class. */
+.is-ok,
+.is-warn,
+.is-danger {
+  transition: color var(--dur-slow) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-ok,
+  .is-warn,
+  .is-danger {
+    transition: none;
+  }
 }
 
 /* Status pill. Text sits on a soft tint at the AA-verified text colour. */

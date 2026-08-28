@@ -317,6 +317,22 @@
   cursor: grab;
 }
 
+/* A node dropped from the palette fades in where it landed. Opacity only,
+   very deliberately: the group's position is the `transform` ATTRIBUTE
+   (translate(x,y)), and a CSS transform in a keyframe would override that
+   attribute and teleport the node to the origin for the animation's
+   duration. NodeView applies this class only to a node that just arrived
+   alone; preset loads and restores render with no entrance. */
+.cv-node.is-entering {
+  animation: cv-node-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes cv-node-in {
+  from {
+    opacity: 0;
+  }
+}
+
 .cv-node:active {
   cursor: grabbing;
 }
@@ -377,6 +393,22 @@
   stroke: var(--accent);
   stroke-width: 2;
   pointer-events: none;
+  /* The ring element mounts on selection, so this plays exactly when the
+     selection appears: a short settle inward onto the node, which reads as
+     the ring closing around the thing that was picked. transform-box makes
+     the scale run about the ring's own centre rather than the SVG origin;
+     the rect carries no transform attribute of its own, so the CSS
+     transform collides with nothing. */
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cv-ring-in var(--dur-fast) var(--ease-out);
+}
+
+@keyframes cv-ring-in {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
 }
 
 /* Keyboard focus gets the same ring treatment as mouse selection, so tabbing
@@ -451,6 +483,12 @@
 
 .cv-node-primary .cv-val {
   fill: var(--text);
+  /* The primary value takes the health colour when its own metric breaches
+     (the is-warn / is-danger rules further down). Easing the fill makes the
+     state CHANGE legible as a change rather than a flicker, and it costs
+     nothing at 10Hz: the digits repaint every tick, but fill only moves at
+     the moment a threshold is crossed. */
+  transition: fill var(--dur-slow) var(--ease);
 }
 
 .cv-node-sec .cv-val {
@@ -1108,7 +1146,42 @@
      instead of watching it travel there. The information is in the position,
      never in the movement. */
   .cv-unit,
-  .cv-vessel-fill {
+  .cv-vessel-fill,
+  .cv-node-primary .cv-val {
     transition: none;
   }
+
+  /* Entrances collapse to appearance-in-place. `animation: none` rather
+     than a shortened duration is safe here, unlike the shell panels: no
+     unmount logic waits on these animationend events. */
+  .cv-node.is-entering,
+  .cv-node-ring {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   In-place rename editor.
+
+   Floated over the node's header row by the world-to-screen transform (the
+   left/top/width/height and font-size all arrive inline, because they scale
+   with the zoom). Styled to read as the node's own name made editable: the
+   node's sans face at the node's weight, a hairline accent border to say
+   "this is now an input", and the node surface behind it so the SVG name
+   underneath never ghosts through.
+   -------------------------------------------------------------------------- */
+
+.cv-rename {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  padding: 0 var(--sp-2);
+  border: var(--bw-strong) solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--sans);
+  font-weight: var(--fw-body);
+  line-height: 1;
+  outline: none;
 }

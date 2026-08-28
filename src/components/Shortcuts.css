@@ -1,0 +1,193 @@
+/* ==========================================================================
+   Keyboard shortcuts dialog.
+
+   This file owns .sc-* only. It reuses .btn and the tokens from index.css
+   and re-declares none of them. Motion: entrance and exit at the interactive
+   durations; the global prefers-reduced-motion rule in index.css shortens
+   both to effectively zero while animationend (which drives unmount) still
+   fires.
+   ========================================================================== */
+
+.sc-root {
+  position: fixed;
+  inset: 0;
+  /* Same layer as the glossary: above the tooltip layer (400), because a
+     tooltip must never float over the dialog covering its trigger. */
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+}
+
+.sc-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  cursor: default;
+}
+
+.sc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: min(640px, 100%);
+  min-height: 0;
+  background: var(--surface);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  outline: none;
+  animation: sc-card-in var(--dur-slow) var(--ease-out);
+}
+
+.sc-root.is-closing .sc-card {
+  animation: sc-card-out var(--dur-base) var(--ease) forwards;
+}
+
+.sc-root.is-closing .sc-scrim {
+  animation: sc-scrim-out var(--dur-base) var(--ease) forwards;
+}
+
+.sc-scrim {
+  animation: sc-scrim-in var(--dur-slow) var(--ease-out);
+}
+
+@keyframes sc-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sc-card-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes sc-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sc-scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.sc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: var(--bw) solid var(--border);
+}
+
+.sc-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-med);
+  letter-spacing: var(--tr-base);
+  color: var(--text);
+}
+
+/* Two columns of groups; the body scrolls inside itself on a short window,
+   so the page never scrolls. Collapses to one column on a narrow one. */
+.sc-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4) var(--sp-7);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+@media (max-width: 640px) {
+  .sc-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sc-group-title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-num);
+  letter-spacing: var(--tr-label);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.sc-rows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.sc-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.sc-keys {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  flex: none;
+}
+
+.sc-alt {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+}
+
+.sc-or {
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+}
+
+/* Key caps: mono with tabular figures, a recessed surface and a hairline.
+   Flat by design; a key cap is a label, not a control. */
+.sc-kbd {
+  padding: 1px var(--sp-1);
+  border: var(--bw) solid var(--border-strong);
+  border-radius: var(--r-mark);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-med);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-label);
+  white-space: nowrap;
+}
+
+.sc-does {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+  text-align: right;
+}

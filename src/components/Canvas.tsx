@@ -43,6 +43,8 @@ import {
 import type { Health } from './format';
 import type { TextStyle } from './textMetrics';
 import { measureText, resetTextMetrics, truncateToWidth } from './textMetrics';
+import { buildClipboardText, parseClipboardText } from '../clipboard';
+import type { ClipboardSubgraph } from '../clipboard';
 import './Canvas.css';
 
 /* ------------------------------------------------------------------ *
@@ -217,7 +219,8 @@ const WARN_AT = (() => {
   return 0.7;
 })();
 
-const GRID = 8;
+/** Grid step. Exported so the shell's paste placement snaps the same way. */
+export const GRID = 8;
 /** Visual radius of a port dot. */
 const PORT_R = 5;
 /**
@@ -230,6 +233,8 @@ const PORT_CY = NODE_H / 2;
 
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 2.5;
+/** One keyboard or button zoom step. Shared so the two cannot drift. */
+const ZOOM_STEP = 1.25;
 /** Below this the body numbers and sparkline drop. */
 const DETAIL_ZOOM = 0.7;
 /** Below this only the name, health rule and meter survive. */
@@ -290,6 +295,18 @@ export interface CanvasProps {
    */
   onSelectionChange: (ids: ReadonlySet<string>) => void;
   onMoveNode: (id: string, x: number, y: number) => void;
+  /**
+   * Explicit gesture boundaries around a node drag, for the shell's undo
+   * history. onMoveStart fires once at drag promotion, BEFORE the promotion
+   * selects the grabbed node, so a history baseline captured in it holds the
+   * pre-drag selection too. onMoveEnd fires exactly once when the drag ends,
+   * by any route: pointerup, pointercancel, Escape, or the buttons===0
+   * stale-gesture guard. onMoveNode itself fires every frame in between and
+   * carries no boundary information on purpose; the shell must not have to
+   * infer "the drag is over" from a gap in the stream.
+   */
+  onMoveStart?: () => void;
+  onMoveEnd?: () => void;
   onConnect: (fromId: string, toId: string) => void;
   /**
    * Delete everything in one gesture. The canvas partitions the selection
@@ -299,6 +316,31 @@ export interface CanvasProps {
    */
   onDeleteSelection: (nodeIds: readonly string[], edgeIds: readonly string[]) => void;
   onDropNode: (kind: NodeKind, x: number, y: number) => void;
+  /**
+   * Commit a rename typed into the double-click editor. Called ONCE, with
+   * the finished label, when the edit commits (Enter or blur); Escape and an
+   * empty name never call it.
+   */
+  onRename?: (id: string, label: string) => void;
+  /**
+   * Alt+drag: duplicate before dragging. Called once at drag promotion with
+   * the grabbed node's id; the shell clones the selection IN PLACE (no
+   * offset), makes the clones the selection, opens its own history gesture,
+   * and returns which clones the drag should now carry: the clone of the
+   * grabbed node, and the other clones with their origins. Returning null
+   * degrades to a plain move. The shell's onMoveEnd still closes the
+   * gesture, so a duplicate-drag is exactly one history entry.
+   */
+  onDuplicateForDrag?: (
+    primaryId: string,
+  ) => { id: string; group: { id: string; x: number; y: number }[] } | null;
+  /**
+   * A validated clipboard subgraph arrived via Ctrl+V. `at` is the pointer's
+   * world position (or the viewport centre when the pointer is elsewhere);
+   * the shell mints fresh ids and appends. Ids in `sub` are the COPIED ids
+   * and must be remapped by the receiver, never trusted to be free.
+   */
+  onPaste?: (sub: ClipboardSubgraph, at: { x: number; y: number }) => void;
   /** Optional: per-node sparkline history. Omitted -> no sparklines. */
   spark?: SparkData;
 }
@@ -1928,6 +1970,13 @@ interface NodeViewProps {
   backlog: number;
   onActivate: (id: string, additive: boolean) => void;
   onNudge: (id: string, dx: number, dy: number) => void;
+  /**
+   * True for the one node that just arrived on an already-populated canvas
+   * (a palette drop or click). Drives the entrance fade in Canvas.css.
+   * Deliberately false for every node of a preset load or a restored
+   * session: content that is simply present does not get an entrance.
+   */
+  entering: boolean;
 }
 
 const NodeView = memo(function NodeView({
@@ -1943,6 +1992,7 @@ const NodeView = memo(function NodeView({
   backlog,
   onActivate,
   onNudge,
+  entering,
 }: NodeViewProps) {
   const readout = stats ? readoutFor(node.kind, stats, node.config, backlog) : null;
   // A faulted node is never reported as healthy, whatever its metrics say.
@@ -1995,8 +2045,19 @@ const NodeView = memo(function NodeView({
         onActivate(node.id, e.shiftKey || e.ctrlKey || e.metaKey);
         return;
       }
-      // Arrows nudge by one grid step, shift+arrow by four.
-      const step = e.shiftKey ? GRID * 4 : GRID;
+      /*
+       * Arrows nudge by one grid step; SHIFT+arrow moves by a single pixel.
+       * The inversion is deliberate: with an 8px snap always on, the fine
+       * step is the escape hatch a grid user actually needs, where a coarser
+       * shift step would just be a faster version of what plain arrows
+       * already do.
+       *
+       * A SELECTED node lets the event through untouched: the canvas-level
+       * handler moves the whole selection (this node included), and handling
+       * it here too would move this node twice.
+       */
+      if (selected) return;
+      const step = e.shiftKey ? 1 : GRID;
       let dx = 0;
       let dy = 0;
       if (e.key === 'ArrowLeft') dx = -step;
@@ -2008,7 +2069,7 @@ const NodeView = memo(function NodeView({
       e.stopPropagation();
       onNudge(node.id, dx, dy);
     },
-    [node.id, onActivate, onNudge],
+    [node.id, selected, onActivate, onNudge],
   );
 
   // A working node must never render an empty meter: 2px minimum whenever
@@ -2048,7 +2109,7 @@ const NodeView = memo(function NodeView({
         // primary's baseline at 52, so strip kinds suppress the selected-state
         // font bump via this class (measured overlap: 124x3px on a shard).
         structure === 'strip' ? ' has-strip' : ''
-      }${linkClass}`}
+      }${entering ? ' is-entering' : ''}${linkClass}`}
       transform={`translate(${node.x},${node.y})`}
       tabIndex={0}
       role="button"
@@ -2518,6 +2579,8 @@ interface Pending {
   worldY: number;
   shift: boolean;
   ctrl: boolean;
+  /** Alt at press: promoting a node drag duplicates first (alt+drag copy). */
+  alt: boolean;
   /** Viewport at press, so a pan is absolute rather than incremental. */
   vx: number;
   vy: number;
@@ -2562,15 +2625,27 @@ export default function Canvas({
   selectedIds,
   onSelectionChange,
   onMoveNode,
+  onMoveStart,
+  onMoveEnd,
   onConnect,
   onDeleteSelection,
   onDropNode,
+  onRename,
+  onDuplicateForDrag,
+  onPaste,
   spark,
 }: CanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const pendingRef = useRef<Pending | null>(null);
   const spaceRef = useRef(false);
+  /**
+   * Last pointer position over the surface, in CLIENT coords, or null when
+   * the pointer is elsewhere. Ctrl+V pastes here; client coords because the
+   * viewport can pan or zoom between the move and the paste, and converting
+   * at paste time stays correct through both.
+   */
+  const lastClientRef = useRef<{ x: number; y: number } | null>(null);
 
   const [view, setView] = useState<Viewport>({ x: 0, y: 0, k: 1 });
   /**
@@ -2647,6 +2722,43 @@ export default function Canvas({
     () => new Set(topology.nodes.map((n) => n.id)),
     [topology.nodes],
   );
+
+  /* ---------------- node entrances ---------------- */
+
+  /**
+   * The one node whose arrival earns an entrance: the single id present now
+   * that was absent a render ago, and only when it arrived ALONE onto a
+   * canvas that already had content. That shape is exactly a palette drop or
+   * a palette click. A preset load or session restore replaces many ids at
+   * once and the very first render has no previous set at all, so neither
+   * animates: content that is simply present does not get an entrance.
+   *
+   * Sticky by design: the id is kept, not cleared on the next render,
+   * because renders arrive every 100ms while the simulation runs and
+   * removing the class mid-flight would cut the animation off. The keyframe
+   * runs once per element, so the stale class on a settled node costs
+   * nothing. Render-phase ref writes guarded by an identity check, so
+   * StrictMode's double render observes identical values both times.
+   */
+  const prevIdsRef = useRef<ReadonlySet<string> | null>(null);
+  const enteredIdRef = useRef<string | null>(null);
+  if (prevIdsRef.current !== nodeIdSet) {
+    const prev = prevIdsRef.current;
+    prevIdsRef.current = nodeIdSet;
+    if (prev && prev.size > 0 && nodeIdSet.size === prev.size + 1) {
+      let added: string | null = null;
+      for (const id of nodeIdSet) {
+        if (!prev.has(id)) {
+          if (added !== null) {
+            added = null;
+            break;
+          }
+          added = id;
+        }
+      }
+      if (added !== null) enteredIdRef.current = added;
+    }
+  }
 
   const setSelection = useCallback(
     (ids: ReadonlySet<string>) => {
@@ -2728,12 +2840,17 @@ export default function Canvas({
         // Same reasoning as the capture above: releasing a pointer the
         // browser has already reclaimed is not an error worth propagating.
       }
+      // Every way a node drag can end funnels through here: the pointerup
+      // path, pointercancel, Escape, and the buttons===0 stale-gesture
+      // guard. Announcing the boundary in this ONE place means the shell's
+      // history sees exactly one end per begin, whichever exit fired.
+      if (p.active && p.mode === 'node') onMoveEnd?.();
     }
     pendingRef.current = null;
     setLink(null);
     setMarquee(null);
     setCursor(spaceRef.current ? 'grab' : 'default');
-  }, []);
+  }, [onMoveEnd]);
 
   /* ---------------- pointerdown: route, do not capture ---------------- */
 
@@ -2788,6 +2905,7 @@ export default function Canvas({
         worldY: w.y,
         shift: e.shiftKey,
         ctrl: e.ctrlKey || e.metaKey,
+        alt: e.altKey,
         vx: v.x,
         vy: v.y,
         active: false,
@@ -2811,7 +2929,7 @@ export default function Canvas({
   /* ---------------- pointermove: promote, then drag ---------------- */
 
   const promote = useCallback(
-    (p: Pending) => {
+    (p: Pending, clientX: number, clientY: number) => {
       p.active = true;
 
       switch (p.hit.kind) {
@@ -2823,6 +2941,37 @@ export default function Canvas({
             break;
           }
           p.mode = 'node';
+
+          /*
+           * ALT+DRAG DUPLICATES, then drags the copies. The shell clones in
+           * place, selects the clones and opens its own history gesture, so
+           * onMoveStart is NOT fired for this path (one begin per end). The
+           * drag origin is RESET to the pointer's position at this moment:
+           * the clones were born here, and measuring their motion from the
+           * original pointerdown would make them jump by the promotion
+           * threshold the instant they appeared.
+           */
+          if (p.alt && onDuplicateForDrag) {
+            const dup = onDuplicateForDrag(id);
+            if (dup) {
+              const cw = toWorld(clientX, clientY);
+              p.hit = { kind: 'node', id: dup.id };
+              p.worldX = cw.x;
+              p.worldY = cw.y;
+              p.grabDx = node.x - cw.x;
+              p.grabDy = node.y - cw.y;
+              for (const g of dup.group) {
+                p.groupIds.push(g.id);
+                p.groupOrigins.set(g.id, { x: g.x, y: g.y });
+              }
+              break;
+            }
+          }
+
+          // The drag is now real: give the shell its history baseline BEFORE
+          // the selectOne below, so the baseline still holds the pre-drag
+          // selection and undo restores it along with the position.
+          onMoveStart?.();
           p.grabDx = node.x - p.worldX;
           p.grabDy = node.y - p.worldY;
           // Dragging a node that is part of a multi-selection moves the whole
@@ -2885,11 +3034,16 @@ export default function Canvas({
         // is where essentially all of it happens.
       }
     },
-    [selectOne],
+    [selectOne, onMoveStart, onDuplicateForDrag, toWorld],
   );
 
   const onSurfaceMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
+      // Remembered for Ctrl+V, which pastes at the pointer. Client coords,
+      // not world: the viewport can pan and zoom between this move and the
+      // paste, and converting at paste time stays honest through both.
+      lastClientRef.current = { x: e.clientX, y: e.clientY };
+
       const p = pendingRef.current;
       if (!p || p.pointerId !== e.pointerId) return;
 
@@ -2925,7 +3079,7 @@ export default function Canvas({
         const dy = e.clientY - p.screenY;
         // Squared comparison: no sqrt on the hot path.
         if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
-        promote(p);
+        promote(p, e.clientX, e.clientY);
       }
 
       if (p.mode === 'pan') {
@@ -2941,8 +3095,17 @@ export default function Canvas({
 
       if (p.mode === 'node') {
         const id = p.hit.id!;
-        const nx = snap(w.x + p.grabDx);
-        const ny = snap(w.y + p.grabDy);
+        /*
+         * Ctrl (or Cmd) held DURING the drag bypasses the 8px grid snap.
+         * Checked live on every move, not latched at pointerdown, so the
+         * escape hatch can be pressed for the last few pixels of an
+         * otherwise snapped drag, which is exactly how it is used. Rounded
+         * to whole pixels so a free-placed node never carries fractional
+         * world coordinates into the saved session.
+         */
+        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
+        const nx = place(w.x + p.grabDx);
+        const ny = place(w.y + p.grabDy);
         onMoveNode(id, nx, ny);
         // Grouped nodes translate by the same snapped delta, so the shape of
         // a multi-selection is preserved exactly rather than each member
@@ -2950,8 +3113,8 @@ export default function Canvas({
         if (p.groupIds.length > 0) {
           const node = topoRef.current.nodes.find((n) => n.id === id);
           if (node) {
-            const baseX = snap(p.worldX + p.grabDx);
-            const baseY = snap(p.worldY + p.grabDy);
+            const baseX = place(p.worldX + p.grabDx);
+            const baseY = place(p.worldY + p.grabDy);
             const mdx = nx - baseX;
             const mdy = ny - baseY;
             for (const other of p.groupIds) {
@@ -3128,6 +3291,38 @@ export default function Canvas({
     };
   }, []);
 
+  /**
+   * THE zoom write. Every path that changes the scale — the wheel, the
+   * keyboard chords, the corner buttons, the 100% reset — funnels through
+   * this one function, so a single clamp and a single rounding govern all of
+   * them and no two paths can drift to different limits. The rounding (three
+   * decimals) also stops repeated in/out steps accumulating float residue
+   * that would make "100%" quietly render as 99%.
+   *
+   * `next` maps the current scale to the wanted one; (px, py) is the point
+   * in surface coords that stays pinned while the scale changes.
+   */
+  const zoomAt = useCallback((px: number, py: number, next: (k: number) => number) => {
+    setView((v) => {
+      const k = clamp(Math.round(next(v.k) * 1000) / 1000, MIN_ZOOM, MAX_ZOOM);
+      if (k === v.k) return v;
+      const wx = (px - v.x) / v.k;
+      const wy = (py - v.y) / v.k;
+      return { k, x: px - wx * k, y: py - wy * k };
+    });
+  }, []);
+
+  /** Zoom about the viewport centre: the keyboard and button path. */
+  const zoomCentered = useCallback(
+    (next: (k: number) => number) => {
+      const el = surfaceRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      zoomAt(r.width / 2, r.height / 2, next);
+    },
+    [zoomAt],
+  );
+
   useEffect(() => {
     const el = surfaceRef.current;
     if (!el) return;
@@ -3135,18 +3330,14 @@ export default function Canvas({
     const onWheel = (e: WheelEvent) => {
       const r = el.getBoundingClientRect();
       // Trackpad pinch arrives as ctrlKey wheel events on every platform.
+      // Keep the world point under the CURSOR pinned to the cursor.
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        setView((v) => {
-          const k = clamp(v.k * Math.exp(-e.deltaY * 0.0022), MIN_ZOOM, MAX_ZOOM);
-          if (k === v.k) return v;
-          // Keep the world point under the CURSOR pinned to the cursor.
-          const px = e.clientX - r.left;
-          const py = e.clientY - r.top;
-          const wx = (px - v.x) / v.k;
-          const wy = (py - v.y) / v.k;
-          return { k, x: px - wx * k, y: py - wy * k };
-        });
+        zoomAt(
+          e.clientX - r.left,
+          e.clientY - r.top,
+          (k) => k * Math.exp(-e.deltaY * 0.0022),
+        );
         return;
       }
       // Plain wheel / two-finger scroll pans.
@@ -3156,7 +3347,7 @@ export default function Canvas({
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [zoomAt]);
 
   /* ---------------- space-to-pan ---------------- */
 
@@ -3265,10 +3456,134 @@ export default function Canvas({
     (id: string, dx: number, dy: number) => {
       const n = topology.nodes.find((m) => m.id === id);
       if (!n) return;
-      onMoveNode(id, snap(n.x + dx), snap(n.y + dy));
+      // Deliberately unsnapped: the step itself is the grid unit for a plain
+      // arrow, and the shift+arrow fine step exists precisely to move OFF
+      // the grid, which a snap here would silently undo.
+      onMoveNode(id, n.x + dx, n.y + dy);
     },
     [topology.nodes, onMoveNode],
   );
+
+  /* ---------------- double-click rename ----------------
+   *
+   * The universal canvas convention: double-click a node, type, Enter or
+   * click away commits, Escape cancels, an empty name reverts. The editor is
+   * an HTML input floated over the node's header (SVG has no editable text),
+   * positioned from the same world-to-screen maths the canvas itself uses so
+   * it tracks the node at any zoom. It is a sibling of the surface, so the
+   * pointer router never sees presses on it, and its keystrokes are safe
+   * from every shortcut via the isTypingTarget guards.
+   */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  /** Guards the commit-on-blur that follows an Escape or Enter unmount. */
+  const renameDoneRef = useRef(false);
+
+  const onSurfaceDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const el = e.target as Element | null;
+      if (el?.closest?.('button, input, select, textarea, a, [data-chrome]')) return;
+      const hit = hitTest(e.target);
+      if (hit.kind !== 'node' || !hit.id) return;
+      const node = topoRef.current.nodes.find((n) => n.id === hit.id);
+      if (!node) return;
+      e.preventDefault();
+      renameDoneRef.current = false;
+      setRenameDraft(node.label);
+      setRenaming(node.id);
+    },
+    [hitTest],
+  );
+
+  const commitRename = useCallback(() => {
+    if (renameDoneRef.current) return;
+    renameDoneRef.current = true;
+    const id = renaming;
+    setRenaming(null);
+    if (!id || !onRename) return;
+    const node = topoRef.current.nodes.find((n) => n.id === id);
+    const label = renameDraft.trim();
+    // An empty name reverts silently: a node must always have a name, and
+    // "you cleared the box so the label is gone" helps nobody.
+    if (!node || label === '' || label === node.label) return;
+    onRename(id, label);
+  }, [renaming, renameDraft, onRename]);
+
+  const cancelRename = useCallback(() => {
+    renameDoneRef.current = true;
+    setRenaming(null);
+  }, []);
+
+  /* ---------------- system clipboard ----------------
+   *
+   * Native copy/cut/paste events, not key bindings: the browser fires these
+   * for whatever chord the user's platform and layout assign, focus in a
+   * text field keeps its native behaviour via the isTypingTarget guard, and
+   * no clipboard permission prompt is ever raised.
+   *
+   * The PASTE PATH IS UNTRUSTED. Whatever is on the clipboard is parsed and
+   * structurally validated exactly the way a share link would be
+   * (parseClipboardText); anything that does not hold up is ignored without
+   * an error, and the event is left unconsumed so the browser can do
+   * whatever it would otherwise have done.
+   */
+  useEffect(() => {
+    const onCopy = (e: ClipboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      const text = buildClipboardText(topoRef.current, selRef.current);
+      if (!text || !e.clipboardData) return;
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', text);
+    };
+
+    const onCut = (e: ClipboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      const text = buildClipboardText(topoRef.current, selRef.current);
+      if (!text || !e.clipboardData) return;
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', text);
+      // Cut = copy + the same single-edit delete the Delete key performs.
+      const ids = new Set(topoRef.current.nodes.map((n) => n.id));
+      const nodes: string[] = [];
+      const edges: string[] = [];
+      for (const id of selRef.current) {
+        if (ids.has(id)) nodes.push(id);
+        else edges.push(id);
+      }
+      onDeleteSelection(nodes, edges);
+      clearSelection();
+    };
+
+    const onPasteEvent = (e: ClipboardEvent) => {
+      if (isTypingTarget(e.target) || !onPaste) return;
+      const text = e.clipboardData?.getData('text/plain');
+      if (!text) return;
+      const sub = parseClipboardText(text);
+      if (!sub) return;
+      e.preventDefault();
+      // At the pointer when it is over the canvas; at the viewport centre
+      // when it is not (a paste right after switching windows, say).
+      const last = lastClientRef.current;
+      let at: { x: number; y: number };
+      if (last) {
+        at = toWorld(last.x, last.y);
+      } else {
+        const el = surfaceRef.current;
+        const r = el?.getBoundingClientRect();
+        at = r ? toWorld(r.left + r.width / 2, r.top + r.height / 2) : { x: 0, y: 0 };
+      }
+      onPaste(sub, at);
+    };
+
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('cut', onCut);
+    document.addEventListener('paste', onPasteEvent);
+    return () => {
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('cut', onCut);
+      document.removeEventListener('paste', onPasteEvent);
+    };
+  }, [onDeleteSelection, clearSelection, onPaste, toWorld]);
 
   /* ---------------- palette drops ---------------- */
 
@@ -3300,9 +3615,15 @@ export default function Canvas({
 
   /* ---------------- fit to content ---------------- */
 
-  const fitToContent = useCallback(() => {
+  /**
+   * Fit a set of nodes into the viewport. The whole diagram for Shift+1 and
+   * the corner button; just the selection for Shift+2. The scale takes the
+   * same rounding zoomAt applies, so a fit and a keyboard zoom can never
+   * report two spellings of the same percentage.
+   */
+  const fitTo = useCallback((nodes: readonly SimNode[]) => {
     const el = surfaceRef.current;
-    if (!el || topology.nodes.length === 0) return;
+    if (!el || nodes.length === 0) return;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;
 
@@ -3310,7 +3631,7 @@ export default function Canvas({
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const n of topology.nodes) {
+    for (const n of nodes) {
       if (n.x < minX) minX = n.x;
       if (n.y < minY) minY = n.y;
       if (n.x + NODE_W > maxX) maxX = n.x + NODE_W;
@@ -3319,7 +3640,10 @@ export default function Canvas({
     const bw = Math.max(1, maxX - minX);
     const bh = Math.max(1, maxY - minY);
     const k = clamp(
-      Math.min((r.width - FIT_MARGIN * 2) / bw, (r.height - FIT_MARGIN * 2) / bh),
+      Math.round(
+        Math.min((r.width - FIT_MARGIN * 2) / bw, (r.height - FIT_MARGIN * 2) / bh) *
+          1000,
+      ) / 1000,
       FIT_MIN,
       FIT_MAX,
     );
@@ -3328,7 +3652,12 @@ export default function Canvas({
       x: (r.width - bw * k) / 2 - minX * k,
       y: (r.height - bh * k) / 2 - minY * k,
     });
-  }, [topology.nodes]);
+  }, []);
+
+  const fitToContent = useCallback(
+    () => fitTo(topology.nodes),
+    [fitTo, topology.nodes],
+  );
 
   /**
    * Re-fit whenever the topology is replaced wholesale (mount, preset load) —
@@ -3346,6 +3675,13 @@ export default function Canvas({
 
   useLayoutEffect(() => {
     if (topology.nodes.length === 0) return;
+    // Never refit while a pointer gesture is in flight (same guard the
+    // resize refit uses). An alt-drag duplicate changes the node-id set at
+    // drag PROMOTION, and refitting there moved the viewport under the
+    // pointer mid-drag; measured, a 75px drag displaced the clone 312 world
+    // px. The clones are born under the pointer, so there is nothing to
+    // reveal anyway.
+    if (pendingRef.current) return;
     fitToContent();
     // fitToContent is intentionally omitted: it changes identity on every node
     // move, and re-fitting mid-drag is exactly what this guard prevents.
@@ -3369,21 +3705,90 @@ export default function Canvas({
     };
   }, [fitToContent]);
 
-  const zoomBy = useCallback((factor: number) => {
-    const el = surfaceRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setView((v) => {
-      const k = clamp(v.k * factor, MIN_ZOOM, MAX_ZOOM);
-      if (k === v.k) return v;
-      // Zoom about the viewport center.
-      const px = r.width / 2;
-      const py = r.height / 2;
-      const wx = (px - v.x) / v.k;
-      const wy = (py - v.y) / v.k;
-      return { k, x: px - wx * k, y: py - wy * k };
-    });
-  }, []);
+  const zoomBy = useCallback(
+    (factor: number) => zoomCentered((k) => k * factor),
+    [zoomCentered],
+  );
+
+  /* ---------------- keyboard: view + selection movement ----------------
+   *
+   * A second window listener rather than an extension of the delete/escape
+   * one purely for declaration order: these chords need zoomCentered and
+   * fitTo, which are defined between the two effects.
+   *
+   * The zoom chords are bound by e.code — Equal, Minus, Digit0 are physical
+   * positions, so the bindings survive keyboard layouts where the printed
+   * symbols move (the same reasoning as binding undo to KeyZ). Ctrl+= rather
+   * than Ctrl+Shift+= because the browser's own zoom accepts either, and the
+   * unshifted key is the one every canvas app documents.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isTypingTarget(e.target)) return;
+
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        if (e.code === 'Equal' || e.code === 'NumpadAdd') {
+          e.preventDefault();
+          zoomCentered((k) => k * ZOOM_STEP);
+          return;
+        }
+        if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
+          e.preventDefault();
+          zoomCentered((k) => k / ZOOM_STEP);
+          return;
+        }
+        if (e.code === 'Digit0' || e.code === 'Numpad0') {
+          e.preventDefault();
+          zoomCentered(() => 1);
+          return;
+        }
+        return;
+      }
+
+      // Shift+1 fits everything, Shift+2 the selection: the pair every
+      // canvas app ships. Positional codes again, because Shift+1 is "!"
+      // only on some layouts.
+      if (e.shiftKey && !e.altKey && e.code === 'Digit1') {
+        e.preventDefault();
+        fitTo(topology.nodes);
+        return;
+      }
+      if (e.shiftKey && !e.altKey && e.code === 'Digit2') {
+        const sel = topology.nodes.filter((n) => selectedIds.has(n.id));
+        if (sel.length === 0) return;
+        e.preventDefault();
+        fitTo(sel);
+        return;
+      }
+
+      /*
+       * Arrows move the whole SELECTION: one grid step plain, ONE PIXEL with
+       * shift. The inversion (shift = finer, not coarser) is deliberate —
+       * with an 8px snap always on, the escape hatch a grid user needs is
+       * fine placement, and shift is where every grid editor puts it. A
+       * focused UNSELECTED node handles its own arrows in NodeView and stops
+       * propagation, so it never arrives here; a focused selected node lets
+       * the event through precisely so this handler moves it with its group.
+       */
+      if (
+        (e.key === 'ArrowLeft' ||
+          e.key === 'ArrowRight' ||
+          e.key === 'ArrowUp' ||
+          e.key === 'ArrowDown') &&
+        !e.altKey
+      ) {
+        const nodes = topology.nodes.filter((n) => selectedIds.has(n.id));
+        if (nodes.length === 0) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 1 : GRID;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        for (const n of nodes) onMoveNode(n.id, n.x + dx, n.y + dy);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomCentered, fitTo, topology.nodes, selectedIds, onMoveNode]);
 
   /* ---------------- derived render data ---------------- */
 
@@ -3557,6 +3962,10 @@ export default function Canvas({
 
   const elapsed = snapshot ? snapshot.system.timeMs / 1000 : 0;
 
+  /** The node being renamed in place, or null. Deleting it (or loading a
+   *  preset over it) unmounts the editor without committing, by lookup. */
+  const renameNode = renaming ? (nodeById.get(renaming) ?? null) : null;
+
   /** Snapped drop target of the live drag-link, if the drop would be legal. */
   const snapTarget =
     link && link.over && canLink(link.from, link.over) ? link.over : null;
@@ -3614,6 +4023,11 @@ export default function Canvas({
         onPointerMove={onSurfaceMove}
         onPointerUp={onSurfaceUp}
         onPointerCancel={cancelGesture}
+        onPointerLeave={() => {
+          // Paste-at-pointer must not aim at a position the pointer left.
+          lastClientRef.current = null;
+        }}
+        onDoubleClick={onSurfaceDoubleClick}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -3672,6 +4086,7 @@ export default function Canvas({
                   backlog={backlogById?.get(n.id) ?? 0}
                   onActivate={onActivate}
                   onNudge={onNudge}
+                  entering={enteredIdRef.current === n.id}
                 />
               ))}
             </g>
@@ -3688,6 +4103,47 @@ export default function Canvas({
           </g>
         </svg>
       </div>
+
+      {/*
+        The in-place rename editor. A sibling of the surface, like all other
+        chrome, so the pointer router cannot see it; positioned over the
+        node's header row by the same world-to-screen transform the canvas
+        applies, so it sits on the name it replaces at any pan or zoom. The
+        font scales with the zoom for the same reason.
+      */}
+      {renameNode && (
+        <input
+          className="cv-rename"
+          data-chrome="rename"
+          style={{
+            left: renameNode.x * view.k + view.x,
+            top: renameNode.y * view.k + view.y,
+            width: NODE_W * view.k,
+            height: HEAD_H * view.k,
+            fontSize: Math.max(11, 14 * view.k),
+          }}
+          value={renameDraft}
+          onChange={(e) => setRenameDraft(e.currentTarget.value)}
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            // The window-level shortcut handlers already ignore text fields;
+            // stopping propagation is belt and braces on top of that.
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitRename();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelRename();
+            }
+          }}
+          aria-label="Component name"
+          autoComplete="off"
+          spellCheck={false}
+          autoFocus
+        />
+      )}
 
       {topology.nodes.length === 0 && (
         <div className="cv-empty">
@@ -3730,8 +4186,9 @@ export default function Canvas({
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={() => zoomBy(1 / 1.25)}
+          onClick={() => zoomBy(1 / ZOOM_STEP)}
           aria-label="Zoom out"
+          title="Zoom out (Ctrl+-)"
         >
           &minus;
         </button>
@@ -3740,14 +4197,16 @@ export default function Canvas({
           className="btn btn-ghost cv-zoom-level"
           onClick={fitToContent}
           aria-label="Fit to content"
+          title="Fit to content (Shift+1)"
         >
           {Math.round(view.k * 100)}%
         </button>
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={() => zoomBy(1.25)}
+          onClick={() => zoomBy(ZOOM_STEP)}
           aria-label="Zoom in"
+          title="Zoom in (Ctrl+=)"
         >
           +
         </button>
