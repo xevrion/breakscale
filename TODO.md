@@ -2,8 +2,9 @@
 
 ## Now
 
-- [ ] Pen / touch / smartboard input
-- [ ] Canvas notes and sections (model exists, no UI)
+- [ ] Annotate the 23 examples with sections and notes (see HANDOFF)
+- [x] Pen / touch / smartboard input
+- [x] Canvas notes and sections (built; NOT yet used by any example)
 
 ## Before going public
 
