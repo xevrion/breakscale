@@ -804,24 +804,85 @@
    -------------------------------------------------------------------------- */
 
 @media (max-width: 720px) {
+  /* The control stacks instead of sitting in a row.
+     
+     Beside each other on a 412px screen the track measured 42px wide: the
+     app's primary control, with a thumb 18px across, had almost no travel
+     at all. Stacked, the caption and figure take one line and the track
+     takes the full width of the row beneath, which is the only arrangement
+     that gives a thumb somewhere to go. */
   .traffic {
-    gap: var(--sp-3);
+    /* A wrapping ROW, not a column: the load control claims a full line for
+       itself, which pushes the readouts and the transport onto the next one
+       where they sit side by side. A column would give each of the three a
+       line of its own and the bar reached 29 percent of the screen. */
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
   }
 
   .traffic-spacer {
     display: none;
   }
 
+  .traffic-load {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+    gap: var(--sp-2) var(--sp-4);
+  }
+
+  /* Caption and figure stay side by side on the first line; the track
+     breaks to its own. */
+  .traffic-load-head {
+    flex: 0 0 auto;
+  }
+
+  .traffic-load-readout {
+    flex: 0 0 auto;
+  }
+
+  .traffic-load-track {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  /* The readouts sit under the slider as their own row, spread across the
+     width rather than crowded against it. */
   .traffic-headline {
     flex: 0 1 auto;
+    justify-content: space-between;
     gap: var(--sp-4);
   }
 
-  /* The slider is what a thumb reaches for, so it keeps the room it needs
-     and the readouts take what is left. */
-  .traffic-load {
+  /* The hero p99 is 34px on a desktop, where it competes with a whole bar
+     for attention. Stacked on a phone it has a row to itself and does not
+     need the size, and the bar is spending height the canvas wants. */
+  .traffic-metric .num-hero {
+    font-size: var(--fs-xl);
+  }
+
+  .traffic-metric {
+    gap: 0;
+  }
+
+  /* Readouts and transport share one row.
+     
+     Stacking put the run controls on a fourth row of their own and the bar
+     reached 29 percent of the screen. Both are short, so the column wraps
+     and the two sit side by side: the numbers on the left, the buttons
+     right-aligned where a thumb on the right hand finds them.
+
+     `.traffic` is a wrap container for this reason, and the two rows above
+     take the full width so only these two ever share a line. */
+  .traffic-headline {
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  .traffic-actions {
+    flex: none;
+    margin-left: auto;
   }
 }
 
