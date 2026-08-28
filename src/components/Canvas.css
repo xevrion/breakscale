@@ -1411,10 +1411,34 @@
 }
 
 .cv-note-text {
-  fill: var(--text);
+  /* currentColor, not the token directly: the group carries `color` when the
+     note has been given an explicit colour, and inherits the token when it
+     has not. One declaration serves both without a second rule. */
+  color: var(--text);
+  fill: currentcolor;
   font-family: var(--sans);
   pointer-events: none;
   user-select: none;
+}
+
+/* The annotation faces. A hand-drawn face reads as a margin note rather than
+   as part of the diagram, which is the whole reason for offering it. Every
+   family here must also exist in textMetrics' STACKS, or the note will be
+   measured in one face and painted in another and the wrap will be wrong. */
+.cv-note[data-font='hand'] .cv-note-text {
+  font-family: var(--hand);
+}
+
+.cv-note[data-font='marker'] .cv-note-text {
+  font-family: var(--marker);
+}
+
+.cv-note[data-font='serif'] .cv-note-text {
+  font-family: var(--serif);
+}
+
+.cv-note[data-font='mono'] .cv-note-text {
+  font-family: var(--mono);
 }
 
 /* The three scales. Sizes and weights MUST match NOTE_SIZES in
@@ -1424,7 +1448,10 @@
 .cv-note.is-sm .cv-note-text {
   font-size: 12px;
   font-weight: 450;
-  fill: var(--text-dim);
+  /* Dims via `color` rather than `fill`, so an explicit colour on the group
+     still wins. Setting fill here would override currentColor and make a
+     small note the one size that ignores its own colour. */
+  color: var(--text-dim);
 }
 
 .cv-note.is-md .cv-note-text {

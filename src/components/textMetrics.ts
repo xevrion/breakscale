@@ -63,16 +63,32 @@ function rootValue(name: string, fallback: string): string {
   return v || fallback;
 }
 
-let sansStack: string | null = null;
-let monoStack: string | null = null;
+/**
+ * The font stacks a canvas text run can be measured in, keyed to the CSS
+ * custom property that defines each one. Annotations may choose a family, so
+ * the set is open in a way node labels never needed: whatever a note is
+ * drawn in has to be what it is measured in, or the wrap will disagree with
+ * the paint.
+ */
+const STACKS = {
+  sans: { prop: '--sans', fallback: 'system-ui, sans-serif' },
+  mono: { prop: '--mono', fallback: 'ui-monospace, monospace' },
+  hand: { prop: '--hand', fallback: 'Comic Sans MS, cursive' },
+  marker: { prop: '--marker', fallback: 'Comic Sans MS, cursive' },
+  serif: { prop: '--serif', fallback: 'Georgia, serif' },
+} as const;
 
-function stack(family: 'sans' | 'mono'): string {
-  if (family === 'sans') {
-    sansStack ??= rootValue('--sans', 'system-ui, sans-serif');
-    return sansStack;
-  }
-  monoStack ??= rootValue('--mono', 'ui-monospace, monospace');
-  return monoStack;
+export type FontFamily = keyof typeof STACKS;
+
+const resolved = new Map<FontFamily, string>();
+
+function stack(family: FontFamily): string {
+  const hit = resolved.get(family);
+  if (hit !== undefined) return hit;
+  const spec = STACKS[family] ?? STACKS.sans;
+  const v = rootValue(spec.prop, spec.fallback);
+  resolved.set(family, v);
+  return v;
 }
 
 /**
@@ -86,7 +102,7 @@ const FALLBACK_CHAR_W = 9.0;
 export interface TextStyle {
   size: number;
   weight: number;
-  family: 'sans' | 'mono';
+  family: FontFamily;
   /** Extra advance per character, for a letter-spaced style. */
   tracking?: number;
   /** Measure the uppercased string, for a text-transform: uppercase style. */
@@ -161,6 +177,7 @@ export function truncateToWidth(
  */
 export function resetTextMetrics(): void {
   cache.clear();
-  sansStack = null;
-  monoStack = null;
+  // The resolved stacks go too. A stack read before index.css applied is as
+  // stale as a width measured against the wrong face.
+  resolved.clear();
 }

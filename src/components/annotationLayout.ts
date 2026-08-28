@@ -9,7 +9,7 @@
 
 import { measureText } from './textMetrics';
 import type { TextStyle } from './textMetrics';
-import type { Note } from '../sim/annotations';
+import type { AnnotationFont, Note } from '../sim/annotations';
 
 /** Drag payload type for the palette's annotation rows. */
 export const ANN_DND_MIME = 'application/x-breakscale-annotation';
@@ -45,9 +45,17 @@ export const NOTE_SIZES: Record<Note['size'], NoteSizeSpec> = {
   lg: { font: 24, line: 32, weight: 550 },
 };
 
-export function noteStyle(size: Note['size']): TextStyle {
+/**
+ * The text style a note is measured and painted in.
+ *
+ * The family is part of the style rather than fixed, because the wrap has to
+ * happen in the same face the browser will paint: a hand-drawn face is wider
+ * per character than the UI sans, so measuring in sans and painting in hand
+ * overruns the note's stored width.
+ */
+export function noteStyle(size: Note['size'], font?: AnnotationFont): TextStyle {
   const spec = NOTE_SIZES[size];
-  return { size: spec.font, weight: spec.weight, family: 'sans' };
+  return { size: spec.font, weight: spec.weight, family: font ?? 'sans' };
 }
 
 /**
@@ -113,9 +121,10 @@ export function layoutNote(
   text: string,
   width: number,
   size: Note['size'],
+  font?: AnnotationFont,
 ): NoteLayout {
   const spec = NOTE_SIZES[size];
-  const lines = wrapText(text, width, noteStyle(size));
+  const lines = wrapText(text, width, noteStyle(size, font));
   return {
     lines,
     font: spec.font,

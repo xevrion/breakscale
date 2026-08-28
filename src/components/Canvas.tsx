@@ -1851,6 +1851,19 @@ const SectionView = memo(function SectionView({
       data-tone={
         ((s.tone % SECTION_TONE_COUNT) + SECTION_TONE_COUNT) % SECTION_TONE_COUNT
       }
+      // A custom colour drives the three locals the tone rules would have
+      // set, so one value restyles fill, border and label together. The fill
+      // is mixed down rather than used neat: a section paints behind the
+      // nodes, and a solid tint at full strength makes their text unreadable.
+      style={
+        s.color
+          ? ({
+              '--sec-fill': `color-mix(in srgb, ${s.color} 12%, transparent)`,
+              '--sec-line': `color-mix(in srgb, ${s.color} 55%, transparent)`,
+              '--sec-ink': s.color,
+            } as CSSProperties)
+          : undefined
+      }
     >
       {/* The tint, and the section's main hit target. Sections paint behind
           everything, so anything sitting on the frame takes the press first
@@ -1931,12 +1944,17 @@ interface NoteViewProps {
  */
 const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewProps) {
   const layout = useMemo(
-    () => layoutNote(note.text, note.width, note.size),
-    [note.text, note.width, note.size],
+    () => layoutNote(note.text, note.width, note.size, note.font),
+    [note.text, note.width, note.size, note.font],
   );
   return (
     <g
       className={`cv-note is-${note.size}${selected ? ' is-selected' : ''}`}
+      data-font={note.font ?? 'sans'}
+      // A note with no colour inherits the theme's ink; one with a colour has
+      // been given it deliberately and overrides. The value is validated in
+      // sanitizeAnnotations, which is the only way one can arrive untrusted.
+      style={note.color ? { color: note.color } : undefined}
       transform={`translate(${note.x},${note.y})`}
     >
       <rect

@@ -30,6 +30,24 @@ export interface Note {
    * make one of those wrong.
    */
   size: 'sm' | 'md' | 'lg';
+  /**
+   * Typeface. A hand-drawn face reads as a margin annotation rather than as
+   * part of the system being described, which is the distinction a student
+   * needs when the same canvas carries both.
+   *
+   * Optional, and absent means the UI default. The wrap in annotationLayout
+   * measures in this same family, so a note is always wrapped in the face it
+   * is painted in.
+   */
+  font?: AnnotationFont;
+  /**
+   * An explicit CSS colour, overriding the theme's default note ink.
+   *
+   * Optional on purpose. A note with no colour follows the theme, so it stays
+   * readable when the palette changes; one with a colour is a deliberate
+   * choice by whoever wrote it and is honoured exactly.
+   */
+  color?: string;
 }
 
 /**
@@ -52,9 +70,27 @@ export interface Section {
    * Index into the section palette rather than a raw colour, so sections
    * restyle with the theme instead of pinning a hex value into saved designs
    * that would then clash after any redesign.
+   *
+   * Still the default, and still what every preset uses. `color` below is the
+   * escape hatch for someone who wants a specific shade; leaving it unset is
+   * the theme-safe path and stays the recommended one.
    */
   tone: number;
+  /** An explicit CSS colour, overriding `tone`. See Note.color. */
+  color?: string;
 }
+
+/**
+ * The faces a note can be set in.
+ *
+ * Deliberately a short closed list rather than a free-text family name. Every
+ * one of these has a stack defined in index.css and is measurable by
+ * textMetrics, which is what keeps the wrap honest; an arbitrary family would
+ * be measured against a fallback and wrap wrongly.
+ */
+export const ANNOTATION_FONTS = ['sans', 'hand', 'marker', 'serif', 'mono'] as const;
+
+export type AnnotationFont = (typeof ANNOTATION_FONTS)[number];
 
 export type Annotation = Note | Section;
 
@@ -147,6 +183,8 @@ export function sanitizeAnnotations(input: unknown): Annotation[] {
         y,
         width: clamp(width ?? NOTE_DEFAULT_WIDTH, 80, 900),
         size: a.size === 'sm' || a.size === 'lg' ? a.size : 'md',
+        ...font(a.font),
+        ...colour(a.color),
       });
       seen.add(id);
     } else if (a.kind === 'section') {
@@ -166,11 +204,45 @@ export function sanitizeAnnotations(input: unknown): Annotation[] {
             ? 0
             : ((Math.floor(tone) % SECTION_TONE_COUNT) + SECTION_TONE_COUNT) %
               SECTION_TONE_COUNT,
+        ...colour(a.color),
       });
       seen.add(id);
     }
   }
   return out;
+}
+
+/**
+ * Accept a font only if it is one we actually have a stack for.
+ *
+ * An unknown family would be measured against a fallback and painted in
+ * another, so the note would wrap to the wrong width. Dropping it back to the
+ * default is the only safe reading.
+ */
+function font(v: unknown): { font?: AnnotationFont } {
+  return typeof v === 'string' && (ANNOTATION_FONTS as readonly string[]).includes(v)
+    ? { font: v as AnnotationFont }
+    : {};
+}
+
+/**
+ * A colour arriving from a share link or an imported file is untrusted text
+ * that ends up in a style attribute, so it is matched against an explicit
+ * pattern rather than passed through. `url(...)`, a semicolon closing the
+ * declaration, or anything else inventive is dropped and the annotation falls
+ * back to its theme colour.
+ *
+ * Deliberately narrow: hex, rgb/rgba, hsl/hsla, and the CSS named colours the
+ * browser already knows. That covers every colour a picker can produce.
+ */
+const COLOUR_RE =
+  /^(#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgb|hsl)a?\([0-9a-z%.,\s/+-]{1,64}\)|[a-z]{3,24})$/i;
+
+function colour(v: unknown): { color?: string } {
+  if (typeof v !== 'string') return {};
+  const c = v.trim();
+  if (!c || c.length > 72 || !COLOUR_RE.test(c)) return {};
+  return { color: c };
 }
 
 function num(v: unknown): number | null {
