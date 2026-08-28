@@ -6066,8 +6066,11 @@ export default function Canvas({
           type="button"
           className="btn btn-ghost cv-zoom-level"
           onClick={fitToContent}
-          aria-label="Fit to content"
-          title="Fit to content (Shift+1)"
+          // Still fits, because someone who learned to click the number
+          // should keep being right. The icon beside it is what makes the
+          // action findable in the first place.
+          aria-label={`Zoom ${Math.round(view.k * 100)} percent. Fit the diagram on screen`}
+          title="Fit the diagram on screen (Shift+1)"
         >
           {Math.round(view.k * 100)}%
         </button>
@@ -6079,6 +6082,37 @@ export default function Canvas({
           title="Zoom in (Ctrl+=)"
         >
           +
+        </button>
+
+        {/*
+          Fit the whole diagram back on screen.
+
+          The percentage beside it has always done this, but a number does
+          not look like a button, so somebody who had panned into empty space
+          had no visible way back and the honest answer was a keyboard
+          shortcut they had not been told about. A labelled icon costs one
+          slot and removes the only way to get properly lost.
+        */}
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={fitToContent}
+          aria-label="Fit the diagram on screen"
+          title="Fit the diagram on screen (Shift+1)"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+          </svg>
         </button>
       </div>
     </div>
