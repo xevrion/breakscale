@@ -87,6 +87,20 @@ describe('serialiseSvg', () => {
     expect(decl).not.toMatch(/fill:\s*(rgb\(0,\s*0,\s*0\)|#000|black)\s*;/);
   });
 
+  it('states the theme it was exported in', () => {
+    // A picture taken in light must stay light wherever it is opened, rather
+    // than following the reader's own preference.
+    document.documentElement.setAttribute('data-theme', 'light');
+    expect(serialiseSvg(makeSvg(), bounds, '#fff')).toContain('data-theme="light"');
+    document.documentElement.removeAttribute('data-theme');
+  });
+
+  it('does not need matchMedia to exist', () => {
+    // jsdom has no matchMedia, and an unguarded call made every test in this
+    // file throw. The export has to work without it.
+    expect(() => serialiseSvg(makeSvg(), bounds, '#fff')).not.toThrow();
+  });
+
   it('leaves the live element untouched', () => {
     // It clones. Mutating the real canvas to export it would move the
     // reader's view out from under them.

@@ -134,11 +134,7 @@ export function serialiseSvg(
   // would resolve those against the READER's theme instead. Stating the
   // theme on the root means a diagram exported in light stays light wherever
   // it is opened, which is the whole point of exporting a picture.
-  clone.setAttribute(
-    'data-theme',
-    document.documentElement.getAttribute('data-theme') ??
-      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-  );
+  clone.setAttribute('data-theme', currentTheme());
   clone.setAttribute('viewBox', `${x} ${y} ${w} ${h}`);
   clone.setAttribute('width', String(Math.round(w)));
   clone.setAttribute('height', String(Math.round(h)));
@@ -150,6 +146,20 @@ export function serialiseSvg(
   // way to tell why.
   const bg = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${background}"/>`;
   return body.replace(/(<svg[^>]*>)/, `$1${bg}`);
+}
+
+/**
+ * Which theme the page is in right now.
+ *
+ * `matchMedia` is absent in jsdom, so an unguarded call turns every test of
+ * this module into a TypeError. Falling back to light is the right default:
+ * a picture is far more often wanted on a white page than a black one.
+ */
+function currentTheme(): string {
+  const explicit = document.documentElement.getAttribute('data-theme');
+  if (explicit) return explicit;
+  if (typeof matchMedia !== 'function') return 'light';
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 /** Hand the reader a file. Shared by both formats and by the JSON export. */
