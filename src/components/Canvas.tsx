@@ -79,6 +79,8 @@ import {
   SECTION_MIN_HEIGHT,
   SECTION_MIN_WIDTH,
   ANNOTATION_FONTS,
+  NOTE_MAX_WIDTH,
+  NOTE_MIN_WIDTH,
   SECTION_TONE_COUNT,
   isNote,
   isSection,
@@ -411,6 +413,11 @@ export interface CanvasProps {
   onSetNoteSize?: (id: string, size: Note['size']) => void;
   /** Recolour a section. `tone` is a palette index, never a colour. */
   onSetSectionTone?: (id: string, tone: number) => void;
+  /**
+   * Resize a note. Only x and width: the height is derived from the wrapped
+   * text on every layout, so there is nothing else for a caller to set.
+   */
+  onResizeNote?: (id: string, x: number, width: number) => void;
   /**
    * Restyle a note. Every field is optional so one handler serves the whole
    * toolbar; `tone: null` clears the colour, and bold toggles rather than
@@ -2128,12 +2135,13 @@ function NoteChrome({ note, ui }: { note: Note; ui: number }) {
       layoutNote(note.text, note.width, note.size, note.font, note.bold, note.italic),
     [note.text, note.width, note.size, note.font, note.bold, note.italic],
   );
-  // Selection ring only. Everything that STYLES the note lives in the
-  // floating bar above the charts strip: a toolbar anchored to the note is
-  // wider than a default note, so it clipped against the viewport edge, and
-  // it moved under the reader's hand on every pan. `ui` is still taken so
-  // the ring can be inset in screen-constant units.
-  void ui;
+  // The ring, plus two width handles. Everything that STYLES the note lives
+  // in the floating bar above the charts strip: a toolbar anchored to the
+  // note is wider than a default note, so it clipped against the viewport
+  // edge and moved under the reader's hand on every pan.
+  const hs = 9 * ui;
+  const hit = 36 * ui;
+  const midY = note.y + layout.height / 2;
   return (
     <g className="cv-ann-sel">
       <rect
@@ -2144,6 +2152,40 @@ function NoteChrome({ note, ui }: { note: Note; ui: number }) {
         height={layout.height + 8}
         rx={4}
       />
+
+      {/* WIDTH ONLY, and only two handles. A note's height is DERIVED from
+          its wrapped text on every layout and never stored, so a bottom or
+          corner handle would set a number the next render throws away: the
+          drag would appear to work and then snap back. Two side handles say
+          truthfully that width is the thing you control and the height
+          follows the words. */}
+      {(['w', 'e'] as const).map((dir) => {
+        const x = dir === 'w' ? note.x - 6 : note.x + note.width + 6;
+        return (
+          <g key={dir}>
+            <rect
+              className="cv-handle"
+              x={x - hs / 2}
+              y={midY - hs / 2}
+              width={hs}
+              height={hs}
+              rx={2 * ui}
+            />
+            {/* The generous invisible target ON TOP of the visible square,
+                sized for a fingertip, matching the section handles. */}
+            <rect
+              className="cv-handle-hit"
+              data-hit="note-resize"
+              data-id={note.id}
+              data-dir={dir}
+              x={x - hit / 2}
+              y={midY - hit / 2}
+              width={hit}
+              height={hit}
+            />
+          </g>
+        );
+      })}
     </g>
   );
 }
@@ -3007,6 +3049,7 @@ type HitKind =
   | 'note'
   | 'section'
   | 'section-resize'
+  | 'note-resize'
   | 'note-size'
   | 'note-bold'
   | 'note-font'
@@ -3060,7 +3103,15 @@ interface Pending {
   active: boolean;
   /** Which drag it was promoted to. Only meaningful when active. */
   mode:
-    'pan' | 'node' | 'link' | 'marquee' | 'ann' | 'ann-resize' | 'draw-section' | null;
+    | 'pan'
+    | 'node'
+    | 'link'
+    | 'marquee'
+    | 'ann'
+    | 'ann-resize'
+    | 'note-resize'
+    | 'draw-section'
+    | null;
   /** Grab offset for a node drag, in world units. Set at promotion. */
   grabDx: number;
   grabDy: number;
@@ -3121,6 +3172,7 @@ export default function Canvas({
   onEditSectionLabel,
   onSetNoteSize,
   onSetSectionTone,
+  onResizeNote,
   onSetNoteStyle,
   spark,
   viewCenterRef,
@@ -3486,7 +3538,10 @@ export default function Canvas({
       // per begin, through this single funnel, whichever exit fired.
       if (
         p.active &&
-        (p.mode === 'node' || p.mode === 'ann' || p.mode === 'ann-resize')
+        (p.mode === 'node' ||
+          p.mode === 'ann' ||
+          p.mode === 'ann-resize' ||
+          p.mode === 'note-resize')
       ) {
         onMoveEnd?.();
       }
@@ -3821,6 +3876,23 @@ export default function Canvas({
           break;
         }
 
+        case 'note-resize': {
+          const id = p.hit.id;
+          const ann = id
+            ? (topoRef.current.annotations ?? []).find((a) => a.id === id)
+            : undefined;
+          if (!ann || !id || !isNote(ann) || !p.hit.dir) {
+            p.mode = 'pan';
+            break;
+          }
+          p.mode = 'note-resize';
+          onMoveStart?.('resize');
+          // Height is a placeholder: only x and w are read back, because the
+          // note's height is derived from its text and is not ours to set.
+          p.annRect = { x: ann.x, y: ann.y, w: ann.width, h: 0 };
+          break;
+        }
+
         case 'note-size':
         case 'note-bold':
         case 'note-font':
@@ -4031,6 +4103,32 @@ export default function Canvas({
         return;
       }
 
+      if (p.mode === 'note-resize' && p.annRect) {
+        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
+        // Only the dragged edge moves. Pulling the WEST handle moves the
+        // note's x as well as its width, so the east edge stays put and the
+        // note grows leftward rather than sliding across the canvas.
+        const dx = w.x - p.worldX;
+        const east = p.annRect.x + p.annRect.w;
+        let x = p.annRect.x;
+        let width: number;
+        if (p.hit.dir === 'w') {
+          x = place(p.annRect.x + dx);
+          width = east - x;
+          if (width < NOTE_MIN_WIDTH) {
+            width = NOTE_MIN_WIDTH;
+            x = east - NOTE_MIN_WIDTH;
+          } else if (width > NOTE_MAX_WIDTH) {
+            width = NOTE_MAX_WIDTH;
+            x = east - NOTE_MAX_WIDTH;
+          }
+        } else {
+          width = clamp(place(p.annRect.w + dx), NOTE_MIN_WIDTH, NOTE_MAX_WIDTH);
+        }
+        onResizeNote?.(p.hit.id!, x, width);
+        return;
+      }
+
       if (p.mode === 'draw-section') {
         const x0 = snap(Math.min(p.worldX, w.x));
         const y0 = snap(Math.min(p.worldY, w.y));
@@ -4180,7 +4278,8 @@ export default function Canvas({
           case 'note':
           case 'section':
           case 'section-resize':
-            // A handle click without a drag is a click on its section.
+          case 'note-resize':
+            // A handle click without a drag is a click on what it belongs to.
             if (p.hit.id) selectOne(p.hit.id, additive);
             break;
 
@@ -4308,6 +4407,7 @@ export default function Canvas({
       onCreateSection,
       onSetNoteSize,
       onSetSectionTone,
+      onResizeNote,
       onSetNoteStyle,
       clearSelection,
       selectOne,

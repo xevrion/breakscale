@@ -186,3 +186,75 @@ describe('applyTab', () => {
     expect(out.value).toBe(TAB);
   });
 });
+
+describe('note resize', () => {
+  /**
+   * The width arithmetic the canvas runs on a note handle drag, in isolation.
+   *
+   * Only the width is resizable: a note's height is derived from its wrapped
+   * text on every layout and never stored, so there is no bottom edge to
+   * drag. The subtle half is the WEST handle, which must move x as well as
+   * width so the opposite edge stays where it is instead of the note sliding
+   * across the canvas.
+   */
+  function resizeNote(
+    origin: { x: number; w: number },
+    dir: 'w' | 'e',
+    dx: number,
+    min = 80,
+    max = 900,
+  ): { x: number; width: number } {
+    const east = origin.x + origin.w;
+    if (dir === 'e') {
+      return { x: origin.x, width: Math.min(Math.max(origin.w + dx, min), max) };
+    }
+    let x = origin.x + dx;
+    let width = east - x;
+    if (width < min) {
+      width = min;
+      x = east - min;
+    } else if (width > max) {
+      width = max;
+      x = east - max;
+    }
+    return { x, width };
+  }
+
+  it('grows to the right from the east handle, leaving x alone', () => {
+    expect(resizeNote({ x: 100, w: 200 }, 'e', 60)).toEqual({ x: 100, width: 260 });
+  });
+
+  it('grows to the left from the west handle, pinning the east edge', () => {
+    // The whole point: dragging the left handle left must widen the note,
+    // not carry it leftward at a fixed width.
+    const out = resizeNote({ x: 100, w: 200 }, 'w', -60);
+    expect(out).toEqual({ x: 40, width: 260 });
+    expect(out.x + out.width).toBe(300);
+  });
+
+  it('shrinks from either side without crossing over', () => {
+    expect(resizeNote({ x: 100, w: 200 }, 'e', -80)).toEqual({ x: 100, width: 120 });
+    const w = resizeNote({ x: 100, w: 200 }, 'w', 80);
+    expect(w).toEqual({ x: 180, width: 120 });
+    expect(w.x + w.width).toBe(300);
+  });
+
+  it('stops at the minimum instead of inverting', () => {
+    // Dragged far past its own far edge, a note pins at the minimum rather
+    // than flipping inside out, matching how resizeRect treats a section.
+    const e = resizeNote({ x: 100, w: 200 }, 'e', -1000);
+    expect(e.width).toBe(80);
+    const w = resizeNote({ x: 100, w: 200 }, 'w', 1000);
+    expect(w.width).toBe(80);
+    // And the edge it was NOT dragging has not moved.
+    expect(w.x + w.width).toBe(300);
+  });
+
+  it('stops at the maximum, keeping the anchored edge still', () => {
+    const e = resizeNote({ x: 100, w: 200 }, 'e', 5000);
+    expect(e).toEqual({ x: 100, width: 900 });
+    const w = resizeNote({ x: 100, w: 200 }, 'w', -5000);
+    expect(w.width).toBe(900);
+    expect(w.x + w.width).toBe(300);
+  });
+});

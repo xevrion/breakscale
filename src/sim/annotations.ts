@@ -137,6 +137,17 @@ export function isNote(a: Annotation): a is Note {
 }
 
 export const NOTE_DEFAULT_WIDTH = 220;
+/**
+ * Wrap-width bounds for a note.
+ *
+ * Only the WIDTH is resizable: a note's height is derived from its wrapped
+ * text on every layout and deliberately never stored, so dragging a bottom
+ * edge would set a number the next render throws away. Narrower than the
+ * minimum and the text breaks mid-word on every line; wider than the maximum
+ * and it stops being an annotation and becomes a paragraph nobody reads.
+ */
+export const NOTE_MIN_WIDTH = 80;
+export const NOTE_MAX_WIDTH = 900;
 export const SECTION_MIN_WIDTH = 120;
 export const SECTION_MIN_HEIGHT = 90;
 
@@ -221,7 +232,7 @@ export function sanitizeAnnotations(input: unknown): Annotation[] {
         text: text.slice(0, 2000),
         x,
         y,
-        width: clamp(width ?? NOTE_DEFAULT_WIDTH, 80, 900),
+        width: clamp(width ?? NOTE_DEFAULT_WIDTH, NOTE_MIN_WIDTH, NOTE_MAX_WIDTH),
         size: a.size === 'sm' || a.size === 'lg' ? a.size : 'md',
         ...font(a.font),
         ...colour(a.color),

@@ -31,7 +31,10 @@ import {
   NOTE_DEFAULT_WIDTH,
   SECTION_MIN_HEIGHT,
   SECTION_MIN_WIDTH,
+  NOTE_MAX_WIDTH,
+  NOTE_MIN_WIDTH,
   SECTION_TONE_COUNT,
+  isNote,
   isSection,
   sanitizeAnnotations,
 } from './sim/annotations';
@@ -843,6 +846,28 @@ export default function App() {
       setAnnotations(
         (topoLiveRef.current.annotations ?? []).map((a) =>
           a.id === id ? { ...a, x, y } : a,
+        ),
+      );
+    },
+    [history, setAnnotations],
+  );
+
+  const handleResizeNote = useCallback(
+    (id: string, x: number, width: number) => {
+      if (!history.inGesture) history.touch('resize', snapRef.current);
+      setAnnotations(
+        (topoLiveRef.current.annotations ?? []).map((a) =>
+          a.id === id && isNote(a)
+            ? {
+                ...a,
+                x,
+                // Clamped here as well as in the canvas, because this is the
+                // boundary the model is written through: a width that only
+                // the gesture bounded could still arrive out of range from a
+                // future caller.
+                width: Math.min(Math.max(width, NOTE_MIN_WIDTH), NOTE_MAX_WIDTH),
+              }
+            : a,
         ),
       );
     },
@@ -2026,6 +2051,7 @@ export default function App() {
               onPaste={handlePaste}
               onMoveAnnotation={handleMoveAnnotation}
               onResizeSection={handleResizeSection}
+              onResizeNote={handleResizeNote}
               onCreateNote={handleCreateNote}
               onCreateSection={handleCreateSection}
               onEditNote={handleEditNote}
