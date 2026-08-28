@@ -1330,6 +1330,36 @@
   stroke-width: 2;
 }
 
+/* A node is being dragged over this frame and will land inside it.
+   The border goes solid and heavy and the tint deepens, so the answer to
+   "which group am I about to join" is visible BEFORE the drop rather than
+   discovered after it. Distinct from selection: selection is a thinner ring
+   on a calm fill, this is the whole frame leaning forward.
+   Only stroke-width and opacity animate, both compositor-friendly, because
+   this runs on every frame of a drag. */
+.cv-section.is-drop-target .cv-section-line {
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+
+.cv-section.is-drop-target .cv-section-fill {
+  fill-opacity: 0.9;
+}
+
+.cv-section-line,
+.cv-section-fill {
+  transition:
+    stroke-width var(--dur-fast) var(--ease),
+    fill-opacity var(--dur-fast) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-section-line,
+  .cv-section-fill {
+    transition: none;
+  }
+}
+
 /* The border's real target: an invisible 16px stroke, pointer-events:stroke
    so ONLY the perimeter band takes the pointer and the fill it encloses
    stays transparent to clicks. Same pattern as .cv-edge-hit. */

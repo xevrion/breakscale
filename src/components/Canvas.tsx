@@ -1789,6 +1789,33 @@ const SEC_LABEL_H = 24;
 /** Minimum plate width, so an empty label still leaves a grab tab. */
 const SEC_LABEL_MIN_W = 28;
 
+/**
+ * The topmost section whose bounds contain a point, or null.
+ *
+ * Used for the drop-target highlight while a node is dragged. The point is
+ * the node's CENTRE rather than its corner, because a person aims the middle
+ * of the thing they are holding at the frame they mean; matching on a corner
+ * makes a node appear to join a section it is only touching.
+ *
+ * Later annotations win, matching paint order: a section drawn over another
+ * is the one the eye reads as the target.
+ */
+function sectionAtPoint(
+  annotations: readonly Annotation[] | undefined,
+  x: number,
+  y: number,
+): string | null {
+  if (!annotations) return null;
+  for (let i = annotations.length - 1; i >= 0; i -= 1) {
+    const a = annotations[i]!;
+    if (a.kind !== 'section') continue;
+    if (x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height) {
+      return a.id;
+    }
+  }
+  return null;
+}
+
 function sectionLabelWidth(label: string): number {
   return Math.max(
     SEC_LABEL_MIN_W,
@@ -1801,6 +1828,8 @@ interface SectionViewProps {
   selected: boolean;
   /** Hide the SVG label while the in-place editor floats over it. */
   editingLabel: boolean;
+  /** A node is being dragged over this section and will land inside it. */
+  dropTarget: boolean;
 }
 
 /**
@@ -1812,10 +1841,13 @@ const SectionView = memo(function SectionView({
   section: s,
   selected,
   editingLabel,
+  dropTarget,
 }: SectionViewProps) {
   return (
     <g
-      className={`cv-section${selected ? ' is-selected' : ''}`}
+      className={`cv-section${selected ? ' is-selected' : ''}${
+        dropTarget ? ' is-drop-target' : ''
+      }`}
       data-tone={
         ((s.tone % SECTION_TONE_COUNT) + SECTION_TONE_COUNT) % SECTION_TONE_COUNT
       }
@@ -3070,6 +3102,18 @@ export default function Canvas({
   /** Live section-draw preview rect, world units. */
   const [draft, setDraft] = useState<Marquee | null>(null);
 
+  /**
+   * The section a dragged node is currently over, or null.
+   *
+   * Purely a drop-target highlight. Membership in this app is spatial and
+   * resolved from geometry whenever it is needed, so nothing is committed
+   * when a node is released: dropping a node inside a frame does not write a
+   * parent anywhere. What this state buys is the thing that was missing,
+   * which is knowing BEFORE you let go that the frame is going to claim what
+   * you are holding.
+   */
+  const [dropSection, setDropSection] = useState<string | null>(null);
+
   /** In-place note text editor: which note, and the live draft. */
   const [noteEdit, setNoteEdit] = useState<{ id: string; draft: string } | null>(null);
   const noteEditDoneRef = useRef(false);
@@ -3334,6 +3378,7 @@ export default function Canvas({
     setLink(null);
     setMarquee(null);
     setDraft(null);
+    setDropSection(null);
     setCursor(spaceRef.current ? 'grab' : 'default');
   }, [onMoveEnd]);
 
@@ -3795,6 +3840,11 @@ export default function Canvas({
         const nx = place(w.x + p.grabDx);
         const ny = place(w.y + p.grabDy);
         onMoveNode(id, nx, ny);
+        // Highlight whichever section this node is about to land in, so the
+        // grouping is visible before the drop rather than discovered after.
+        setDropSection(
+          sectionAtPoint(topoRef.current.annotations, nx + NODE_W / 2, ny + NODE_H / 2),
+        );
         // Grouped members translate by the same snapped delta, so the shape
         // of a multi-selection is preserved exactly rather than each member
         // being snapped independently.
@@ -5099,6 +5149,7 @@ export default function Canvas({
                     section={s}
                     selected={selectedIds.has(s.id)}
                     editingLabel={labelEdit?.id === s.id}
+                    dropTarget={dropSection === s.id}
                   />
                 ))}
               </g>
