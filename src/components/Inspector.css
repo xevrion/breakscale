@@ -577,12 +577,26 @@
 /* Stands in for the scale row when there is no traffic source. Same slot,
    same height, so the control does not change size as a client is added or
    removed. */
+/* Stands where the load figure would be when there is nothing to report.
+   Sized and coloured as text rather than as a number: it is a sentence, and
+   setting it in the mono figure stack would make "No traffic source" read as
+   a value the simulator had measured. */
+.traffic-load-none {
+  color: var(--text-dim);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-med);
+  white-space: nowrap;
+}
+
 .traffic-scale-note {
   position: absolute;
   inset: auto 0 0;
   height: 12px;
   margin: 0;
-  color: var(--text-faint);
+  /* --text-dim, not --text-faint. The faint tone is for text a reader may
+     ignore; this one is the answer to "why will the slider not move", and it
+     was losing the page to a bold 0 directly above it. */
+  color: var(--text-dim);
   font-size: var(--fs-sm);
   line-height: 12px;
   white-space: nowrap;

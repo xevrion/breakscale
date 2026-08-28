@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { PRESETS } from './sim/presets';
 import type { Topology } from './sim/types';
 
@@ -42,6 +43,26 @@ describe('offered load control', () => {
     };
     expect(hasTrafficSource(stripped)).toBe(false);
     expect(clientRps(stripped)).toBe(0);
+  });
+
+  it('reports the absence rather than a zero', () => {
+    // AGENTS.md: a component with no meaningful value for a metric shows
+    // something else, never a plausible-looking number. With no client there
+    // is no offered load, and "0 requests / sec" claims a measurement that
+    // was never taken. It also outranked the explanation beneath the slider,
+    // so a reader dragging a dead control read the zero as the answer.
+    const ui = readFileSync(
+      new URL('./components/Inspector.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(ui.includes('No traffic source')).toBe(true);
+    // The figure is rendered only on the branch that HAS a source: the
+    // sentence comes first in the ternary, the number after it.
+    const sentence = ui.indexOf('No traffic source');
+    const figure = ui.indexOf('formatRateBare(rps)');
+    expect(sentence).toBeGreaterThan(-1);
+    expect(figure).toBeGreaterThan(sentence);
+    expect(ui.includes('noTrafficSource ?')).toBe(true);
   });
 
   it('a canvas with components but no client still has no traffic source', () => {

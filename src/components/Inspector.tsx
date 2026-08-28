@@ -3026,14 +3026,27 @@ export function TrafficControl({
             <Term id="offered">Offered load</Term>
           </label>
           <span className="traffic-load-readout">
-            {/* num-lg, not the hero. The slider's own value is feedback the
-                student just caused; p99 is the consequence they are meant to
-                watch, and it reads as the most important number on screen
-                only if it is the ONLY number at the hero size. */}
-            <span className="num num-lg">{formatRateBare(rps)}</span>
-            <span className="label traffic-load-unit">
-              <Term id="rps">requests / sec</Term>
-            </span>
+            {noTrafficSource ? (
+              /* Not "0". With no client there is no offered load to report,
+                 and a confident zero in the app's darkest ink outranks the
+                 faint note under the slider that explains why: a reader
+                 drags, nothing happens, and the number tells them the number
+                 is the answer. Saying what is missing puts the reason where
+                 the eye already is. */
+              <span className="traffic-load-none">No traffic source</span>
+            ) : (
+              <>
+                {/* num-lg, not the hero. The slider's own value is feedback
+                    the student just caused; p99 is the consequence they are
+                    meant to watch, and it reads as the most important number
+                    on screen only if it is the ONLY number at the hero
+                    size. */}
+                <span className="num num-lg">{formatRateBare(rps)}</span>
+                <span className="label traffic-load-unit">
+                  <Term id="rps">requests / sec</Term>
+                </span>
+              </>
+            )}
           </span>
         </div>
         <div className="traffic-load-track">
