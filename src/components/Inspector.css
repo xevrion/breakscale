@@ -155,7 +155,9 @@
   height: 100%;
   border-radius: var(--r-pill);
   background: var(--ok-mark);
-  transition: width var(--dur-base) var(--ease-out);
+  /* No width transition: this is a 10Hz readout, and transitioning it kept
+     the bar permanently animating under load, always ~200ms behind the
+     number beside it. It steps with the digits instead. */
 }
 
 /* The bar uses the -mark tokens: they are fills, never text, and they carry
@@ -663,9 +665,16 @@
    slider and p99 are the two things that must survive, and three squeezed
    figures help nobody. Nothing here may wrap — the bar grows if it does,
    and it is meant to stay one line tall.
+
+   The thresholds are set by measurement, not taste. With the undo/redo
+   cluster and the three reference buttons beside the wordmark, the bar's
+   minimum one-line width with all four readouts is about 1350px; below that
+   the later chrome painted over Reset and pushed the reference buttons off
+   screen. Dropping the secondary readouts at 1360px keeps every control
+   reachable down to about 1180px, where the slider gives up width next.
    -------------------------------------------------------------------------- */
 
-@media (max-width: 1100px) {
+@media (max-width: 1360px) {
   .traffic-metric-group {
     display: none;
   }
@@ -675,7 +684,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1180px) {
   .traffic-load {
     flex-basis: 220px;
     min-width: 160px;

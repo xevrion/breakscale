@@ -8,7 +8,11 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
+import type {
+  CSSProperties,
+  MutableRefObject,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
 import type {
   EdgeState,
   FailureKind,
@@ -45,6 +49,8 @@ import type { TextStyle } from './textMetrics';
 import { measureText, resetTextMetrics, truncateToWidth } from './textMetrics';
 import { buildClipboardText, parseClipboardText } from '../clipboard';
 import type { ClipboardSubgraph } from '../clipboard';
+import { arrowPath, previewPath, routeEdge } from './edgeRoute';
+import type { EdgeRoute } from './edgeRoute';
 import './Canvas.css';
 
 /* ------------------------------------------------------------------ *
@@ -343,6 +349,20 @@ export interface CanvasProps {
   onPaste?: (sub: ClipboardSubgraph, at: { x: number; y: number }) => void;
   /** Optional: per-node sparkline history. Omitted -> no sparklines. */
   spark?: SparkData;
+  /**
+   * Optional out-parameter: the canvas keeps `current` set to a getter that
+   * returns the world coordinates at the centre of the current view. The
+   * shell uses it to place palette CLICKS (which carry no drop point) where
+   * the student is actually looking. A ref rather than state on purpose: the
+   * view changes every pan/zoom frame, and nothing should re-render for it.
+   */
+  viewCenterRef?: MutableRefObject<(() => { x: number; y: number }) | null>;
+  /**
+   * Bumped by the shell when the diagram was replaced wholesale (a preset
+   * load) and the camera should re-frame the new content. Node edits never
+   * bump it, so add/delete/undo keep the camera still. See the fit effect.
+   */
+  fitSignal?: number;
 }
 
 /* ------------------------------------------------------------------ *
@@ -352,8 +372,10 @@ export interface CanvasProps {
 const snap = (v: number) => Math.round(v / GRID) * GRID;
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
-const inPort = (n: SimNode) => ({ x: n.x, y: n.y + PORT_CY });
 const outPort = (n: SimNode) => ({ x: n.x + NODE_W, y: n.y + PORT_CY });
+
+/** A node's box in the router's terms. */
+const nodeRect = (n: SimNode) => ({ x: n.x, y: n.y, w: NODE_W, h: NODE_H });
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
 
@@ -467,7 +489,7 @@ export function readoutFor(
          thing worth seeing. */
       return {
         primary: { value: formatRate(s.arrivalRate), label: 'sent' },
-        a: { value: formatRate(s.throughput), label: 'ok/s' },
+        a: { value: formatRate(s.throughput), label: 'ok' },
         b: { value: formatPct(err), label: 'failing' },
         load: err,
         health: healthOfErr(err),
@@ -485,7 +507,7 @@ export function readoutFor(
        is not the place the story shows first anyway. */
     case 'lb':
       return {
-        primary: { value: formatRate(s.throughput), label: '/s' },
+        primary: { value: formatRate(s.throughput), label: 'served' },
         a: { value: formatMs(s.p99), label: 'p99' },
         b: { value: formatCount(s.queued), label: 'waiting' },
         load: util,
@@ -502,7 +524,7 @@ export function readoutFor(
       return {
         primary: { value: formatPct(hit), label: 'hit' },
         a: { value: formatMs(s.p99), label: 'p99' },
-        b: { value: formatRate(s.throughput), label: '/s' },
+        b: { value: formatRate(s.throughput), label: 'served' },
         load: miss,
         health: healthOfLoad(miss),
         spark: hit,
@@ -686,7 +708,7 @@ export function readoutFor(
     case 'worker':
       return {
         primary: { value: formatPct(util), label: 'busy' },
-        a: { value: formatRate(s.throughput), label: '/s' },
+        a: { value: formatRate(s.throughput), label: 'done' },
         b: { value: formatCount(backlog), label: 'waiting' },
         load: util,
         health: healthOfLoad(util),
@@ -725,7 +747,7 @@ export function readoutFor(
         a: { value: `${healthy}/${total}`, label: 'healthy' },
         b: dark
           ? { value: formatMs(s.failoverRemainingMs), label: 'back in' }
-          : { value: formatRate(s.throughput), label: '/s' },
+          : { value: formatRate(s.throughput), label: 'served' },
         load: dark ? 1 : 1 - frac(healthy, total),
         health: dark || healthy === 0 ? 'danger' : healthy < total ? 'warn' : 'ok',
         spark: err,
@@ -742,7 +764,7 @@ export function readoutFor(
       return {
         primary: { value: formatPct(hit), label: 'hit' },
         a: { value: formatRate(s.originFetchRate), label: 'origin' },
-        b: { value: formatRate(s.throughput), label: '/s' },
+        b: { value: formatRate(s.throughput), label: 'served' },
         load: miss,
         health: healthOfLoad(miss),
         spark: hit,
@@ -838,7 +860,7 @@ export function readoutFor(
       return {
         primary: { value: formatMs(s.traversalCostMs), label: 'query' },
         a: { value: formatPct(util), label: 'busy' },
-        b: { value: formatRate(s.throughput), label: '/s' },
+        b: { value: formatRate(s.throughput), label: 'served' },
         load: util,
         health: healthOfLoad(util),
         spark: s.traversalCostMs ?? 0,
@@ -872,7 +894,7 @@ export function readoutFor(
       return {
         primary: { value: formatMs(s.queryCostMs), label: 'query' },
         a: { value: formatPct(util), label: 'busy' },
-        b: { value: formatRate(s.throughput), label: '/s' },
+        b: { value: formatRate(s.throughput), label: 'served' },
         load: util,
         health: healthOfLoad(util),
         spark: s.queryCostMs ?? 0,
@@ -930,7 +952,7 @@ export function readoutFor(
         b:
           refused > 0
             ? { value: formatRate(refused), label: 'refused' }
-            : { value: formatRate(s.connectRate), label: 'new/s' },
+            : { value: formatRate(s.connectRate), label: 'new' },
         load: fill,
         health: refused > 0 ? 'danger' : healthOfLoad(fill),
         spark: fill,
@@ -1422,65 +1444,17 @@ const Glyph = memo(function Glyph({ kind }: { kind: NodeKind }) {
  * ------------------------------------------------------------------ */
 
 /**
- * Edge routing: a straight run with ONE filleted turn at each end.
+ * Edge routing lives in edgeRoute.ts as pure geometry (rects in, path out),
+ * because anchors, path shape and arrowhead orientation are ONE coupled
+ * decision: the router picks which SIDE of each box the wire leaves and
+ * enters from the boxes' relative positions, builds the filleted orthogonal
+ * run between them, and reports the arrival direction the arrowhead must
+ * point along. See that module for the side-selection rule and thresholds.
  *
- * This replaces a full-width cubic bezier, and the reason is the user's
- * complaint that the wires "read as noise". A bezier between two ports is
- * curving along its ENTIRE length, so ten of them crossing a diagram produce
- * ten unique arcs with no shared direction — the eye cannot group them and
- * the result looks like scribble.
- *
- * An engineering diagram instead reads as a bus: every wire leaves its source
- * horizontally, travels along ONE axis, and arrives horizontally. Only the
- * corners are curved, and they all share the same radius, so the picture is
- * built from a small vocabulary of repeated shapes. That is what makes a
- * schematic scan cleanly at a glance.
- *
- * Geometry: leave the source horizontally for STUB px, turn, run vertically
- * to the target's row, turn again, arrive horizontally. When the two ports are
- * already on (nearly) the same row the whole thing degenerates to a straight
- * line, which is both the common case and the cheapest to read.
- *
- * `mid` is where the vertical run happens. Halfway between the ports normally;
- * clamped to leave a stub at each end so the corner radius always fits.
+ * The wires still read as a bus: every path is straight legs plus shared
+ * fillet radii, so the picture is built from a small vocabulary of repeated
+ * shapes, which is what makes a schematic scan cleanly at a glance.
  */
-const EDGE_STUB = 22;
-const EDGE_RADIUS = 12;
-
-function edgePath(ax: number, ay: number, bx: number, by: number): string {
-  const dy = by - ay;
-
-  // Same row (within a hair): a straight line. No corners to draw.
-  if (Math.abs(dy) < 1) return `M${ax},${ay} L${bx},${by}`;
-
-  const dx = bx - ax;
-  // Where the vertical leg sits. Keep a stub at both ends so each fillet has
-  // room; when the target is BEHIND the source there is no room for a mid
-  // route, so the leg goes just past the source and the path doubles back.
-  const mid = dx > EDGE_STUB * 2 ? ax + Math.max(EDGE_STUB, dx / 2) : ax + EDGE_STUB;
-
-  // Corner radius must never exceed half of either leg it joins, or the two
-  // arcs overlap and the path visibly kinks.
-  const r = Math.min(
-    EDGE_RADIUS,
-    Math.abs(dy) / 2,
-    Math.max(1, Math.abs(mid - ax)),
-    Math.max(1, Math.abs(bx - mid)),
-  );
-  const sy = dy > 0 ? 1 : -1;
-  // Sweep flags flip with direction so both corners bend the correct way.
-  const s1 = dy > 0 ? 1 : 0;
-  const s2 = dy > 0 ? 0 : 1;
-
-  return [
-    `M${ax},${ay}`,
-    `L${mid - r},${ay}`,
-    `A${r},${r} 0 0 ${s1} ${mid},${ay + r * sy}`,
-    `L${mid},${by - r * sy}`,
-    `A${r},${r} 0 0 ${s2} ${mid + r},${by}`,
-    `L${bx},${by}`,
-  ].join(' ');
-}
 
 /**
  * Stroke width from flow. Logarithmic so 10rps and 1000rps stay in one visual
@@ -1491,22 +1465,20 @@ function edgeWidth(f: number): number {
   return f <= 0 ? 1 : clamp(1 + Math.log10(1 + f) * 0.85, 1, 4.5);
 }
 
-/**
- * Arrowhead geometry. Because every edge now arrives horizontally the head is
- * a fixed triangle rather than a rotated one: ARROW_LEN along the wire,
- * ARROW_HALF either side of it. INSET is how far the LINE stops short of the
- * tip so the stroke never pokes through the solid head.
- */
-const ARROW_INSET = 8;
-const ARROW_LEN = 8;
-const ARROW_HALF = 3.6;
-
 interface EdgeViewProps {
   edge: SimEdge;
+  /** Top-left of the SOURCE node's box; the router picks its own anchors. */
   ax: number;
   ay: number;
+  /** Top-left of the TARGET node's box. */
   bx: number;
   by: number;
+  /**
+   * -1 | 0 | +1. Non-zero when the reverse edge also exists: the pair is
+   * shifted LANE_OFFSET to either side of the shared corridor so the two
+   * wires and their arrowheads stay individually visible.
+   */
+  lane: number;
   flow: number;
   /**
    * Why this wire is or is not carrying traffic, straight from the engine.
@@ -1546,6 +1518,7 @@ const EdgeView = memo(function EdgeView({
   ay,
   bx,
   by,
+  lane,
   flow,
   state,
   control,
@@ -1554,13 +1527,20 @@ const EdgeView = memo(function EdgeView({
   showLabel,
   labelDy,
 }: EdgeViewProps) {
-  // Every edge now ARRIVES horizontally (see edgePath), so the arrowhead is
-  // always axis-aligned and needs no trigonometry. That is a direct benefit of
-  // the routing change: the old bezier arrived at an arbitrary angle, which
-  // meant computing atan2 per edge per frame and produced arrowheads that
-  // each sat at their own tilt.
-  const tipX = bx - 2;
-  const d = edgePath(ax, ay, tipX - ARROW_INSET, by);
+  // The router arrives axis-aligned from whichever side it picked, so the
+  // arrowhead is one of four fixed triangles and needs no trigonometry.
+  // Memoised on the raw coordinates (scalars, so the memo around EdgeView
+  // keeps working): a route only recomputes when an endpoint node moves.
+  const route: EdgeRoute = useMemo(
+    () =>
+      routeEdge(
+        { x: ax, y: ay, w: NODE_W, h: NODE_H },
+        { x: bx, y: by, w: NODE_W, h: NODE_H },
+        lane,
+      ),
+    [ax, ay, bx, by, lane],
+  );
+  const d = route.d;
 
   /**
    * A wire that cannot carry traffic is never drawn as if it might.
@@ -1614,16 +1594,13 @@ const EdgeView = memo(function EdgeView({
    * working on exactly those edges, which is the same class of dead-overlay
    * bug the input rebuild was done to kill.
    *
-   * The safe region is the horizontal GAP between the source's exit port and
-   * the target's entry port. Both ports sit on node edges, so the span
-   * strictly between them is the one stretch of wire guaranteed to be clear
-   * of both endpoints. When the target is to the LEFT of the source (a
-   * back-edge, which routes out and around) that gap is empty or inverted, so
-   * the anchor falls back to the outbound stub, which is always exposed.
+   * The safe region is the wire's mid leg, which the router places in the
+   * clear corridor strictly BETWEEN the two boxes, whichever sides the route
+   * uses. routeEdge reports that point as `label`, so back-edges and
+   * vertical routes get an exposed anchor for free.
    */
-  const gap = bx - ARROW_INSET - ax;
-  const midX = gap > EDGE_STUB ? ax + gap / 2 : ax + EDGE_STUB;
-  const midY = (ay + by) / 2;
+  const midX = route.label.x;
+  const midY = route.label.y;
 
   return (
     <g
@@ -1646,13 +1623,9 @@ const EdgeView = memo(function EdgeView({
       {active && (
         <path d={d} className="cv-edge-flow" strokeWidth={width * 0.75} style={style} />
       )}
-      {/* Arrowhead. Axis-aligned because every edge arrives horizontally. */}
-      <path
-        d={`M${tipX},${by} L${tipX - ARROW_LEN},${by - ARROW_HALF} L${
-          tipX - ARROW_LEN
-        },${by + ARROW_HALF} Z`}
-        className="cv-edge-arrow"
-      />
+      {/* Arrowhead: one of four fixed triangles, pointed along the path's
+          actual final direction as reported by the router. */}
+      <path d={arrowPath(route.tip, route.dir)} className="cv-edge-arrow" />
 
       {/*
         THE BREAK. A severed wire gets a physical gap with two cut ends, not
@@ -2634,6 +2607,8 @@ export default function Canvas({
   onDuplicateForDrag,
   onPaste,
   spark,
+  viewCenterRef,
+  fitSignal = 0,
 }: CanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -2715,6 +2690,24 @@ export default function Canvas({
       y: (clientY - r.top - v.y) / v.k,
     };
   }, []);
+
+  /**
+   * Publish the view-centre getter for the shell's palette-click placement.
+   * Reads surfaceRef and viewRef through toWorld, so the value is always
+   * current without this effect ever re-running per pan/zoom frame.
+   */
+  useEffect(() => {
+    if (!viewCenterRef) return;
+    viewCenterRef.current = () => {
+      const el = surfaceRef.current;
+      if (!el) return { x: 0, y: 0 };
+      const r = el.getBoundingClientRect();
+      return toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    };
+    return () => {
+      viewCenterRef.current = null;
+    };
+  }, [viewCenterRef, toWorld]);
 
   /* ---------------- selection helpers ---------------- */
 
@@ -3660,9 +3653,17 @@ export default function Canvas({
   );
 
   /**
-   * Re-fit whenever the topology is replaced wholesale (mount, preset load) —
-   * keyed on the set of node ids so dragging a node or editing its config
-   * never yanks the viewport out from under the user.
+   * Re-fit ONLY when the diagram is replaced wholesale: first content on a
+   * previously empty canvas (mount, session restore, the first node added to
+   * a cleared canvas), or an explicit `fitSignal` bump from the shell (a
+   * preset load). Everything else keeps the camera where the student put it.
+   *
+   * The old trigger — the sorted node-id set — refit on EVERY add, delete
+   * and undo-restore, which yanked the viewport under the student each time
+   * (measured: deleting one node moved every click target ~160px with no pan
+   * input, and made three coordinate-verified clicks land on the wrong
+   * node). Excalidraw never moves the camera on add/delete, and it is right:
+   * an editing operation must not re-aim the view.
    */
   const topoKey = useMemo(
     () =>
@@ -3673,8 +3674,17 @@ export default function Canvas({
     [topology.nodes],
   );
 
+  const hadContentRef = useRef(false);
+  const fitSignalRef = useRef(fitSignal);
+
   useLayoutEffect(() => {
+    const hadContent = hadContentRef.current;
+    hadContentRef.current = topology.nodes.length > 0;
+    const signalChanged = fitSignalRef.current !== fitSignal;
+    fitSignalRef.current = fitSignal;
     if (topology.nodes.length === 0) return;
+    // An edit to an already-populated diagram: keep the camera.
+    if (hadContent && !signalChanged) return;
     // Never refit while a pointer gesture is in flight (same guard the
     // resize refit uses). An alt-drag duplicate changes the node-id set at
     // drag PROMOTION, and refitting there moved the viewport under the
@@ -3686,7 +3696,7 @@ export default function Canvas({
     // fitToContent is intentionally omitted: it changes identity on every node
     // move, and re-fitting mid-drag is exactly what this guard prevents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topoKey]);
+  }, [topoKey, fitSignal]);
 
   /** Re-fit on container resize, but only while the user is idle. */
   useEffect(() => {
@@ -3879,6 +3889,27 @@ export default function Canvas({
   }, [snapshot, topology.nodes, faultById, backlogById]);
 
   /**
+   * Lane assignment for bidirectional pairs, keyed by edge id.
+   *
+   * When A -> B and B -> A both exist the router would give them the same
+   * corridor and the two wires would fuse into one line with two invisible
+   * arrowheads. Each member of such a pair gets a lane (-1 or +1, decided by
+   * id order so it is stable across renders) and the router shifts the whole
+   * wire LANE_OFFSET perpendicular to its axis. Lone edges stay in lane 0.
+   */
+  const laneById = useMemo(() => {
+    const m = new Map<string, number>();
+    const key = (f: string, t: string) => `${f}->${t}`;
+    const present = new Set(topology.edges.map((e) => key(e.from, e.to)));
+    for (const e of topology.edges) {
+      if (present.has(key(e.to, e.from))) {
+        m.set(e.id, e.from < e.to ? -1 : 1);
+      }
+    }
+    return m;
+  }, [topology.edges]);
+
+  /**
    * De-conflicted vertical offsets for edge rate labels, keyed by edge id.
    *
    * Every label anchors at its edge's own midpoint, and two edges can share
@@ -3904,18 +3935,16 @@ export default function Canvas({
       // Mirror of EdgeView's own "does a label render" condition.
       const hasLabel = control || (!severed && flow > 0.05);
       if (!hasLabel) continue;
-      const p = outPort(a);
-      const q = inPort(b);
-      const gap = q.x - ARROW_INSET - p.x;
-      const midX = gap > EDGE_STUB ? p.x + gap / 2 : p.x + EDGE_STUB;
-      const midY = (p.y + q.y) / 2;
-      const key = `${Math.round(midX / 16)}:${Math.round(midY / 16)}`;
+      // The same route EdgeView draws, so the bucketed anchor is the exact
+      // point the label will render at.
+      const { label } = routeEdge(nodeRect(a), nodeRect(b), laneById.get(ed.id) ?? 0);
+      const key = `${Math.round(label.x / 16)}:${Math.round(label.y / 16)}`;
       const n = buckets.get(key) ?? 0;
       buckets.set(key, n + 1);
       if (n > 0) m.set(ed.id, n * 10);
     }
     return m;
-  }, [showEdgeLabels, topology.edges, nodeById, controlEdges, snapshot]);
+  }, [showEdgeLabels, topology.edges, nodeById, controlEdges, snapshot, laneById]);
 
   /**
    * The link gesture currently in flight, from either mechanism. Drag and
@@ -3983,23 +4012,23 @@ export default function Canvas({
    * the pending connection completely unidentified.
    */
   const ARMED_STUB = 56;
-  let previewX = 0;
-  let previewY = 0;
-  if (previewPort) {
-    if (link) {
-      previewX = link.x;
-      previewY = link.y;
-      if (snapTarget) {
-        const t = nodeById.get(snapTarget);
-        if (t) {
-          const q = inPort(t);
-          previewX = q.x;
-          previewY = q.y;
-        }
-      }
+  let previewD: string | null = null;
+  if (previewFrom) {
+    const snapNode = snapTarget ? nodeById.get(snapTarget) : undefined;
+    if (link && snapNode) {
+      // Snapped: show the wire exactly where the real edge will route,
+      // extended to the arrow tip since the preview draws no head.
+      const r = routeEdge(nodeRect(previewFrom), nodeRect(snapNode));
+      previewD = `${r.d} L${r.tip.x},${r.tip.y}`;
+    } else if (link) {
+      previewD = previewPath(nodeRect(previewFrom), link.x, link.y);
     } else {
-      previewX = previewPort.x + ARMED_STUB;
-      previewY = previewPort.y;
+      // Armed by a click: a short stub out of the source port.
+      previewD = previewPath(
+        nodeRect(previewFrom),
+        previewPort!.x + ARMED_STUB,
+        previewPort!.y,
+      );
     }
   }
 
@@ -4041,16 +4070,15 @@ export default function Canvas({
                 const a = nodeById.get(ed.from);
                 const b = nodeById.get(ed.to);
                 if (!a || !b) return null;
-                const p = outPort(a);
-                const q = inPort(b);
                 return (
                   <EdgeView
                     key={ed.id}
                     edge={ed}
-                    ax={p.x}
-                    ay={p.y}
-                    bx={q.x}
-                    by={q.y}
+                    ax={a.x}
+                    ay={a.y}
+                    bx={b.x}
+                    by={b.y}
+                    lane={laneById.get(ed.id) ?? 0}
                     flow={snapshot?.edgeFlow[ed.id] ?? 0}
                     state={snapshot?.edgeState[ed.id] ?? 'idle'}
                     control={controlEdges.has(ed.id)}
@@ -4063,10 +4091,10 @@ export default function Canvas({
               })}
             </g>
 
-            {previewPort && (
+            {previewD && (
               <path
                 className={`cv-link-preview${snapTarget ? ' is-snapped' : ''}`}
-                d={edgePath(previewPort.x, previewPort.y, previewX, previewY)}
+                d={previewD}
               />
             )}
 
@@ -4170,7 +4198,9 @@ export default function Canvas({
             {topology.edges.length}{' '}
             {topology.edges.length === 1 ? 'connection' : 'connections'}
           </span>
-          <span>{formatElapsed(elapsed)}</span>
+          {/* Kept out of the ledger's uppercase transform: "1.5s" must not
+              render as "1.5S" — units always print lowercase. */}
+          <span className="cv-ledger-time">{formatElapsed(elapsed)}</span>
         </div>
       )}
 
@@ -4180,6 +4210,32 @@ export default function Canvas({
         <p className="cv-hint" role="status">
           Click a component to connect · Esc to cancel
         </p>
+      )}
+
+      {/* A one-line contextual hint, the cheapest thing Excalidraw does that
+          this app lacked: at rest it teaches the camera, with a node selected
+          it teaches the node verbs. Quiet, static, never animated, and it
+          yields its slot to the armed-link instruction above. Separated by
+          GAP rather than a "·" glyph, which measured 2.12:1 on the canvas
+          (see .cv-ledger). aria-hidden: it repeats what titles and the
+          shortcuts dialog already expose to assistive tech, and its churn on
+          selection would be noise there. */}
+      {pendingLink === null && topology.nodes.length > 0 && !renameNode && (
+        <div className="cv-hint-idle label" aria-hidden="true">
+          {topology.nodes.some((n) => selectedIds.has(n.id)) ? (
+            <>
+              <span>Drag to move</span>
+              <span>Delete to remove</span>
+              <span>Double-click to rename</span>
+            </>
+          ) : (
+            <>
+              <span>Scroll to pan</span>
+              <span>Ctrl+scroll to zoom</span>
+              <span>Shift+drag to select</span>
+            </>
+          )}
+        </div>
       )}
 
       <div className="cv-zoom" data-chrome="zoom">

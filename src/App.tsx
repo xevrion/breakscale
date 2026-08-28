@@ -173,18 +173,31 @@ function PanelSlot({
   const [toggled, setToggled] = useState(false);
   if (!toggled && open !== bootOpen) setToggled(true);
 
+  // The entrance class is REMOVED once its animation completes, symmetric
+  // with the exit handler. A finished keyframe replays nothing, so leaving
+  // the class cost little at runtime, but any remount (HMR, a key change)
+  // would replay the slide on content that was simply present.
+  const [entered, setEntered] = useState(false);
+  const prevOpen = useRef(open);
+  if (prevOpen.current !== open) {
+    prevOpen.current = open;
+    if (open) setEntered(false);
+  }
+
   if (!mounted) return null;
 
-  const state = closing ? ' is-closing' : toggled ? ' is-entering' : '';
+  const state = closing ? ' is-closing' : toggled && !entered ? ' is-entering' : '';
 
   return (
     <div
       className={`app-slot app-slot-${edge}${state}`}
       inert={closing || undefined}
       onAnimationEnd={(e: AnimationEvent<HTMLDivElement>) => {
-        // Only the slot's own exit animation may unmount it. Animations on
-        // children (a chart transition, a button) bubble through here too.
-        if (closing && e.target === e.currentTarget) unmount();
+        // Only the slot's own animations count. Animations on children (a
+        // chart transition, a button) bubble through here too.
+        if (e.target !== e.currentTarget) return;
+        if (closing) unmount();
+        else setEntered(true);
       }}
     >
       {open ? children : lastChildren.current}
@@ -274,13 +287,23 @@ function saveSession(session: Session): void {
   }
 }
 
-/** The client node is the traffic source; its rps is the load slider's value. */
-function findClient(t: Topology) {
-  return t.nodes.find((n) => n.kind === 'client') ?? null;
+/** Every traffic source on the canvas. Presets routinely have several. */
+function findClients(t: Topology): SimNode[] {
+  return t.nodes.filter((n) => n.kind === 'client');
 }
 
+/**
+ * Total offered load: the SUM over every client node. The header used to
+ * mirror a separate `rps` state cell that only the slider wrote, which came
+ * apart two ways — a multi-client preset offered more than the header
+ * admitted (Spotify: goodput 5.7k/s under "Offered load 5k"), and deleting
+ * then re-adding a client left the header frozen on the old value while the
+ * new client sent 50/s. Deriving from the topology makes the number a fact.
+ */
 function clientRps(t: Topology): number {
-  return findClient(t)?.config.rps ?? 0;
+  let sum = 0;
+  for (const c of findClients(t)) sum += c.config.rps;
+  return sum;
 }
 
 /* ------------------------------------------------------------------ *
@@ -549,6 +572,27 @@ export default function App() {
   }, [topology, selectedIds, rps, presetId]);
 
   /**
+   * The topology as of the LAST EVENT HANDLER, not the last committed render.
+   *
+   * snapRef above is refreshed by a layout effect, which only helps if React
+   * renders between two handlers. Pointer moves are continuous-priority
+   * events: React schedules their re-render through the scheduler, so a fast
+   * flick can deliver pointerup BEFORE the render for the final pointermove
+   * has committed. endGesture would then compare the drag's baseline against
+   * a pre-drag snapshot, conclude the gesture went nowhere, and drop the
+   * entry — a fast node drag became invisible to undo and left a stale redo
+   * stack behind. Verified with a real three-event drag in a background tab.
+   *
+   * Every handler that writes the topology writes this ref in the same
+   * synchronous breath, so a gesture's end always sees the state its own
+   * moves produced, whether or not React has caught up.
+   */
+  const topoLiveRef = useRef<Topology>(initial.topology);
+  useLayoutEffect(() => {
+    topoLiveRef.current = topology;
+  }, [topology]);
+
+  /**
    * Toast naming what was undone or redone. On a large canvas the reverted
    * change can be off screen (a preset load, a node deleted at the far
    * edge), and without the toast an off-screen undo is indistinguishable
@@ -599,8 +643,13 @@ export default function App() {
    */
   const applyTopology = useCallback(
     (next: Topology) => {
+      topoLiveRef.current = next;
       setTopology(next);
       engine.setTopology(next);
+      // Refresh the snapshot immediately so a topology edit made while PAUSED
+      // shows the new node's readouts at once, instead of blank rows sitting
+      // next to headline numbers from the previous run until the next tick.
+      setSnapshot(engine.snapshot());
       setPresetId(null);
     },
     [engine],
@@ -617,10 +666,15 @@ export default function App() {
       if (!history.inGesture) history.touch('move', snapRef.current);
       // Position is presentation only — the engine does not care, so this
       // skips setTopology and avoids clearing the active preset badge.
-      setTopology((t) => ({
+      // Computed eagerly from the live mirror (and written back to it) so a
+      // pointerup arriving before React commits still sees this move.
+      const t = topoLiveRef.current;
+      const next = {
         ...t,
         nodes: t.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)),
-      }));
+      };
+      topoLiveRef.current = next;
+      setTopology(next);
     },
     [history],
   );
@@ -631,7 +685,10 @@ export default function App() {
   }, [history]);
 
   const handleMoveEnd = useCallback(() => {
-    history.endGesture(snapRef.current);
+    // The topology from the live mirror, never from snapRef alone: a flick's
+    // pointerup can outrun the render for its last pointermove, and endGesture
+    // fed the stale mirror would drop the entry as a no-op (see topoLiveRef).
+    history.endGesture({ ...snapRef.current, topology: topoLiveRef.current });
   }, [history]);
 
   const handleAddNode = useCallback(
@@ -647,11 +704,51 @@ export default function App() {
     [applyTopology, topology, history],
   );
 
-  /** Palette click (no drop point): place into open space near the middle. */
+  /**
+   * Filled by the canvas with a "world point at the centre of the current
+   * view" getter. A palette CLICK has no drop point of its own; the old
+   * placement (max x + 220) marched monotonically rightward, so after a few
+   * clicks each new node — entrance animation and all — landed entirely
+   * outside the viewport and the click looked like a no-op. Measured: two
+   * palette clicks on the company preset created nodes at screen y ≈ -257.
+   */
+  const viewCenterRef = useRef<(() => { x: number; y: number }) | null>(null);
+
+  /** Palette click (no drop point): place at the centre of the current view. */
   const handlePaletteAdd = useCallback(
     (kind: NodeKind) => {
-      const maxX = topology.nodes.reduce((m, n) => Math.max(m, n.x), 0);
-      handleAddNode(kind, maxX + 220, 200);
+      const centre = viewCenterRef.current?.();
+      if (!centre) {
+        // No canvas yet (should not happen in practice): old fallback.
+        const maxX = topology.nodes.reduce((m, n) => Math.max(m, n.x), 0);
+        handleAddNode(kind, maxX + 220, 200);
+        return;
+      }
+      // Centre the node on the view, snapped to the grid. A small ring of
+      // nearby offsets dodges an exact pile-up from repeated clicks, but the
+      // search never leaves the neighbourhood: on a dense diagram the node
+      // simply lands at the centre and overlaps, which the student can see
+      // and fix — a node placed "helpfully" outside the viewport cannot be.
+      const cx = Math.round((centre.x - NODE_W / 2) / GRID) * GRID;
+      const cy = Math.round((centre.y - NODE_H / 2) / GRID) * GRID;
+      const occupied = (px: number, py: number) =>
+        topology.nodes.some(
+          (n) => Math.abs(n.x - px) < NODE_W && Math.abs(n.y - py) < NODE_H,
+        );
+      const STEP = GRID * 4;
+      const ring: [number, number][] = [
+        [0, 0],
+        [STEP, STEP],
+        [-STEP, STEP],
+        [STEP, -STEP],
+        [-STEP, -STEP],
+        [2 * STEP, 0],
+        [0, 2 * STEP],
+        [-2 * STEP, 0],
+        [0, -2 * STEP],
+      ];
+      const spot = ring.find(([dx, dy]) => !occupied(cx + dx, cy + dy)) ?? [0, 0];
+      handleAddNode(kind, cx + spot[0], cy + spot[1]);
     },
     [handleAddNode, topology.nodes],
   );
@@ -841,8 +938,8 @@ export default function App() {
           n.id === id ? { ...n, config: { ...n.config, ...patch } } : n,
         ),
       }));
-      // The load slider and the client's rps knob are the same value.
-      if (patch.rps !== undefined) setRps(patch.rps);
+      // No slider sync needed: the header's offered load is DERIVED from the
+      // topology's client nodes, so a per-node rps knob updates it for free.
     },
     [engine, history],
   );
@@ -867,14 +964,10 @@ export default function App() {
           targets.has(n.id) ? { ...n, config: { ...n.config, ...patch } } : n,
         ),
       }));
-      // If the traffic source was in the selection, the load slider must
-      // follow it — the bar and the client's rps knob are one value.
-      if (patch.rps !== undefined) {
-        const client = findClient(topology);
-        if (client && targets.has(client.id)) setRps(patch.rps);
-      }
+      // No slider sync needed: the header derives offered load from the
+      // topology, so editing any client's rps here updates it for free.
     },
-    [engine, topology, history],
+    [engine, history],
   );
 
   const handleRename = useCallback(
@@ -890,17 +983,69 @@ export default function App() {
     [history],
   );
 
-  /** The top-bar slider writes straight through to the client node. */
+  /**
+   * The top-bar slider sets the TOTAL offered load. One client gets the value
+   * outright; several are scaled proportionally so a preset's deliberate
+   * traffic mix survives the drag, with the remainder placed on the first
+   * client so the distributed parts always sum to exactly `next`.
+   */
   const handleRpsChange = useCallback(
     (next: number) => {
       setRps(next);
-      const client = findClient(topology);
-      if (client) handleConfigChange(client.id, { rps: next });
+      const clients = findClients(topology);
+      if (clients.length === 0) return;
+      if (clients.length === 1) {
+        handleConfigChange(clients[0]!.id, { rps: next });
+        return;
+      }
+      const total = clients.reduce((s, c) => s + c.config.rps, 0);
+      const shares = clients.map((c) =>
+        Math.max(
+          0,
+          Math.round(next * (total > 0 ? c.config.rps / total : 1 / clients.length)),
+        ),
+      );
+      const spread = shares.reduce((s, v) => s + v, 0);
+      shares[0] = Math.max(0, shares[0]! + (next - spread));
+      // One history baseline, one engine pass, one topology write.
+      history.touch('setting change', snapRef.current);
+      const byId = new Map(clients.map((c, i) => [c.id, shares[i]!]));
+      for (const [id, rps] of byId) engine.updateNodeConfig(id, { rps });
+      setTopology((t) => ({
+        ...t,
+        nodes: t.nodes.map((n) =>
+          byId.has(n.id) ? { ...n, config: { ...n.config, rps: byId.get(n.id)! } } : n,
+        ),
+      }));
     },
-    [handleConfigChange, topology],
+    [handleConfigChange, topology, history, engine],
   );
 
   /* ---------------- presets & reset ---------------- */
+
+  /**
+   * State backing the lost-per-second derivation further down (see the
+   * cumulativeLost memo). Declared here because reset and preset load must
+   * zero it SYNCHRONOUSLY: leaving it to the effect meant the old run's
+   * "Dropped 104k/s" sat on screen next to p99 0ms until the next effect
+   * pass — indefinitely, while paused.
+   */
+  const lostPrevRef = useRef<number | null>(null);
+  const lostPrevTimeRef = useRef(0);
+  const [lostRps, setLostRps] = useState(0);
+
+  const resetLostRate = useCallback(() => {
+    lostPrevRef.current = null;
+    lostPrevTimeRef.current = 0;
+    setLostRps(0);
+  }, []);
+
+  /**
+   * Bumped when the diagram is replaced wholesale, so the canvas re-frames
+   * the new content. Node edits never bump it: the camera belongs to the
+   * student, and add/delete/undo must not move it.
+   */
+  const [fitNonce, setFitNonce] = useState(0);
 
   const handleLoadPreset = useCallback(
     (preset: Preset) => {
@@ -914,17 +1059,23 @@ export default function App() {
       setRps(clientRps(fresh));
       setPresetId(preset.id);
       setSelectedIds(new Set<string>());
+      topoLiveRef.current = fresh;
       engine.setTopology(fresh);
       engine.reset();
+      resetLostRate();
       setSnapshot(engine.snapshot());
+      setFitNonce((n) => n + 1);
     },
-    [engine, history],
+    [engine, history, resetLostRate],
   );
 
   const handleReset = useCallback(() => {
     engine.reset();
+    // Synchronously, not via the derivation effect: Reset must never leave
+    // the previous run's Dropped figure standing beside a zeroed clock.
+    resetLostRate();
     setSnapshot(engine.snapshot());
-  }, [engine]);
+  }, [engine, resetLostRate]);
 
   const handleToggleRun = useCallback(() => setRunning((r) => !r), []);
 
@@ -1123,6 +1274,14 @@ export default function App() {
     selectedNode && snapshot ? (snapshot.nodes[selectedNode.id] ?? null) : null;
 
   /**
+   * The header's offered load, derived from the topology's client nodes (the
+   * sum, so multi-client presets add up) rather than mirrored in a separate
+   * state cell that add/delete paths forgot to reconcile. `rps` state remains
+   * only as the persisted slider value for session restore.
+   */
+  const offeredRps = useMemo(() => clientRps(topology), [topology]);
+
+  /**
    * Requests actually lost PER SECOND, derived from the engine's per-reason
    * counters. This is the single source of truth for "dropped": the top bar
    * and the throughput chart previously derived it two different ways
@@ -1144,12 +1303,9 @@ export default function App() {
    * it follows pause, step and reset, where a wall clock would invent
    * traffic while the simulation is stopped. This mirrors the identical
    * derivation in Metrics.tsx, which fixed this same bug for the failures
-   * panel.
+   * panel. The backing refs and state live up beside handleReset, which must
+   * zero them synchronously.
    */
-  const lostPrevRef = useRef<number | null>(null);
-  const lostPrevTimeRef = useRef(0);
-  const [lostRps, setLostRps] = useState(0);
-
   const cumulativeLost = useMemo(() => {
     if (!snapshot) return 0;
     let s = 0;
@@ -1256,7 +1412,7 @@ export default function App() {
         </div>
 
         <TrafficControl
-          rps={rps}
+          rps={offeredRps}
           onRpsChange={handleRpsChange}
           running={running}
           onToggleRun={handleToggleRun}
@@ -1429,6 +1585,8 @@ export default function App() {
               onDuplicateForDrag={handleDuplicateForDrag}
               onPaste={handlePaste}
               spark={spark}
+              viewCenterRef={viewCenterRef}
+              fitSignal={fitNonce}
             />
             <button
               type="button"

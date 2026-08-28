@@ -11,6 +11,7 @@ import {
   NODE_DND_MIME,
 } from './nodeVisuals';
 import { Term } from './Tooltip';
+import { usePreference } from '../content/preferences';
 import './Palette.css';
 
 /* ------------------------------------------------------------------ *
@@ -264,6 +265,16 @@ export function Palette({
   onLoadPreset,
 }: PaletteProps) {
   /**
+   * Whether the hover explanations are on. With them OFF (the default) the
+   * per-row "?" mark is not rendered at all: <Term> degrades to its bare
+   * children then, which left 33 inert question marks with no handler and no
+   * focus stop — decoration that could only mislead — and their sr-only
+   * labels, no longer anchored by the positioned .pal-explain wrapper,
+   * silently extended the document's scroll box by ~634px.
+   */
+  const hintsOn = usePreference('tooltips');
+
+  /**
    * Which sections are open. Local UI state — the shell has no business
    * knowing whether a disclosure is expanded, and persisting it would
    * mean a student who collapsed everything once opens the app to an
@@ -364,10 +375,12 @@ export function Palette({
                       and a dotted underline on a lone question mark would be
                       noise on top of noise. The tooltip itself is unchanged.
                     */}
-                    <Term id={KIND_TERM[kind]} className="pal-explain" bare>
-                      <span aria-hidden="true">?</span>
-                      <span className="sr-only">What is a {KIND_NAME[kind]}?</span>
-                    </Term>
+                    {hintsOn && (
+                      <Term id={KIND_TERM[kind]} className="pal-explain" bare>
+                        <span aria-hidden="true">?</span>
+                        <span className="sr-only">What is a {KIND_NAME[kind]}?</span>
+                      </Term>
+                    )}
                   </li>
                 ))}
               </ul>

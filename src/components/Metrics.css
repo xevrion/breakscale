@@ -483,7 +483,8 @@
   height: 100%;
   border-radius: var(--r-pill);
   background: currentColor;
-  transition: width var(--dur-base) var(--ease-out);
+  /* No width transition: a 10Hz readout wearing one is permanently mid-
+     animation and always behind the number beside it (see .cv-meter-fill). */
 }
 
 .mx-key-fail .mx-key-value {

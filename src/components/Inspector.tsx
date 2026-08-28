@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type {
   NodeConfig,
@@ -1263,6 +1263,10 @@ function NumberRow({
   onChange: (v: number) => void;
 }) {
   const id = useId();
+  /** Text as typed while the field is focused; null when at rest. */
+  const [draft, setDraft] = useState<string | null>(null);
+  /** The committed value when focus arrived, so Escape can revert to it. */
+  const atFocusRef = useRef(value);
   return (
     <div
       className={spec.hint ? 'ins-field-row ins-field-row--hinted' : 'ins-field-row'}
@@ -1271,6 +1275,16 @@ function NumberRow({
         {spec.term ? <Term id={spec.term}>{spec.label}</Term> : spec.label}
       </label>
       <span className="ins-number-wrap">
+        {/*
+          A DRAFT rides over the committed value while the field is focused.
+          Committing the clamped parse of every keystroke corrupted edits in
+          progress: Ctrl+A then "-5" saw the intermediate "" parse to 0,
+          clamp to the minimum, re-render into the field, and the following
+          "5" append to it — the student typed -5 and got 15. The draft lets
+          the box hold any partial text; only text that parses commits (still
+          clamped, still live), and blur or Enter squares the box back with
+          the committed value. Escape discards the draft outright.
+        */}
         <input
           id={id}
           className="ins-number"
@@ -1278,14 +1292,32 @@ function NumberRow({
           min={spec.min}
           max={spec.max}
           step={spec.step}
-          value={value}
+          value={draft ?? value}
           placeholder={mixed ? 'mixed' : undefined}
           data-mixed={mixed || undefined}
           onChange={(e) => {
-            const raw = Number(e.currentTarget.value);
+            const text = e.currentTarget.value;
+            setDraft(text);
+            if (text.trim() === '') return;
+            const raw = Number(text);
             if (!Number.isFinite(raw)) return;
-            const clamped = Math.min(spec.max, Math.max(spec.min, Math.round(raw)));
-            onChange(clamped);
+            onChange(Math.min(spec.max, Math.max(spec.min, Math.round(raw))));
+          }}
+          onFocus={() => {
+            atFocusRef.current = value;
+          }}
+          onBlur={() => setDraft(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              setDraft(null);
+              e.currentTarget.blur();
+            } else if (e.key === 'Escape') {
+              // Same contract as the canvas rename: Escape means "as it was
+              // when I started", not "keep whatever half-edit went through".
+              onChange(atFocusRef.current);
+              setDraft(null);
+              e.currentTarget.blur();
+            }
           }}
         />
         <span className="label ins-unit">{spec.unit}</span>
@@ -2404,6 +2436,9 @@ function SingleInspector({
   const fields = FIELDS_BY_KIND[node.kind];
   const cfg = node.config;
 
+  /** The node's name when the title field took focus; Escape restores it. */
+  const labelAtFocusRef = useRef(node.label);
+
   // Derived ceiling: how many requests per second this node can finish if
   // every slot stays busy. Recomputed live as capacity/serviceMs move.
   const showCeiling = HAS_THROUGHPUT_CEILING.has(node.kind) && cfg.serviceMs > 0;
@@ -2444,13 +2479,32 @@ function SingleInspector({
     <aside className="ins" aria-label="Inspector">
       <div className="ins-scroll scroll">
         <header className="ins-head">
+          {/*
+            Writes through per keystroke (the canvas label should follow the
+            typing), but Escape reverts to the name the field had when focus
+            arrived and leaves the field — the same contract as the canvas's
+            double-click rename, which this used to disagree with: one rename
+            surface cancelled on Escape, the other kept the half-typed name.
+          */}
           <input
             className="ins-title"
             type="text"
             value={node.label}
             spellCheck={false}
             aria-label="Node name"
+            onFocus={(e) => {
+              labelAtFocusRef.current = e.currentTarget.value;
+            }}
             onChange={(e) => onRename(node.id, e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                onRename(node.id, labelAtFocusRef.current);
+                e.currentTarget.blur();
+              }
+            }}
           />
           {/*
             The kind name is where a student learns WHAT they have selected.
@@ -2908,7 +2962,6 @@ export function TrafficControl({
 }: TrafficControlProps) {
   const sliderId = useId();
 
-  const p99Tone = toneClass(healthOfLatency(system.p99));
   const errTone = toneClass(healthOfErr(system.errorRate));
 
   // Traffic that actually FAILED, while it is failing. Deliberately not
@@ -2918,6 +2971,15 @@ export function TrafficControl({
   // the engine's own fraction of requests that errored or were shed.
   const dropped = Number.isFinite(lost) ? Math.max(0, lost) : 0;
   const showDropped = dropped > 0.5;
+
+  /**
+   * p99 of WHAT? With zero goodput nothing is completing, so a latency
+   * percentile does not exist — and "0ms" beside "Errors 100%" read as
+   * "instantly fast" in the middle of a total outage (observed on the retry
+   * storm preset). No data renders as the sentinel, never as a fake zero.
+   */
+  const p99 = system.p99 === 0 && system.goodputRps === 0 ? null : system.p99;
+  const p99Tone = toneClass(healthOfLatency(p99));
 
   return (
     <div className="traffic">
@@ -3000,7 +3062,7 @@ export function TrafficControl({
                 System <Term id="p99">p99</Term>
               </span>
               <span className={p99Tone ? `num num-hero ${p99Tone}` : 'num num-hero'}>
-                {formatMs(system.p99)}
+                {formatMs(p99)}
               </span>
             </div>
 

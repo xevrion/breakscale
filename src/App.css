@@ -129,17 +129,30 @@
    documents every one of them), then the labels collapse to the icons. The
    buttons keep their accessible names via aria-label at every width, and
    their titles still name the keys.
+
+   THE THRESHOLDS SIT ABOVE THE BAR'S MEASURED MIN-CONTENT, not below it.
+   Measured: the full bar's min-content is ~1728px (brand 170 + undo 68 +
+   traffic 860 + three labelled buttons 390 + five 40px gaps + padding).
+   The old 1680/1500 pair both fired BELOW that, so from ~1710 down the
+   reference cluster painted over Reset. Each step here lands before the
+   width it rescues: keys go at 1780 (min-content drops to ~1672), labels
+   and the wide gaps go together at 1700 (min-content ~1390), and the 1360
+   block below takes it to ~1250, safely under a 1280 window.
    -------------------------------------------------------------------------- */
 
-@media (max-width: 1680px) {
+@media (max-width: 1780px) {
   .app-glossary-key {
     display: none;
   }
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1700px) {
   .app-glossary-label {
     display: none;
+  }
+
+  .app-bar {
+    gap: var(--sp-5);
   }
 }
 
@@ -422,16 +435,14 @@
     width: 288px;
   }
 
-  /* The bar's own regions tighten before anything inside them has to. */
+  /* The bar's padding tightens with the rails. */
   .app-bar {
-    gap: var(--sp-5);
     padding: var(--sp-3) var(--sp-4);
   }
-}
 
-/* The tagline is the first thing to go: it is charm, not information, and
-   the slider needs the width more than the sentence does. */
-@media (max-width: 1180px) {
+  /* The tagline goes with the rails: it is charm, not information, and at
+     this width the ~90px it holds is what keeps the bar's min-content under
+     a 1280 window. */
   .app-tagline {
     display: none;
   }

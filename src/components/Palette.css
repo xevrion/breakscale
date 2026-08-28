@@ -208,8 +208,10 @@
      1001px viewport, and window.scrollTo(0, 900) moved the app. Verified
      back to a non-scrolling page after this rule. */
   position: relative;
-  width: 20px;
-  height: 20px;
+  /* 24px: the minimum comfortable pointer target. It was 20px wide — under
+     the guideline, on a mark whose entire job is to be aimed at. */
+  width: 24px;
+  height: 24px;
   margin-right: var(--sp-2);
   border-radius: var(--r-sm);
   color: var(--text-faint);

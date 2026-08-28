@@ -596,12 +596,18 @@
 /* At 'ok' the bar is the node's OWN colour: a healthy component is simply
    itself, working. Load is already encoded by LENGTH, which is the channel
    that survives colourblindness and low zoom, so hue is held in reserve for
-   the two states actually worth interrupting a student for. */
+   the two states actually worth interrupting a student for.
+
+   The FILL colour eases (it moves only at threshold crossings, like the
+   primary value's colour), but the WIDTH deliberately does not: it is a
+   10Hz measurement, and a width transition kept every meter permanently
+   animating under load — document.getAnimations() reported 30 width
+   transitions in "running" simultaneously on a 36-node preset, each bar
+   lagging truth by up to 200ms forever. The digits step; the bar steps
+   with them. */
 .cv-meter-fill {
   fill: var(--k-stroke);
-  transition:
-    width var(--dur-slow) linear,
-    fill var(--dur-slow) var(--ease);
+  transition: fill var(--dur-slow) var(--ease);
 }
 
 .cv-node.is-warn .cv-meter-fill {
@@ -877,9 +883,10 @@
 }
 
 .cv-vessel-fill {
-  /* See .cv-cell-fill: --k-line is not a mapped local. */
+  /* See .cv-cell-fill: --k-line is not a mapped local. No width transition:
+     the depth is a 10Hz measurement, and transitioning it kept the vessel
+     permanently animating under load (see .cv-meter-fill). */
   fill: var(--k-stroke);
-  transition: width var(--dur-base) var(--ease-out);
 }
 
 /* The limit. A queue's brim is a hard wall — past it requests are destroyed,
@@ -1085,6 +1092,29 @@
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
   color: var(--text-faint);
+  pointer-events: none;
+}
+
+/* The elapsed clock. Units print lowercase ("1.5s", "2m 05s"): the ledger's
+   .label uppercase turned the seconds into "1.5S", a unit no book sets. */
+.cv-ledger-time {
+  text-transform: none;
+}
+
+/* The contextual hint line: top centre, in the slot the armed-link
+   instruction also uses, so the two never stack. Quiet text straight on the
+   canvas, no border, no surface, no motion — guidance, not chrome.
+   --text-faint measures 5.17:1 on --bg (AA). */
+.cv-hint-idle {
+  position: absolute;
+  top: var(--sp-3);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: var(--sp-4);
+  min-height: 32px;
+  align-items: center;
+  white-space: nowrap;
   pointer-events: none;
 }
 

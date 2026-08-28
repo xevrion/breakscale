@@ -529,8 +529,12 @@ body,
 #root {
   width: 100%;
   height: 100%;
-  /* Fixed-viewport app: the page never scrolls, panels scroll internally. */
-  overflow: hidden;
+  /* Fixed-viewport app: the page never scrolls, panels scroll internally.
+     `clip`, not `hidden`: hidden still leaves the page a scroll container
+     that scrollIntoView (reachable via find-in-page) can scroll — measured,
+     a 36px programmatic scroll clipped the top bar with no way back. clip
+     removes the scroll box entirely. */
+  overflow: clip;
 }
 
 body {
