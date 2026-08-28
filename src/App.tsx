@@ -59,6 +59,7 @@ import { SessionHistory, syncEngine } from './history';
 import type { HistoryEntry, HistorySnapshot } from './history';
 import { buildShareUrl, decodeTopology, hasShareHash } from './share';
 import { DESIGN_FILE_ACCEPT, downloadDesign, readDesignFile } from './designFile';
+import { downloadBlob, svgToPng } from './imageExport';
 import './App.css';
 
 /* ------------------------------------------------------------------ *
@@ -1169,6 +1170,7 @@ export default function App() {
    */
   const viewCenterRef = useRef<(() => { x: number; y: number }) | null>(null);
   const armToolRef = useRef<((tool: AnnotationTool) => void) | null>(null);
+  const exportSvgRef = useRef<(() => string | null) | null>(null);
   const [armedTool, setArmedTool] = useState<AnnotationTool | null>(null);
 
   /**
@@ -1596,6 +1598,49 @@ export default function App() {
   }, [importError]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * Save the diagram as a picture.
+   *
+   * SVG is the honest default for a diagram (it stays sharp and its text is
+   * still text), so PNG is offered beside it rather than instead of it: a
+   * slide deck and a chat window both want a raster.
+   */
+  const handleExportImage = useCallback(
+    async (format: 'svg' | 'png') => {
+      const svg = exportSvgRef.current?.();
+      if (!svg) {
+        toastSeq.current += 1;
+        setToast({
+          text: 'There is nothing on the canvas to export yet.',
+          id: toastSeq.current,
+        });
+        return;
+      }
+      const stem = presetId
+        ? (PRESETS.find((p) => p.id === presetId)?.name ?? 'design')
+        : 'design';
+      const name = stem
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      try {
+        if (format === 'svg') {
+          downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), `${name}.svg`);
+          return;
+        }
+        const m = /viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"/.exec(svg);
+        const w = m ? Number(m[1]) : 1200;
+        const h = m ? Number(m[2]) : 800;
+        downloadBlob(await svgToPng(svg, w, h), `${name}.png`);
+      } catch {
+        // A failed export must say so. Silence here reads as a broken button.
+        toastSeq.current += 1;
+        setToast({ text: 'That picture could not be saved.', id: toastSeq.current });
+      }
+    },
+    [presetId],
+  );
 
   const handleExport = useCallback(() => {
     const preset = PRESETS.find((p) => p.id === presetId);
@@ -2325,6 +2370,7 @@ export default function App() {
               spark={spark}
               viewCenterRef={viewCenterRef}
               armToolRef={armToolRef}
+              exportSvgRef={exportSvgRef}
               onToolChange={setArmedTool}
               fitSignal={fitNonce}
               visibleRef={stageSafeRef}
@@ -2474,6 +2520,7 @@ export default function App() {
         onExport={handleExport}
         onImport={() => fileInputRef.current?.click()}
         onCopyLink={handleCopyLink}
+        onExportImage={handleExportImage}
       />
 
       <Examples

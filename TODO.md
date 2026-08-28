@@ -25,7 +25,7 @@
 - [x] sitemap.xml
 - [x] canonical + og:url
 - [x] JSON-LD: SoftwareApplication, LearningResource
-- [ ] Glossary as crawlable HTML, not locked in the bundle
+- [x] Glossary as crawlable HTML, not locked in the bundle
 - [ ] Run the SEO / AEO skills (/seo-audit, /seo-geo, /seo-schema) for a full
       pass. AFTER the custom art lands, not before: the audit checks the OG
       image, favicon and logo, so running it against the code-drawn
@@ -37,10 +37,10 @@
 ## Save / share (excalidraw parity)
 
 - [x] Design persists to localStorage, restores on reload
-- [ ] Export to file (.breakscale.json)
-- [ ] Import from file, drag-and-drop onto the canvas
-- [ ] Export as PNG / SVG
-- [ ] Share link: topology encoded in the URL hash, read-only for the recipient
+- [x] Export to file (.breakscale)
+- [x] Import from file, drag-and-drop onto the canvas
+- [x] Export as PNG / SVG
+- [x] Share link: topology encoded in the URL hash, read-only for the recipient
 - [ ] Named saves, a list of your own designs
 - [ ] Live collaboration (later, maybe)
 
@@ -48,6 +48,7 @@
 
 - [x] Search box over the 33 components
 - [x] Adjustable size for the rail, the inspector and the charts strip
+- [x] A visible button to bring the diagram back on screen
 - [ ] Minimap for large diagrams
 - [ ] Name the design + a "saved" indicator, so people know work persists
 - [ ] Canvas toggles surfaced in the inspector: snap, grid, minimap, edge labels

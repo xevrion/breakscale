@@ -99,6 +99,7 @@ export interface SettingsProps {
   onExport?: () => void;
   onImport?: () => void;
   onCopyLink?: () => void;
+  onExportImage?: (format: 'svg' | 'png') => void;
 }
 
 export function Settings({
@@ -107,6 +108,7 @@ export function Settings({
   onExport,
   onImport,
   onCopyLink,
+  onExportImage,
 }: SettingsProps) {
   const { mounted, closing, unmount } = usePresence(open);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -241,6 +243,36 @@ export function Settings({
                       <span className="st-row-label">Save to a file</span>
                       <span className="st-hint">
                         Downloads the whole design, notes and all.
+                      </span>
+                    </span>
+                  </button>
+                )}
+                {onExportImage && (
+                  <button
+                    type="button"
+                    className="st-action"
+                    onClick={() => onExportImage('png')}
+                  >
+                    <Glyph d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3M21 15l-5-5L5 21" />
+                    <span className="st-action-text">
+                      <span className="st-row-label">Save as a picture</span>
+                      <span className="st-hint">
+                        A PNG of the whole diagram, for a slide or a report.
+                      </span>
+                    </span>
+                  </button>
+                )}
+                {onExportImage && (
+                  <button
+                    type="button"
+                    className="st-action"
+                    onClick={() => onExportImage('svg')}
+                  >
+                    <Glyph d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM8 15l2-3 2 2 2-4 3 5" />
+                    <span className="st-action-text">
+                      <span className="st-row-label">Save as an SVG</span>
+                      <span className="st-hint">
+                        Stays sharp at any size, and the text is still text.
                       </span>
                     </span>
                   </button>

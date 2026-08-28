@@ -89,6 +89,7 @@ import {
   isSection,
 } from '../sim/annotations';
 import type { Annotation, AnnotationFont, Note, Section } from '../sim/annotations';
+import { serialiseSvg } from '../imageExport';
 import './Canvas.css';
 
 /* ------------------------------------------------------------------ *
@@ -462,6 +463,16 @@ export interface CanvasProps {
    * it was actually wanted.
    */
   armToolRef?: MutableRefObject<((tool: 'note' | 'section') => void) | null>;
+  /**
+   * Hands back the diagram as a standalone SVG string, framed to its own
+   * content rather than to the reader's current view.
+   *
+   * A ref rather than a prop the shell renders, for the same reason
+   * viewCenterRef is one: the shell needs to ASK the canvas something at the
+   * moment a button is pressed, and nothing should re-render to make that
+   * possible.
+   */
+  exportSvgRef?: MutableRefObject<(() => string | null) | null>;
   /** Fires when a tool is armed or disarmed, including by the N and B keys. */
   onToolChange?: (tool: 'note' | 'section' | null) => void;
   /**
@@ -3240,6 +3251,7 @@ export default function Canvas({
   spark,
   viewCenterRef,
   armToolRef,
+  exportSvgRef,
   onToolChange,
   fitSignal = 0,
   visibleRef,
@@ -3416,6 +3428,46 @@ export default function Canvas({
   useEffect(() => {
     onToolChange?.(tool);
   }, [tool, onToolChange]);
+
+  useEffect(() => {
+    if (!exportSvgRef) return;
+    exportSvgRef.current = () => {
+      const svg = surfaceRef.current?.querySelector('svg.cv-svg');
+      const nodes = topoRef.current.nodes;
+      if (!svg || nodes.length === 0) return null;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const n of nodes) {
+        if (n.x < minX) minX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.x + NODE_W > maxX) maxX = n.x + NODE_W;
+        if (n.y + NODE_H > maxY) maxY = n.y + NODE_H;
+      }
+      // Annotations sit outside the node bounds by design, so a frame drawn
+      // from the nodes alone would crop the notes explaining them.
+      for (const a of topoRef.current.annotations ?? []) {
+        const w = isSection(a) ? a.width : a.width;
+        const h = isSection(a) ? a.height : 0;
+        if (a.x < minX) minX = a.x;
+        if (a.y - 28 < minY) minY = a.y - 28;
+        if (a.x + w > maxX) maxX = a.x + w;
+        if (a.y + h > maxY) maxY = a.y + h;
+      }
+      const bg = getComputedStyle(document.documentElement)
+        .getPropertyValue('--bg')
+        .trim();
+      return serialiseSvg(
+        svg as SVGSVGElement,
+        { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+        bg || '#ffffff',
+      );
+    };
+    return () => {
+      exportSvgRef.current = null;
+    };
+  }, [exportSvgRef]);
 
   useEffect(() => {
     if (!armToolRef) return;
