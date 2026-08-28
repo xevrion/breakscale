@@ -33,7 +33,13 @@ export type VendorId = 'generic' | 'aws' | 'gcp' | 'azure';
 export interface VendorSize {
   /** Exactly as the vendor writes it, e.g. `db.r6g.large`. */
   name: string;
-  vcpu: number;
+  /**
+   * Absent where the vendor does not publish one in readable text. Azure
+   * Managed Redis states its per-SKU vCPU counts only inside an image, so
+   * those sizes omit this rather than carry a guessed number. `derive.ts`
+   * already treats a missing count as "nothing honest to say".
+   */
+  vcpu?: number;
   /** In the vendor's OWN unit. AWS and Azure publish GiB, GCP publishes GB. */
   memory: number;
   memoryUnit: 'GiB' | 'GB';

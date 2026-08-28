@@ -11,6 +11,9 @@ import {
 } from './nodeVisuals';
 import { Term } from './Tooltip';
 import { usePreference } from '../content/preferences';
+import { useVendor } from '../content/vendors/useVendor';
+import { nameFor } from '../content/vendors/lookup';
+import type { Vendor } from '../content/vendors/types';
 import { ANN_DND_MIME } from './annotationLayout';
 import './Palette.css';
 
@@ -212,9 +215,17 @@ const ANN_ROWS: {
  * substring match is predictable, and predictability beats cleverness when
  * the result is "the thing you wanted is not on screen".
  */
-function matchesKind(kind: NodeKind, group: KindGroup, needle: string): boolean {
+function matchesKind(
+  kind: NodeKind,
+  group: KindGroup,
+  needle: string,
+  vendor: Vendor | null,
+): boolean {
   return (
     KIND_NAME[kind].toLowerCase().includes(needle) ||
+    // The vendor name too, so someone who typed "RDS" finds the database
+    // even though the concept is what the rail is organised by.
+    nameFor(kind, vendor).toLowerCase().includes(needle) ||
     KIND_HINT[kind].toLowerCase().includes(needle) ||
     group.title.toLowerCase().includes(needle)
   );
@@ -259,6 +270,7 @@ export function Palette({ onAdd, onAddAnnotation, armedTool }: PaletteProps) {
    * silently extended the document's scroll box by ~634px.
    */
   const hintsOn = usePreference('tooltips');
+  const vendor = useVendor();
 
   const totalKinds = useMemo(
     () => KIND_GROUPS.reduce((n, g) => n + g.kinds.length, 0),
@@ -280,9 +292,9 @@ export function Palette({ onAdd, onAddAnnotation, armedTool }: PaletteProps) {
     if (!needle) return KIND_GROUPS;
     return KIND_GROUPS.map((g) => ({
       ...g,
-      kinds: g.kinds.filter((k) => matchesKind(k, g, needle)),
+      kinds: g.kinds.filter((k) => matchesKind(k, g, needle, vendor)),
     })).filter((g) => g.kinds.length > 0);
-  }, [needle]);
+  }, [needle, vendor]);
 
   const matchCount = useMemo(
     () => groups.reduce((n, g) => n + g.kinds.length, 0),
@@ -454,7 +466,7 @@ export function Palette({ onAdd, onAddAnnotation, armedTool }: PaletteProps) {
                       <span className="pal-glyph">
                         <Glyph kind={kind} />
                       </span>
-                      <span className="pal-name">{KIND_NAME[kind]}</span>
+                      <span className="pal-name">{nameFor(kind, vendor)}</span>
                     </button>
                     {/*
                       `bare` because the row is already a strong affordance

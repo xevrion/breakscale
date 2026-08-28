@@ -85,12 +85,17 @@ export function isSizedKind(kind: NodeKind): boolean {
  */
 export function deriveFromSize(kind: NodeKind, size: VendorSize): Derived | null {
   if (!isSizedKind(kind)) return null;
-  if (!Number.isFinite(size.vcpu) || size.vcpu <= 0) return null;
+
+  // A size with no published vCPU count gets nothing. Azure Managed Redis
+  // states its per-SKU counts only inside an image, and inventing one to
+  // fill the gap is the plausible-looking number AGENTS.md forbids.
+  const vcpu = size.vcpu;
+  if (typeof vcpu !== 'number' || !Number.isFinite(vcpu) || vcpu <= 0) return null;
 
   // A published max-connections figure is a REAL ceiling, so where the
   // vendor states one it wins over the vCPU rule of thumb. This is the one
   // place the derivation gets to stand on a citable number.
-  const fromVcpu = Math.max(1, Math.round(size.vcpu * SLOTS_PER_VCPU));
+  const fromVcpu = Math.max(1, Math.round(vcpu * SLOTS_PER_VCPU));
   const capacity =
     typeof size.maxConnections === 'number' && size.maxConnections > 0
       ? Math.min(fromVcpu, size.maxConnections)
