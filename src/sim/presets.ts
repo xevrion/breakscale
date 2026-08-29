@@ -900,7 +900,14 @@ const asyncWorkers: Topology = {
  *    ceiling each request needs one attempt and load passes through 1:1.
  *    Once queueing pushes past 250ms, every request starts issuing all 3
  *    attempts, tripling the offered load onto a db already at its limit,
- *    and the system collapses. Stable to ~90 rps (2x), collapses ~110 (2.4x).
+ *    and the system collapses. Stable to 80 rps (1.8x); collapse begins at
+ *    85 (1.9x) and is total by 90 (2x).
+ *
+ *    Measured, not estimated, and the onset is genuinely stochastic: at 85
+ *    rps four seeds give 39.6%, 59.1%, 93.0% and 95.0% failures, because
+ *    whether the queue tips depends on the timing of the first slow batch.
+ *    An earlier note here claimed collapse at 2.4x, which is well past the
+ *    interesting part: by then it is uniformly dead.
  * ------------------------------------------------------------------ */
 
 const retryStorm: Topology = {
@@ -927,7 +934,7 @@ const retryStorm: Topology = {
       'rt-note-storm',
       40,
       320,
-      'The database handles 100 a second. Once waiting passes the 250ms timeout on the API, every request starts retrying three times, so the load triples onto a database that was already full. Drag past about 2.4x and watch it collapse instead of level off.',
+      'The database handles 100 a second. Once waiting passes the 250ms timeout on the API, every request starts retrying three times, so the load triples onto a database that was already full. It is steady at 80 a second. Push to 85 and it starts losing most of its traffic; by 90 almost none gets through.',
       340,
     ),
   ],
