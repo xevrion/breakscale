@@ -72,9 +72,11 @@ Two git hooks are installed when you run `bun install`:
 - **On push**, the full CI suite runs locally: typecheck, lint, format, tests. If any of it fails
   the push is blocked, with the failure printed.
 
-This mirrors `.github/workflows/ci.yml` exactly, so a push that succeeds locally will not turn CI
-red. If you ever need to bypass a hook deliberately, `git push --no-verify` works, but expect CI to
-catch whatever the hook would have.
+This mirrors the checks in `.github/workflows/ci.yml`, with one gap: the hook runs on your machine
+only, while CI also runs the tests and the build on Windows. A push that is green locally can still
+turn CI red if a change is sensitive to path separators or drive letters. If you ever need to
+bypass a hook deliberately, `git push --no-verify` works, but expect CI to catch whatever the hook
+would have.
 
 ## How the project is laid out
 
