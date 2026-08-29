@@ -36,9 +36,12 @@ system-design terms that established course sites already hold.
 - [x] Serve the glossary at /glossary, not only /glossary.html
       It 404'd in production while the sitemap advertised it. Fixed with a
       rewrite in vercel.json.
-- [ ] Verify the domain in Google Search Console, submit the sitemap
-      DNS TXT verification through Cloudflare, so it survives redeploys.
-      Bing Webmaster Tools as well; it can import the Search Console property.
+- [x] Verify the domain in Google Search Console, submit the sitemap
+      Verified by DNS. Sitemap read the same day, both pages discovered.
+- [x] Redirect www and the old deployment URL to the apex (308)
+- [ ] Bing Webmaster Tools; it can import the Search Console property.
+      Worth doing because Copilot cites the Bing index, which is separate
+      from Google's.
 - [ ] Per-example pages, one per preset
       23 presets, each with a topology, a lesson, and measured numbers.
       Generate them the way tools/glossary-page.ts generates the glossary so
