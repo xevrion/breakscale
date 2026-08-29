@@ -46,10 +46,11 @@ system-design terms that established course sites already hold.
       23 presets, each with a topology, a lesson, and measured numbers.
       Generate them the way tools/glossary-page.ts generates the glossary so
       they cannot drift from the presets.
-- [ ] A title that matches what people search for
-      The page title is "Breakscale", which only finds people who already
-      know the name. Competing tools lead with the query itself. One line,
-      and the highest ratio of effect to effort left in this list.
+- [x] A title that matches what people search for
+- [x] Serve /favicon.ico as well as the SVG
+      Clients request that path by convention whatever the HTML declares, so
+      an SVG-only setup left it 404ing and the search result showing a
+      placeholder. Also added an apple-touch-icon.
 - [ ] Static landing content
       The app is a client-rendered SPA, so a crawler sees an empty body. The
       glossary carries the only crawlable prose on the site, and it is not
