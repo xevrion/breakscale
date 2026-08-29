@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** Every .tsx under src, minus tests. */
 function componentFiles(dir: string, out: string[] = []): string[] {
@@ -37,7 +38,7 @@ function withoutComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 }
 
-const ROOT = new URL('.', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('.', import.meta.url));
 
 describe('interface copy', () => {
   it('uses no em dashes outside comments', () => {
