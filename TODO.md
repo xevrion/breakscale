@@ -9,12 +9,9 @@
 ## Before going public
 
 - [x] Deploy (breakscale.vercel.app)
-- [x] Custom domain (breakscale.tech, on Cloudflare DNS)
-      Registrar Namify, nameservers cora/koa.ns.cloudflare.com, A records for
-      apex and www at 76.76.21.21, DNS only (NOT proxied: Vercel needs a
-      direct connection to issue its certificate). SPF and DMARC set to
-      reject, since the domain sends no mail. SITE_ORIGIN is set in Vercel
-      production and every host reference derives from tools/site.ts.
+- [x] Custom domain (breakscale.tech)
+      Every host reference derives from tools/site.ts, so moving origin is one
+      environment variable rather than a search and replace.
 - [x] Logo + favicon
 - [x] OG image
 - [x] README banner (screenshots still to come)
@@ -25,18 +22,10 @@
 
 ## SEO / AEO
 
-The honest framing, because it changes what is worth doing. Google's own AI
-optimization guide says GEO and AEO are rebranded labels for ordinary SEO, and
-that it ignores llms.txt outright. So there is no separate AI checklist to
-work through, there is one pile of fundamentals that happens to feed both.
-
-Ranking first for "system design" is not reachable and chasing it wastes the
-effort. Educative, ByteByteGo, DesignGurus and system-design-primer (330k
-stars) hold those queries with years of authority behind them. What is open is
-the set of queries nobody has answered well: "system design simulator",
-"visualize a retry storm", "what does p99 latency actually look like",
-"simulate a thundering herd". Breakscale is the best answer to those and the
-only one that runs the experiment.
+Search and AI-answer visibility are the same work: ordinary SEO fundamentals,
+applied once. Target the queries this tool actually answers (system design
+simulator, retry storms, latency percentiles under load) rather than the broad
+system-design terms that established course sites already hold.
 
 - [x] Meta tags, og:, twitter:
 - [x] robots.txt
@@ -44,55 +33,27 @@ only one that runs the experiment.
 - [x] canonical + og:url
 - [x] JSON-LD: SoftwareApplication, LearningResource
 - [x] Glossary as crawlable HTML, not locked in the bundle
-- [x] Glossary served at /glossary, not just /glossary.html
-      It was 404ing in production while the sitemap advertised it, so the one
-      page with 4,828 words of crawlable prose was invisible and the sitemap
-      pointed at a dead URL. A rewrite in vercel.json fixes it.
-
-- [ ] Static landing content (LOW priority, and here is why)
-      The app renders nothing without JavaScript: curl the home page and the
-      body is empty. That sounds fatal until you check the thing we are
-      modelling ourselves on. Excalidraw serves ten words and a "You need to
-      enable JavaScript to run this app" message, has no JSON-LD at all, and
-      its robots.txt says `Allow: /$`, which permits only the root. They rank
-      anyway.
-      So this is not what stands between us and being found, and it is days of
-      work. We already beat them on every technical measure that can be
-      audited: three schema types to their zero, a 4,828-word crawlable
-      glossary to their nothing, a full sitemap to their unreferenced one.
-      What actually carries Excalidraw is nine years, 105k stars, a Wikipedia
-      entry, an npm package embedded everywhere, and constant Reddit and
-      YouTube mentions. Brand mentions correlate roughly 3x more strongly with
-      AI citation than backlinks do. That is won by the launch posts, the open
-      issues and the contributors, not by a renderer.
-
-- [ ] Per-example pages, one static page per preset
-      23 presets, each with a topology, a lesson, and numbers from an actual
-      simulation. Worth doing, but for the right reason: not as schema fodder,
-      as the sort of page someone links to from a Reddit thread about retry
-      storms. Content nobody else has, aimed at questions nobody answers well.
-      Generate them the way tools/glossary-page.ts already generates the
-      glossary so they cannot drift from the presets.
-
-- [ ] Verify the domain in Google Search Console and submit the sitemap
-      DNS verification via a Cloudflare TXT record is the least fragile
-      method. Then submit https://breakscale.tech/sitemap.xml and request
-      indexing on the home page and the glossary.
-      Bing Webmaster Tools too: Copilot cites the Bing index, and Bing can
-      import the Search Console property directly.
-
-- [ ] Run the SEO / AEO skills (/seo-audit, /seo-geo, /seo-schema) for a full
-      pass. AFTER the custom art lands, not before: the audit checks the OG
-      image, favicon and logo, so running it against the code-drawn
-      placeholders would just generate findings that the real assets fix.
+- [x] Serve the glossary at /glossary, not only /glossary.html
+      It 404'd in production while the sitemap advertised it. Fixed with a
+      rewrite in vercel.json.
+- [ ] Verify the domain in Google Search Console, submit the sitemap
+      DNS TXT verification through Cloudflare, so it survives redeploys.
+      Bing Webmaster Tools as well; it can import the Search Console property.
+- [ ] Per-example pages, one per preset
+      23 presets, each with a topology, a lesson, and measured numbers.
+      Generate them the way tools/glossary-page.ts generates the glossary so
+      they cannot drift from the presets.
+- [ ] Static landing content
+      The app is a client-rendered SPA, so a crawler sees an empty body. Low
+      priority: the glossary already carries crawlable content, and this is a
+      large change for an uncertain gain.
 - [ ] Replace the generated art with custom OG image, favicon and logo
-      Redrawn in code around the knee curve, derived from M/M/1 rather than
-      styled by eye. Keep if it holds up, otherwise hand-make.
-- [ ] Screenshots for the README (a retry storm collapsing is the one to get)
-- [ ] Per-example pages
-- [x] llms.txt
+      Hand-made rather than drawn in code.
+- [ ] Run the SEO / AEO skills for a full pass, after the custom art lands
+      The audit checks the OG image, favicon and logo, so running it against
+      placeholders would only produce findings the real assets fix.
 
-## Save / share (excalidraw parity)
+## Save / share (parity with the canvas tools people expect)
 
 - [x] Design persists to localStorage, restores on reload
 - [x] Export to file (.breakscale)
@@ -102,7 +63,7 @@ only one that runs the experiment.
 - [x] Named saves, a list of your own designs
 - [ ] Live collaboration (later, maybe)
 
-## UI ideas (from a competitor's build, worth taking)
+## Interface
 
 - [x] Search box over the 33 components
 - [x] Adjustable size for the rail, the inspector and the charts strip
@@ -124,21 +85,23 @@ only one that runs the experiment.
 - [ ] Challenges ("5k rps under 200ms p99")
 - [x] Request tracer (queued vs service time)
 - [x] Cost model
-- [ ] Traffic scenarios: ramp, spike, diurnal, thundering herd
+- [ ] Traffic scenarios: ramp, spike and diurnal are in the engine and
+      tested; they still need a control in the inspector. Thundering herd is
+      not started, and is correlated arrivals rather than a rate curve.
 - [ ] Networking layer (bandwidth + loss; latency already works)
 
 ## Bugs / gaps
 
-- [ ] Safari pinch broken (uses gesturestart, not ctrl+wheel)
+- [ ] Safari pinch zoom (#9)
 - [ ] Lint warnings in App.tsx, Glossary.tsx, Metrics.tsx
-- [ ] No visual regression tests
+- [ ] Visual regression tests (#14)
 - [ ] Never tested on real smartboard or tablet
 
 ## Done
 
 - [x] MIT, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, templates
 - [x] CI + pre-push hooks, 23 labels, repo description and topics
-- [x] Engine: 33 components, 23 examples, 372 tests
+- [x] Engine: 33 components, 23 examples
 - [x] Undo/redo, canvas shortcuts, edge routing, floating panels
 - [x] Light theme, Lucide icons, icon transport controls
 - [x] Responsive 2560 down to 960
