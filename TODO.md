@@ -46,10 +46,15 @@ system-design terms that established course sites already hold.
       23 presets, each with a topology, a lesson, and measured numbers.
       Generate them the way tools/glossary-page.ts generates the glossary so
       they cannot drift from the presets.
+- [ ] A title that matches what people search for
+      The page title is "Breakscale", which only finds people who already
+      know the name. Competing tools lead with the query itself. One line,
+      and the highest ratio of effect to effort left in this list.
 - [ ] Static landing content
-      The app is a client-rendered SPA, so a crawler sees an empty body. Low
-      priority: the glossary already carries crawlable content, and this is a
-      large change for an uncertain gain.
+      The app is a client-rendered SPA, so a crawler sees an empty body. The
+      glossary carries the only crawlable prose on the site, and it is not
+      the page that would rank for "system design simulator". Measured
+      against what currently ranks for that query, this is the gap.
 - [ ] Replace the generated art with custom OG image, favicon and logo
       Hand-made rather than drawn in code.
 - [ ] Run the SEO / AEO skills for a full pass, after the custom art lands
