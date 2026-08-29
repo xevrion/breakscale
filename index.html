@@ -43,6 +43,10 @@
       a tool; LearningResource is what actually describes this one, and almost
       nothing in the system design space claims it. Both are declared because
       the two answer different questions: "what is this" and "who is it for".
+
+      Organization carries sameAs to the repository, which is the one link
+      that ties this site to the project as a single entity rather than two
+      unrelated things that happen to share a name.
     -->
     <script type="application/ld+json">
       {
@@ -58,6 +62,13 @@
             "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
             "license": "https://opensource.org/licenses/MIT",
             "isAccessibleForFree": true
+          },
+          {
+            "@type": "Organization",
+            "name": "Breakscale",
+            "url": "https://breakscale.vercel.app/",
+            "description": "An open source discrete-event simulator for learning how distributed systems behave under load.",
+            "sameAs": ["https://github.com/xevrion/breakscale"]
           },
           {
             "@type": "LearningResource",
