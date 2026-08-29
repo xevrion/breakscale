@@ -28,10 +28,12 @@ import type {
 import {
   ICON_BOX,
   ICON_STROKE,
+  KIND_GROUPS,
   KIND_ICON,
   KIND_NAME,
   NODE_DND_MIME,
   cellStrip,
+  groupOfKind,
   stackBadge,
   stackLayers,
 } from './nodeVisuals';
@@ -5361,6 +5363,32 @@ export default function Canvas({
     return m;
   }, [topology.nodes]);
 
+  /**
+   * What the design is made of, by category: "4 traffic, 7 compute, 3 data".
+   *
+   * The total says how big a diagram is; the breakdown says what kind of
+   * system it is, which is what a reader is trying to work out about a
+   * reconstruction they did not build themselves.
+   *
+   * Groups print in taxonomy order, not by size, so the line matches the
+   * order of the rail and does not reshuffle itself every time a node is
+   * dropped. Empty groups are left out: eleven of the twenty-three examples
+   * touch only three of the six, and "0 messaging" on a three-box chain is
+   * noise. The group's `id` is the name printed, because "specialised
+   * stores" is too long for a corner that also has to hold two totals and a
+   * clock.
+   */
+  const nodeGroupSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const n of topology.nodes) {
+      const group = groupOfKind(n.kind);
+      if (group) counts.set(group.id, (counts.get(group.id) ?? 0) + 1);
+    }
+    return KIND_GROUPS.filter((g) => counts.has(g.id))
+      .map((g) => `${counts.get(g.id)} ${g.id}`)
+      .join(', ');
+  }, [topology.nodes]);
+
   const detail: 0 | 1 | 2 = view.k >= DETAIL_ZOOM ? 2 : view.k >= MINIMAL_ZOOM ? 1 : 0;
   const showEdgeLabels = view.k >= 1;
 
@@ -6001,6 +6029,13 @@ export default function Canvas({
             {topology.nodes.length}{' '}
             {topology.nodes.length === 1 ? 'component' : 'components'}
           </span>
+          {/* The breakdown elaborates the total above it, so it sits next to
+              it rather than at the end. Commas inside one span, not the flex
+              gap: the gap separates FACTS, and split across spans "4 traffic
+              7 compute" would read as two more of them. A comma inherits
+              --text-faint from the text around it, so it carries none of the
+              contrast problem the old "·" separator did. */}
+          <span className="cv-ledger-groups">{nodeGroupSummary}</span>
           <span>
             {topology.edges.length}{' '}
             {topology.edges.length === 1 ? 'connection' : 'connections'}

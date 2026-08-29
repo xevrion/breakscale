@@ -1125,6 +1125,25 @@
   text-transform: none;
 }
 
+/* The category breakdown drops out well before the phone breakpoint, because
+   it is by far the longest thing in this row and it runs INTO the zoom
+   cluster rather than off the screen.
+
+   Measured in the browser rather than estimated. The widest breakdown any
+   example produces is Discord's "6 traffic, 9 compute, 1 data, 2 stores,
+   2 messaging, 1 control", which takes the ledger to 737px, ending at x=1029.
+   The zoom cluster sits 181px in from the right edge, so the two meet at a
+   viewport of 1210px. 1240 leaves a little room rather than sitting on the
+   number. Above it the row is comfortable at every width up to 2560.
+
+   The totals stay at every size. They are what a reader glances at; the
+   breakdown is the elaboration, so it is the right thing to lose first. */
+@media (max-width: 1240px) {
+  .cv-ledger-groups {
+    display: none;
+  }
+}
+
 /* The contextual hint line: top centre, in the slot the armed-link
    instruction also uses, so the two never stack. Quiet text straight on the
    canvas, no border, no surface, no motion — guidance, not chrome.

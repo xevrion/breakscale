@@ -459,3 +459,88 @@ export function cellStrip(count: number, width: number, gap = 1.5): CellStrip {
   const w = Math.max(0.75, slot - g);
   return { x: (i: number) => i * slot, w, dense };
 }
+
+/* ------------------------------------------------------------------ *
+ * The kind taxonomy.
+ *
+ * Thirty-three kinds listed flat is a wall of names nobody reads. Grouped,
+ * each group answers one question, so a student looking for "how do I stop
+ * this melting" goes straight to Control without reading the other names.
+ * It is a lookup index, not decoration.
+ *
+ * It lives here rather than in Palette.tsx because the rail is no longer the
+ * only reader: the canvas ledger counts a design by group too, and a second
+ * copy of the taxonomy is how the two would drift. This module is already
+ * where per-kind presentation data lives (KIND_ICON, KIND_NAME, KIND_TERM),
+ * and it exports no components, so it is also the one of the two files that
+ * can export a constant without tripping `only-export-components`.
+ *
+ * `id` doubles as the short name. Every one of the six is a single word that
+ * reads correctly in running text, which is what the ledger prints where
+ * `title` would be too long ("stores", not "Specialised stores").
+ * ------------------------------------------------------------------ */
+
+export interface KindGroup {
+  id: string;
+  title: string;
+  kinds: NodeKind[];
+}
+
+export const KIND_GROUPS: KindGroup[] = [
+  { id: 'traffic', title: 'Traffic', kinds: ['client', 'lb', 'cdn', 'edgecompute'] },
+  {
+    id: 'compute',
+    title: 'Compute',
+    kinds: ['service', 'worker', 'queue', 'retryqueue', 'transcoder'],
+  },
+  {
+    id: 'data',
+    title: 'Data',
+    kinds: ['db', 'cache', 'writebehind', 'replica', 'shard'],
+  },
+  {
+    // The polyglot-persistence shelf: each of these exists because putting
+    // its workload in the main database is the mistake it teaches against.
+    id: 'stores',
+    title: 'Specialised stores',
+    kinds: [
+      'objectstore',
+      'searchindex',
+      'timeseriesdb',
+      'graphdb',
+      'vectordb',
+      'coldstorage',
+    ],
+  },
+  {
+    // How services talk when it is not one request calling one server:
+    // logs, topics, sockets, functions and jobs on a clock.
+    id: 'messaging',
+    title: 'Messaging',
+    kinds: ['streambroker', 'pubsub', 'websocket', 'lambda', 'cron'],
+  },
+  {
+    id: 'control',
+    title: 'Control',
+    kinds: [
+      'ratelimiter',
+      'loadshedder',
+      'breaker',
+      'bulkhead',
+      'autoscaler',
+      'region',
+      'apigateway',
+      'sidecar',
+    ],
+  },
+];
+
+/** Which group a kind belongs to, resolved once rather than scanned per call. */
+const GROUP_OF_KIND = new Map<NodeKind, KindGroup>();
+for (const group of KIND_GROUPS) {
+  for (const kind of group.kinds) GROUP_OF_KIND.set(kind, group);
+}
+
+export function groupOfKind(kind: NodeKind): KindGroup | undefined {
+  return GROUP_OF_KIND.get(kind);
+}
