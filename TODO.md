@@ -9,9 +9,12 @@
 ## Before going public
 
 - [x] Deploy (breakscale.vercel.app)
-- [ ] Custom domain (breakscale.dev?)
-      BLOCKS the SEO work below: canonical, og:url, sitemap and llms.txt all
-      name the host, so doing them twice is wasted. Domain first.
+- [x] Custom domain (breakscale.tech, on Cloudflare DNS)
+      Registrar Namify, nameservers cora/koa.ns.cloudflare.com, A records for
+      apex and www at 76.76.21.21, DNS only (NOT proxied: Vercel needs a
+      direct connection to issue its certificate). SPF and DMARC set to
+      reject, since the domain sends no mail. SITE_ORIGIN is set in Vercel
+      production and every host reference derives from tools/site.ts.
 - [x] Logo + favicon
 - [x] OG image
 - [x] README banner (screenshots still to come)
@@ -22,12 +25,56 @@
 
 ## SEO / AEO
 
+The honest framing, because it changes what is worth doing. Google's own AI
+optimization guide says GEO and AEO are rebranded labels for ordinary SEO, and
+that it ignores llms.txt outright. So there is no separate AI checklist to
+work through, there is one pile of fundamentals that happens to feed both.
+
+Ranking first for "system design" is not reachable and chasing it wastes the
+effort. Educative, ByteByteGo, DesignGurus and system-design-primer (330k
+stars) hold those queries with years of authority behind them. What is open is
+the set of queries nobody has answered well: "system design simulator",
+"visualize a retry storm", "what does p99 latency actually look like",
+"simulate a thundering herd". Breakscale is the best answer to those and the
+only one that runs the experiment.
+
 - [x] Meta tags, og:, twitter:
 - [x] robots.txt
 - [x] sitemap.xml
 - [x] canonical + og:url
 - [x] JSON-LD: SoftwareApplication, LearningResource
 - [x] Glossary as crawlable HTML, not locked in the bundle
+- [x] Glossary served at /glossary, not just /glossary.html
+      It was 404ing in production while the sitemap advertised it, so the one
+      page with 4,828 words of crawlable prose was invisible and the sitemap
+      pointed at a dead URL. A rewrite in vercel.json fixes it.
+
+- [ ] THE BIG ONE: the app renders nothing without JavaScript
+      `curl` the home page and the body is empty. Zero visible words. AI
+      crawlers do not execute JavaScript, so ChatGPT, Perplexity and Claude
+      see a blank page, and Googlebot has to spend its render budget to see
+      anything at all. The glossary is the only page with real crawlable text
+      and that is exactly why it is the only page with a chance of being
+      cited.
+      The fix is a static, server-rendered landing page: what Breakscale is,
+      what a retry storm is, what p99 means, the measured numbers, all in HTML
+      that exists before any script runs. The app itself can stay a client
+      SPA. Everything else in this section is worth less than this one item.
+
+- [ ] Per-example pages, one static page per preset
+      23 presets, each with a topology, a lesson, and numbers that come from
+      an actual simulation. That is 23 pages of content nobody else on the
+      internet has, aimed at queries nobody currently answers. Generate them
+      the way tools/glossary-page.ts already generates the glossary, so they
+      cannot drift from the presets.
+
+- [ ] Verify the domain in Google Search Console and submit the sitemap
+      DNS verification via a Cloudflare TXT record is the least fragile
+      method. Then submit https://breakscale.tech/sitemap.xml and request
+      indexing on the home page and the glossary.
+      Bing Webmaster Tools too: Copilot cites the Bing index, and Bing can
+      import the Search Console property directly.
+
 - [ ] Run the SEO / AEO skills (/seo-audit, /seo-geo, /seo-schema) for a full
       pass. AFTER the custom art lands, not before: the audit checks the OG
       image, favicon and logo, so running it against the code-drawn
