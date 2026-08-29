@@ -8,8 +8,24 @@
       name="description"
       content="Live system design simulator. Drag the load up and watch latency, queues and errors respond in real time."
     />
+    <!--
+      Two icon declarations, not one. The SVG is what a modern browser uses and
+      the only one that stays sharp at any size, but plenty of clients ask for
+      /favicon.ico by convention regardless of what is declared here, and
+      Google's crawler is one of them. Serving only the SVG left that request
+      404ing and the search result showing a placeholder globe.
+    -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Breakscale</title>
+    <link rel="icon" sizes="48x48" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!--
+      The title leads with what people search for, not with the product name.
+      "Breakscale" alone only finds readers who already know it exists; the
+      name still comes first for anyone who does, and the phrase after it is
+      what someone types when they do not.
+    -->
+    <title>Breakscale: System Design Simulator You Can Break</title>
 
     <!-- Social preview. Without these a shared link renders as a bare URL,
          which for a visual tool throws away the one thing most likely to make
