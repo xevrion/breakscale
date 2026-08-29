@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://breakscale.vercel.app"><strong>Try it</strong></a>
+  <a href="https://breakscale.tech"><strong>Try it</strong></a>
 </p>
 
 <p align="center">
