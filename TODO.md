@@ -49,24 +49,30 @@ only one that runs the experiment.
       page with 4,828 words of crawlable prose was invisible and the sitemap
       pointed at a dead URL. A rewrite in vercel.json fixes it.
 
-- [ ] THE BIG ONE: the app renders nothing without JavaScript
-      `curl` the home page and the body is empty. Zero visible words. AI
-      crawlers do not execute JavaScript, so ChatGPT, Perplexity and Claude
-      see a blank page, and Googlebot has to spend its render budget to see
-      anything at all. The glossary is the only page with real crawlable text
-      and that is exactly why it is the only page with a chance of being
-      cited.
-      The fix is a static, server-rendered landing page: what Breakscale is,
-      what a retry storm is, what p99 means, the measured numbers, all in HTML
-      that exists before any script runs. The app itself can stay a client
-      SPA. Everything else in this section is worth less than this one item.
+- [ ] Static landing content (LOW priority, and here is why)
+      The app renders nothing without JavaScript: curl the home page and the
+      body is empty. That sounds fatal until you check the thing we are
+      modelling ourselves on. Excalidraw serves ten words and a "You need to
+      enable JavaScript to run this app" message, has no JSON-LD at all, and
+      its robots.txt says `Allow: /$`, which permits only the root. They rank
+      anyway.
+      So this is not what stands between us and being found, and it is days of
+      work. We already beat them on every technical measure that can be
+      audited: three schema types to their zero, a 4,828-word crawlable
+      glossary to their nothing, a full sitemap to their unreferenced one.
+      What actually carries Excalidraw is nine years, 105k stars, a Wikipedia
+      entry, an npm package embedded everywhere, and constant Reddit and
+      YouTube mentions. Brand mentions correlate roughly 3x more strongly with
+      AI citation than backlinks do. That is won by the launch posts, the open
+      issues and the contributors, not by a renderer.
 
 - [ ] Per-example pages, one static page per preset
-      23 presets, each with a topology, a lesson, and numbers that come from
-      an actual simulation. That is 23 pages of content nobody else on the
-      internet has, aimed at queries nobody currently answers. Generate them
-      the way tools/glossary-page.ts already generates the glossary, so they
-      cannot drift from the presets.
+      23 presets, each with a topology, a lesson, and numbers from an actual
+      simulation. Worth doing, but for the right reason: not as schema fodder,
+      as the sort of page someone links to from a Reddit thread about retry
+      storms. Content nobody else has, aimed at questions nobody answers well.
+      Generate them the way tools/glossary-page.ts already generates the
+      glossary so they cannot drift from the presets.
 
 - [ ] Verify the domain in Google Search Console and submit the sitemap
       DNS verification via a Cloudflare TXT record is the least fragile
