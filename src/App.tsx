@@ -19,6 +19,10 @@ import type { NodeConfig, NodeKind, SimNode, SimSnapshot, Topology } from './sim
 import { useCoarsePointer } from './useCoarsePointer';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
+import { CHALLENGES, challengeById } from './sim/challenges';
+import { applyLoad, evaluate } from './sim/challenge';
+import { ChallengePanel } from './components/Challenge';
+import { Challenges } from './components/Challenges';
 import type { Preset } from './sim/presets';
 import Canvas, {
   GRID,
@@ -641,6 +645,18 @@ export default function App() {
   const backupInputRef = useRef<HTMLInputElement | null>(null);
 
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const [challengesOpen, setChallengesOpen] = useState(false);
+
+  /**
+   * The challenge being attempted, by id, or null for the free sandbox.
+   *
+   * Only the id is held: the brief itself is a module constant, and storing
+   * a copy would let a challenge edited in source drift from one already in
+   * progress. Not persisted, because a brief resumed days later with a
+   * half-finished design and no memory of the goal is worse than starting it
+   * again.
+   */
+  const [challengeId, setChallengeId] = useState<string | null>(null);
 
   /* ---------------- panel layout ---------------- */
 
@@ -824,6 +840,11 @@ export default function App() {
         label: 'Your designs',
         icon: 'M4 4a2 2 0 0 1 2-2h7l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM13 2v5h5M9 13h6M9 17h6',
         onSelect: () => setDesignsOpen(true),
+      },
+      {
+        label: 'Challenges',
+        icon: 'M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22M18 2H6v7a6 6 0 0 0 12 0z',
+        onSelect: () => setChallengesOpen(true),
       },
       {
         label: 'Examples',
@@ -1967,8 +1988,42 @@ export default function App() {
       // Deep copy: presets are module-level constants and must never be
       // mutated by editing the loaded system.
       replaceDesign(structuredClone(preset.topology), preset.id, 'example load');
+      // Loading an example by hand leaves any brief behind: the design the
+      // brief was judging is gone, so continuing to score it would be
+      // scoring something else.
+      setChallengeId(null);
     },
     [replaceDesign],
+  );
+
+  /**
+   * Start a brief: load its preset and set the load it is judged at.
+   *
+   * The load is applied to the topology rather than held beside it, so the
+   * slider shows the number the brief actually states and a reader can move
+   * it. Turning the traffic down until the goals are met is not a way to
+   * cheat, because the goals are only ever read at the stated load.
+   */
+  const handleStartChallenge = useCallback(
+    (id: string) => {
+      const challenge = challengeById(id);
+      if (!challenge) return;
+      const preset = PRESETS.find((p) => p.id === challenge.presetId);
+      if (!preset) return;
+      const topology = structuredClone(preset.topology);
+      applyLoad(topology, challenge.loadRps);
+      replaceDesign(topology, preset.id, 'challenge start');
+      setChallengeId(id);
+    },
+    [replaceDesign],
+  );
+
+  /* The live verdict. Recomputed per snapshot rather than on a timer, so the
+     panel and the numbers it quotes always come from the same tick. */
+  const challenge = challengeId ? challengeById(challengeId) : undefined;
+  const challengeResult = useMemo(
+    () => (challenge && snapshot ? evaluate(challenge, snapshot) : null),
+    [challenge, snapshot],
   );
 
   /* ---------------- design files ----------------
@@ -2725,6 +2780,13 @@ export default function App() {
               never see it. Its rect is the canvas minus every open panel.
             */}
             <div ref={stageSafeRef} className="stage-safe" aria-hidden="true" />
+            {challenge && challengeResult ? (
+              <ChallengePanel
+                challenge={challenge}
+                result={challengeResult}
+                onGiveUp={() => setChallengeId(null)}
+              />
+            ) : null}
             <button
               type="button"
               className="btn btn-sm btn-icon stage-toggle stage-toggle-library"
@@ -2951,6 +3013,12 @@ export default function App() {
         presets={PRESETS}
         activePresetId={presetId}
         onLoad={handleLoadPreset}
+      />
+      <Challenges
+        open={challengesOpen}
+        onClose={() => setChallengesOpen(false)}
+        challenges={CHALLENGES}
+        onStart={handleStartChallenge}
       />
     </div>
   );

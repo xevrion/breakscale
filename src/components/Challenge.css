@@ -1,0 +1,148 @@
+/* ==========================================================================
+   The challenge panel.
+
+   Floats over the canvas at the top left, in the space the components rail
+   occupies when it is open, because a brief and the diagram it is about have
+   to be readable at the same time. Same island treatment as the bar above
+   it: an opaque surface, since live numbers on a moving diagram cannot be
+   read.
+   ========================================================================== */
+
+.chal {
+  position: absolute;
+  top: var(--bar-clear);
+  /* Right, not left. The components rail lives on the left and is open by
+     default, and solving a brief means reaching for it: a panel that covers
+     the parts you need to change is a panel in the way. The right is empty
+     unless something is selected, and the rule below yields to the inspector
+     when it is. */
+  right: var(--sp-3);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: 320px;
+  max-width: calc(100vw - var(--sp-3) * 2);
+  padding: var(--sp-4);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+/* Passing is the one state that earns colour on the frame. It is the answer
+   to the question the panel asks, and a reader should be able to see it
+   without reading a word. */
+.chal.is-passed {
+  border-color: var(--ok);
+}
+
+.chal-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chal-kicker {
+  color: var(--text-faint);
+}
+
+.chal-name {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-med);
+  line-height: var(--lh-tight);
+}
+
+.chal-brief {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+.chal-goals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A goal is a row of three: what is measured, what it reads now, and what it
+   has to reach. The target stays visible after a goal is met, so the reader
+   can see how much room they have rather than only that they are past it. */
+.chal-goal {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 var(--sp-3);
+  align-items: baseline;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.chal-goal-name {
+  font-size: var(--fs-sm);
+}
+
+.chal-goal-actual {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-num);
+  /* Unmet is the loud state, not met: a reader scanning the panel is looking
+     for what is still wrong. */
+  color: var(--danger);
+}
+
+.chal-goal.is-met .chal-goal-actual {
+  color: var(--ok);
+}
+
+.chal-goal-target {
+  grid-column: 1 / -1;
+  color: var(--text-faint);
+}
+
+.chal-verdict {
+  margin: 0;
+  color: var(--ok);
+  font-size: var(--fs-sm);
+}
+
+.chal-hint {
+  margin: 0;
+  padding-top: var(--sp-3);
+  border-top: var(--bw) solid var(--border);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+.chal-exit {
+  align-self: flex-start;
+}
+
+/* Selecting a component opens the inspector in this same corner, and the
+   inspector is what the reader selected the component to use. The brief
+   steps aside rather than fighting it: still readable, no longer the thing
+   in front. */
+.app-body.has-inspector .chal {
+  right: calc(var(--ins-w) + var(--sp-3) * 2);
+}
+
+/* On a phone the panel is the whole width and sits under the header, where
+   the sheets do not reach. */
+@media (max-width: 720px) {
+  .chal {
+    left: var(--sp-3);
+    right: var(--sp-3);
+    width: auto;
+  }
+
+  /* The inspector is a sheet over the canvas here, not a rail beside it, so
+     there is nothing to step aside from. */
+  .app-body.has-inspector .chal {
+    right: var(--sp-3);
+  }
+}
