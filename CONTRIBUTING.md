@@ -16,7 +16,15 @@ describe the approach. It takes a few minutes and it saves you writing something
 be rewritten.
 
 **Want to work on an existing issue?** Comment on it and it will be assigned to you, so two people
-do not build the same thing.
+do not build the same thing. You do not have to wait for the assignment to land before you start,
+it is there to stop collisions rather than to gate you.
+
+Issues carry labels that say what they are and roughly where they live. `good first issue` means
+what it says: each one names the file and usually the line the fix probably belongs on, so you are
+not hunting for the starting point. `help wanted` is a real task that is not beginner-sized.
+`discussion` means the approach is not settled and code is premature, so comment before you build.
+The `area:` labels (`area:sim`, `area:canvas`, `area:metrics`, `area:presets`, `area:content`) tell
+you which part of the codebase you would be in.
 
 Issues are triaged roughly weekly. If something sits longer than that, a nudge on the thread is
 welcome rather than annoying.
@@ -25,14 +33,26 @@ welcome rather than annoying.
 
 You need [Bun](https://bun.sh). Node 20 or newer also works if you prefer npm.
 
+Fork the repo on GitHub first, then:
+
 ```bash
-git clone https://github.com/xevrion/breakscale.git
+git clone https://github.com/YOUR-USERNAME/breakscale.git
 cd breakscale
 bun install
 bun dev
 ```
 
 The app runs at http://localhost:5173.
+
+Work on a branch rather than on `main`, and point `main` at this repository so you can keep it
+current without your fork drifting:
+
+```bash
+git remote add upstream https://github.com/xevrion/breakscale.git
+git fetch upstream
+git branch --set-upstream-to=upstream/main main
+git checkout -b your-branch-name
+```
 
 Useful commands:
 
@@ -149,6 +169,36 @@ generated rather than designed:
 
 For a new feature or anything touching the engine's architecture, open an issue first and describe
 the approach. It saves you writing something that then needs rewriting.
+
+### The title
+
+Pull requests are squash-merged, so the title becomes the commit message on `main` and there is a
+CI check that enforces its shape. Start it with one of these:
+
+`feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
+
+Scopes are optional. This is a single package, so requiring them would be friction for nothing.
+`fix: the minimap viewport shrinks when you pan away` and `fix(test): resolve ROOT with
+fileURLToPath` are both fine.
+
+Write the subject as a plain statement of what changed, lowercase after the prefix, no trailing
+full stop. Look at `git log` for the house style; it leans towards saying what a reader gets rather
+than which function moved.
+
+### What happens after you open it
+
+If this is your first pull request here, the checks will sit waiting for a status that never
+arrives, until a maintainer approves them. That is GitHub's gate on fork pull requests, not
+something you did wrong, and it is usually cleared the same day. After your first merged pull
+request they run automatically from then on.
+
+There are four checks: `check` (typecheck, lint, format, tests, build), `CodeQL`, `semantic` for
+the title, and a Vercel deploy. The Vercel one reports a failure on pull requests from forks
+because it will not build a fork branch without authorisation, so ignore that one; it is not about
+your code.
+
+If a review asks for changes, push follow-up commits rather than amending and force-pushing. The
+squash-merge flattens them anyway, and it lets the reviewer see what moved since they last looked.
 
 ## Reporting bugs
 
