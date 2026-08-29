@@ -91,7 +91,17 @@ system-design terms that established course sites already hold.
   - [x] Defaults derived from published specs, cited in the source
   - [x] Picker in preferences, generic stays the default
   - [x] Vendor pricing gathered and cited (43 hourly prices, all sourced)
-- [ ] Challenges ("5k rps under 200ms p99")
+- [ ] Challenges: a target to hit, not just a sandbox
+      "Hold 5k rps under 200ms p99 without going over $X a month." The cost
+      model and the traffic scenarios both exist now, so the pieces are
+      there: a challenge is a preset plus a goal plus a pass condition the
+      engine can check.
+      Asked for independently by an educator planning to use this with
+      students, which is the clearest signal on this list. A sandbox teaches
+      whoever already knows what to try; a target teaches everyone else.
+      Worth designing before building: what counts as passing, whether the
+      budget is fixed or scored, and whether a challenge can be shared the
+      way a design already can.
 - [x] Request tracer (queued vs service time)
 - [x] Cost model
 - [ ] Traffic scenarios: ramp, spike and diurnal are in the engine and
