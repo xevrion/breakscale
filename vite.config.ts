@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
@@ -86,8 +86,19 @@ function siteOrigin(): Plugin {
       const out = resolve(process.cwd(), 'dist');
       for (const name of ['sitemap.xml', 'robots.txt', 'llms.txt']) {
         const file = resolve(out, name);
-        if (!existsSync(file)) continue;
-        writeFileSync(file, swap(readFileSync(file, 'utf8')));
+        /* Read first and handle the miss, rather than testing with existsSync
+           and then reading. The two-step form is a time-of-check to
+           time-of-use race: the file can change between the check and the
+           read, and the check buys nothing the read does not already tell
+           us. A file that is genuinely absent is not an error here, one of
+           these three may simply not be in public/. */
+        let source: string;
+        try {
+          source = readFileSync(file, 'utf8');
+        } catch {
+          continue;
+        }
+        writeFileSync(file, swap(source));
       }
     },
   };
