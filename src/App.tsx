@@ -98,7 +98,7 @@ const LAYOUT_KEY = 'breakscale.layout.v1';
  */
 const SHEET_DISMISS_PX = 64;
 
-/** The gap between the floating bar and whatever clears it, matching --sp-3. */
+/** The gap below the floating bar, before whatever clears it. Matches --sp-3. */
 const BAR_GAP_PX = 12;
 
 interface LayoutPrefs {
@@ -650,7 +650,7 @@ export default function App() {
   const coarse = useCoarsePointer();
 
   /**
-   * The bar's real height, so everything that must clear it can.
+   * Where the bar actually ends, so everything that must clear it can.
    *
    * `--bar-clear` was a constant (84px, 116px on a phone), which held while
    * the bar was one row of a known height. It stopped holding the moment the
@@ -664,12 +664,19 @@ export default function App() {
    * the element knows.
    */
   const barRef = useRef<HTMLElement | null>(null);
-  const [barH, setBarH] = useState<number | null>(null);
+  const [barBottom, setBarBottom] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const el = barRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const measure = () => setBarH(Math.round(el.getBoundingClientRect().height));
+    /* The bar's BOTTOM edge, not its height.
+    
+       The bar floats: it sits --sp-3 down from the top, so its height alone
+       is short by that offset and the panels started flush against it with
+       no gap at all. Reading the bottom of its rect includes the offset
+       whatever that offset happens to be, which is the point of measuring
+       rather than restating the arithmetic. */
+    const measure = () => setBarBottom(Math.round(el.getBoundingClientRect().bottom));
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     measure();
@@ -2626,7 +2633,9 @@ export default function App() {
             '--strip-h': `${layout.stripH}px`,
             /* The bar's own height plus the gap it floats in. Falls back to
                the stylesheet's constant until the first measurement lands. */
-            ...(barH === null ? {} : { '--bar-clear': `${barH + BAR_GAP_PX}px` }),
+            ...(barBottom === null
+              ? {}
+              : { '--bar-clear': `${barBottom + BAR_GAP_PX}px` }),
           } as CSSProperties
         }
       >

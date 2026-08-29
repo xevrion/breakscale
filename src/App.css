@@ -345,16 +345,16 @@
   min-height: 0;
   overflow: hidden;
 
-  /* How far down the canvas the floating bar reaches: its offset, its own
-     height, and a gap below it. Everything that must clear the bar reads
-     this one number rather than restating the arithmetic.
+  /* Where the floating bar ends, plus a gap: its 12px offset, its 56px
+     height, and 12px below it. Everything that must clear the bar reads this
+     one number rather than restating the arithmetic.
 
      App.tsx MEASURES the bar and overwrites this inline. The constant is the
      value used for the first paint, before the observer has run, and it is
      the one-row desktop height. It stopped being correct on its own once the
      bar could wrap: on a phone the bar stands over 200px tall and a constant
      put the components toggle underneath it. */
-  --bar-clear: 84px;
+  --bar-clear: 80px;
 
   --rail-w: 224px;
   --ins-w: 320px;
