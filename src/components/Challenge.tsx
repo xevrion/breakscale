@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Challenge, ChallengeResult } from '../sim/challenge';
 import './Challenge.css';
 
@@ -31,6 +32,22 @@ function format(metric: string, value: number): string {
 }
 
 export function ChallengePanel({ challenge, result, onGiveUp }: ChallengePanelProps) {
+  /* Hints are asked for, never volunteered. A panel that opens with three
+     paragraphs of help has answered a question nobody asked yet, and the
+     reader skips them. Asking is also the honest signal that someone is
+     stuck, which is the moment help is worth anything. */
+  const [shown, setShown] = useState<string[]>([]);
+
+  /* Starting a different brief starts from no hints. Adjusted during render
+     rather than in an effect: an effect would paint the previous brief's
+     hints for a frame first, and React documents this as the way to reset
+     state when a prop changes. */
+  const [lastId, setLastId] = useState(challenge.id);
+  if (lastId !== challenge.id) {
+    setLastId(challenge.id);
+    setShown([]);
+  }
+
   return (
     <section
       className={`chal${result.passed ? ' is-passed' : ''}`}
@@ -60,12 +77,31 @@ export function ChallengePanel({ challenge, result, onGiveUp }: ChallengePanelPr
       </ul>
 
       {result.passed ? (
-        <p className="chal-verdict">Passed. The design meets every condition.</p>
+        <>
+          <p className="chal-verdict">Passed. The design meets every condition.</p>
+          {/* The explanation arrives only now. Shown from the start it is the
+              answer, and the brief stops being one; withheld until the reader
+              has already worked it out, it is the difference between passing
+              and understanding, which is the whole point of the exercise. */}
+          <p className="chal-lesson">{challenge.lesson}</p>
+        </>
       ) : (
-        /* The hint is always visible rather than behind a reveal. Someone who
-           is stuck and has to admit it before being helped tends to leave
-           instead. */
-        <p className="chal-hint">{challenge.hint}</p>
+        <div className="chal-help">
+          {shown.map((text, i) => (
+            <p key={i} className="chal-hint">
+              {text}
+            </p>
+          ))}
+          {shown.length < challenge.hints.length ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost chal-more"
+              onClick={() => setShown(challenge.hints.slice(0, shown.length + 1))}
+            >
+              {shown.length === 0 ? 'Give me a hint' : 'Another hint'}
+            </button>
+          ) : null}
+        </div>
       )}
 
       <button type="button" className="btn btn-sm chal-exit" onClick={onGiveUp}>

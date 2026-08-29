@@ -31,10 +31,29 @@ export interface Challenge {
   loadRps: number;
   goals: Goal[];
   /**
-   * What to change, in the reader's terms. Not a solution: a starting point,
-   * because a blank "make it work" is where people give up.
+   * Nudges, in order, from the smallest one that helps to the one that names
+   * the component.
+   *
+   * Staged rather than a single paragraph because the two people using this
+   * need different amounts. Someone practising wants a direction and then to
+   * be left alone; someone stuck at minute one needs telling where to look
+   * before they close the tab. One hint written for either is wrong for the
+   * other, and a hint that gives the answer away in its first sentence turns
+   * the brief into a reading exercise.
+   *
+   * None of them state the fix. The last one narrows to a component and a
+   * question, and finding out what to do with it is the exercise.
    */
-  hint: string;
+  hints: string[];
+  /**
+   * Why the fix worked, shown only once the goals are met.
+   *
+   * This is the part that makes it teaching rather than a puzzle. Without it
+   * a reader passes and takes away "capacity 8 works here", which is worth
+   * nothing anywhere else. Withheld until then on purpose: read first, it is
+   * the answer, and the brief stops being one.
+   */
+  lesson: string;
 }
 
 /**

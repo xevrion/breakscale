@@ -2010,12 +2010,37 @@ export default function App() {
       if (!challenge) return;
       const preset = PRESETS.find((p) => p.id === challenge.presetId);
       if (!preset) return;
-      const topology = structuredClone(preset.topology);
-      applyLoad(topology, challenge.loadRps);
-      replaceDesign(topology, preset.id, 'challenge start');
+
+      /*
+       * A brief replaces whatever is on the canvas, so it asks first when
+       * that is something the reader made.
+       *
+       * Undo already recovers it, which is the real safety net, but nobody
+       * who has just watched their diagram vanish thinks to press Ctrl+Z.
+       * The question is only worth asking when there is something to lose:
+       * an unmodified example or an empty canvas is not work, and a prompt
+       * on every start would train people to dismiss it before reading.
+       *
+       * A confirm() for the same reason the restore path uses one. It is
+       * destructive, it is rare, and a custom modal would be new furniture
+       * for a question asked once.
+       */
+      const madeSomething = presetId === null && topology.nodes.length > 0;
+      if (
+        madeSomething &&
+        !window.confirm(
+          'Starting a challenge replaces what is on the canvas. Your design is not saved anywhere else. Continue?',
+        )
+      ) {
+        return;
+      }
+
+      const topo = structuredClone(preset.topology);
+      applyLoad(topo, challenge.loadRps);
+      replaceDesign(topo, preset.id, 'challenge start');
       setChallengeId(id);
     },
-    [replaceDesign],
+    [replaceDesign, presetId, topology.nodes.length],
   );
 
   /* The live verdict. Recomputed per snapshot rather than on a timer, so the

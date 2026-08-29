@@ -81,6 +81,24 @@ describe('challenges', () => {
     expect(evaluate(c, after).passed).toBe(true);
   });
 
+  it('every brief teaches something once it is passed', () => {
+    // The lesson is the reason this is not a puzzle. A brief that ends at
+    // "passed" leaves the reader with a number that works here and nowhere
+    // else.
+    for (const c of CHALLENGES) {
+      expect(c.lesson.length, `${c.id} lesson`).toBeGreaterThan(120);
+      expect(c.hints.length, `${c.id} hints`).toBeGreaterThan(1);
+    }
+  });
+
+  it('no hint gives the answer away in its first line', () => {
+    // The first hint is a direction, not a solution. If it names the field to
+    // change, the brief is a reading exercise.
+    for (const c of CHALLENGES) {
+      expect(c.hints[0]!.length, `${c.id} first hint`).toBeLessThan(140);
+    }
+  });
+
   it('keep it warm has two honest answers', () => {
     // Either raise the hit rate so fewer requests reach the database, or give
     // the database enough machines to take what does. A brief with one
@@ -124,7 +142,8 @@ describe('evaluate', () => {
       presetId: 'single-server',
       loadRps: 100,
       goals: [{ metric: 'p99', max: 200 }],
-      hint: 't',
+      hints: ['t'],
+      lesson: 't',
     };
     const result = evaluate(c, dead);
     expect(result.passed).toBe(false);
