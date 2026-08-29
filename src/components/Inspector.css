@@ -925,3 +925,23 @@
     gap: var(--sp-4);
   }
 }
+
+/* --------------------------------------------------------------------------
+   Fields a challenge is holding still.
+
+   Dimmed and disabled rather than hidden. A field that vanishes reads as a
+   bug, and the reader cannot tell whether the simulator forgot it or the
+   brief took it away. Left in place with its value visible, it still
+   answers "how long does this query take", which is a thing they need to
+   know to solve the brief; it simply is not a thing they get to change.
+   -------------------------------------------------------------------------- */
+
+.ins-field.is-locked,
+.ins-field-row.is-locked {
+  opacity: 0.55;
+}
+
+.ins-field.is-locked .ins-hint,
+.ins-field-row.is-locked .ins-hint {
+  color: var(--text-dim);
+}

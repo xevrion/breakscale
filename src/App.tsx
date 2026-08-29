@@ -20,7 +20,7 @@ import { useCoarsePointer } from './useCoarsePointer';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
 import { CHALLENGES, challengeById } from './sim/challenges';
-import { applyLoad, evaluate } from './sim/challenge';
+import { FIXED_DURING_CHALLENGE, applyLoad, evaluate } from './sim/challenge';
 import { ChallengePanel } from './components/Challenge';
 import { Challenges } from './components/Challenges';
 import type { Preset } from './sim/presets';
@@ -2897,6 +2897,7 @@ export default function App() {
             selectedEdgeCount={selectedEdgeCount}
             onChangeMany={handleConfigChangeMany}
             onDeleteMany={handleDeleteMany}
+            lockedFields={challenge ? FIXED_DURING_CHALLENGE : undefined}
           />
           <PanelResizer
             edge="right"

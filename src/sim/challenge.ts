@@ -122,6 +122,32 @@ export function evaluate(challenge: Challenge, snapshot: SimSnapshot): Challenge
   return { passed: !dead && goals.every((g) => g.met), goals };
 }
 
+/**
+ * Fields a brief holds still.
+ *
+ * Not an anti-cheat list. It is the line between a decision you get to make
+ * and a fact about the work you have been given, and the simulator already
+ * draws it: `derive.ts` refuses to change service time when a larger vendor
+ * instance is picked, because a bigger machine does not make a query faster,
+ * it runs more of them at once.
+ *
+ * `serviceMs` is how long the work takes. Setting it to 1ms passes every
+ * brief here instantly and teaches nothing, because no engineer gets to
+ * declare their database forty times faster by typing a number. `serviceCv`
+ * is the same: how uneven the work is, is a property of the work.
+ *
+ * Everything else stays editable, including the things that look like
+ * cheating and are not. Raising capacity to something absurd is a legitimate
+ * answer that costs absurd money, which is exactly the tradeoff a budget
+ * makes visible later. The brief is not trying to stop anyone, it is trying
+ * to keep the question honest.
+ */
+export const FIXED_DURING_CHALLENGE: readonly string[] = ['serviceMs', 'serviceCv'];
+
+export function isFixedDuringChallenge(field: string): boolean {
+  return FIXED_DURING_CHALLENGE.includes(field);
+}
+
 /** The load a challenge is judged at, applied to every traffic source. */
 export function applyLoad(topology: Topology, loadRps: number): Topology {
   const clients = topology.nodes.filter((n) => n.kind === 'client');

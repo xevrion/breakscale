@@ -1212,17 +1212,20 @@ function SliderRow({
   spec,
   value,
   mixed,
+  locked,
   onChange,
 }: {
   spec: SliderSpec;
   value: number;
   /** True when a multi-selection disagrees on this field. */
   mixed?: boolean;
+  /** Held still by a challenge. Shown, and shown to be fixed, never hidden. */
+  locked?: boolean;
   onChange: (v: number) => void;
 }) {
   const id = useId();
   return (
-    <div className="ins-field">
+    <div className={locked ? 'ins-field is-locked' : 'ins-field'}>
       <div className="ins-field-head">
         <label className="row-k" htmlFor={id}>
           {spec.term ? <Term id={spec.term}>{spec.label}</Term> : spec.label}
@@ -1249,12 +1252,19 @@ function SliderRow({
         }
         aria-describedby={`${id}-u`}
         aria-valuetext={mixed ? 'mixed' : spec.display(value)}
+        disabled={locked}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
       />
       <span id={`${id}-u`} className="sr-only">
         {spec.unit}
       </span>
-      {spec.hint ? <p className="ins-hint">{spec.hint}</p> : null}
+      {locked ? (
+        <p className="ins-hint">
+          Fixed for this challenge: it describes the work, not your design.
+        </p>
+      ) : spec.hint ? (
+        <p className="ins-hint">{spec.hint}</p>
+      ) : null}
     </div>
   );
 }
@@ -1263,11 +1273,14 @@ function NumberRow({
   spec,
   value,
   mixed,
+  locked,
   onChange,
 }: {
   spec: NumberSpec;
   value: number;
   mixed?: boolean;
+  /** Held still by a challenge. See SliderRow. */
+  locked?: boolean;
   onChange: (v: number) => void;
 }) {
   const id = useId();
@@ -1277,7 +1290,11 @@ function NumberRow({
   const atFocusRef = useRef(value);
   return (
     <div
-      className={spec.hint ? 'ins-field-row ins-field-row--hinted' : 'ins-field-row'}
+      className={
+        (spec.hint || locked
+          ? 'ins-field-row ins-field-row--hinted'
+          : 'ins-field-row') + (locked ? ' is-locked' : '')
+      }
     >
       <label className="row-k" htmlFor={id}>
         {spec.term ? <Term id={spec.term}>{spec.label}</Term> : spec.label}
@@ -1303,6 +1320,7 @@ function NumberRow({
           value={draft ?? value}
           placeholder={mixed ? 'mixed' : undefined}
           data-mixed={mixed || undefined}
+          disabled={locked}
           onChange={(e) => {
             const text = e.currentTarget.value;
             setDraft(text);
@@ -1330,7 +1348,13 @@ function NumberRow({
         />
         <span className="label ins-unit">{spec.unit}</span>
       </span>
-      {spec.hint ? <p className="ins-hint">{spec.hint}</p> : null}
+      {locked ? (
+        <p className="ins-hint">
+          Fixed for this challenge: it describes the work, not your design.
+        </p>
+      ) : spec.hint ? (
+        <p className="ins-hint">{spec.hint}</p>
+      ) : null}
     </div>
   );
 }
@@ -2080,6 +2104,15 @@ export interface InspectorProps {
   onChange: (id: string, patch: Partial<NodeConfig>) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, label: string) => void;
+  /**
+   * Fields a challenge is holding still, or undefined outside one.
+   *
+   * A brief fixes the properties of the work (how long a query takes, how
+   * uneven it is) and leaves every design decision editable. See
+   * FIXED_DURING_CHALLENGE in sim/challenge.ts for why that line sits where
+   * it does.
+   */
+  lockedFields?: readonly string[];
 
   /* ---- multi-selection: all optional, all additive ---------------- *
    * The canvas rewrite made a multi-selection reachable, but the shell
@@ -2110,6 +2143,7 @@ export function Inspector({
   onChange,
   onDelete,
   onRename,
+  lockedFields,
   selectedNodes,
   selectedEdgeCount = 0,
   onChangeMany,
@@ -2174,6 +2208,7 @@ export function Inspector({
       onChange={onChange}
       onDelete={onDelete}
       onRename={onRename}
+      lockedFields={lockedFields}
     />
   );
 }
@@ -2434,12 +2469,14 @@ function SingleInspector({
   onChange,
   onDelete,
   onRename,
+  lockedFields,
 }: {
   node: SimNode;
   stats: NodeStats | null;
   onChange: (id: string, patch: Partial<NodeConfig>) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, label: string) => void;
+  lockedFields?: readonly string[];
 }) {
   const fields = FIELDS_BY_KIND[node.kind];
   const cfg = node.config;
@@ -2567,6 +2604,7 @@ function SingleInspector({
             <div className="ins-fields">
               {group.fields.map((field) => {
                 const spec = specFor(node.kind, field);
+                const locked = lockedFields?.includes(field) ?? false;
                 // Fields that only some kinds read are optional on NodeConfig,
                 // so a node saved by an older build can be missing one. Fall
                 // back to this kind's default rather than to the spec's
@@ -2578,6 +2616,7 @@ function SingleInspector({
                     key={field}
                     spec={spec}
                     value={value}
+                    locked={locked}
                     onChange={(v) => onChange(node.id, { [field]: v })}
                   />
                 ) : (
@@ -2585,6 +2624,7 @@ function SingleInspector({
                     key={field}
                     spec={spec}
                     value={value}
+                    locked={locked}
                     onChange={(v) => onChange(node.id, { [field]: v })}
                   />
                 );

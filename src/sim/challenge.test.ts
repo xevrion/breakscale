@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Engine } from './engine';
 import { PRESETS } from './presets';
 import { CHALLENGES } from './challenges';
-import { applyLoad, evaluate } from './challenge';
+import { FIXED_DURING_CHALLENGE, applyLoad, evaluate } from './challenge';
 import type { Challenge } from './challenge';
 import type { SimSnapshot, Topology } from './types';
 
@@ -124,6 +124,29 @@ describe('challenges', () => {
     expect(result.passed).toBe(false);
     expect(result.goals).toHaveLength(c.goals.length);
     for (const g of result.goals) expect(Number.isFinite(g.actual)).toBe(true);
+  });
+});
+
+describe('what a brief holds still', () => {
+  it('service time would pass a brief on its own, which is why it is fixed', () => {
+    // The justification for the lock, asserted rather than asserted-in-prose.
+    // Making the database forty times faster passes instantly and teaches
+    // nothing, because it is not a change anyone gets to make.
+    const c = CHALLENGES.find((x) => x.id === 'stop-the-storm')!;
+    const cheated = play(c, (t) => {
+      t.nodes.find((n) => n.id === 'db')!.config.serviceMs = 1;
+    });
+    expect(evaluate(c, cheated).passed).toBe(true);
+    expect(FIXED_DURING_CHALLENGE).toContain('serviceMs');
+  });
+
+  it('leaves every design decision editable', () => {
+    // The line is between the work and the design, not between easy and hard.
+    // Capacity, instances, timeouts and retries are all things an engineer
+    // chooses, so none of them is locked.
+    for (const field of ['capacity', 'instances', 'timeoutMs', 'retries', 'hitRate']) {
+      expect(FIXED_DURING_CHALLENGE, field).not.toContain(field);
+    }
   });
 });
 
