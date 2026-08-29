@@ -4,11 +4,13 @@ import type { NodeKind } from '../sim/types';
 import {
   ICON_BOX,
   ICON_STROKE,
+  KIND_GROUPS,
   KIND_ICON,
   KIND_NAME,
   KIND_TERM,
   NODE_DND_MIME,
 } from './nodeVisuals';
+import type { KindGroup } from './nodeVisuals';
 import { Term } from './Tooltip';
 import { usePreference } from '../content/preferences';
 import { useVendor } from '../content/vendors/useVendor';
@@ -24,17 +26,9 @@ import './Palette.css';
  * flat that is a 1100px column: a wall of text that must be scrolled to
  * be read, which means the student cannot see what the app offers.
  *
- * The fix is GROUPING, not shrinking. Four groups of 3-4 kinds each are
- * scannable at a glance because each group answers one question:
- *
- *   Traffic    where load comes from and how it is spread
- *   Compute    the things that do work and can saturate
- *   Data       the things that store it, and the two ways to scale that
- *   Control    the things that protect the system by refusing work
- *
- * A student looking for "how do I stop this melting" goes straight to
- * Control without reading the other eleven names. That is the whole
- * point of the taxonomy — it is a lookup index, not decoration.
+ * The fix is GROUPING, not shrinking. The groups themselves are
+ * KIND_GROUPS in nodeVisuals.ts, shared with the canvas ledger; what the
+ * rail adds is the rendering.
  *
  * Sections collapse, and the open/closed state is local UI state that
  * the shell does not need to know about. Components stay open by
@@ -42,61 +36,6 @@ import './Palette.css';
  * that is how a student starts. Keys is closed — it is a reference, not
  * a task.
  * ------------------------------------------------------------------ */
-
-interface KindGroup {
-  id: string;
-  title: string;
-  kinds: NodeKind[];
-}
-
-const KIND_GROUPS: KindGroup[] = [
-  { id: 'traffic', title: 'Traffic', kinds: ['client', 'lb', 'cdn', 'edgecompute'] },
-  {
-    id: 'compute',
-    title: 'Compute',
-    kinds: ['service', 'worker', 'queue', 'retryqueue', 'transcoder'],
-  },
-  {
-    id: 'data',
-    title: 'Data',
-    kinds: ['db', 'cache', 'writebehind', 'replica', 'shard'],
-  },
-  {
-    // The polyglot-persistence shelf: each of these exists because putting
-    // its workload in the main database is the mistake it teaches against.
-    id: 'stores',
-    title: 'Specialised stores',
-    kinds: [
-      'objectstore',
-      'searchindex',
-      'timeseriesdb',
-      'graphdb',
-      'vectordb',
-      'coldstorage',
-    ],
-  },
-  {
-    // How services talk when it is not one request calling one server:
-    // logs, topics, sockets, functions and jobs on a clock.
-    id: 'messaging',
-    title: 'Messaging',
-    kinds: ['streambroker', 'pubsub', 'websocket', 'lambda', 'cron'],
-  },
-  {
-    id: 'control',
-    title: 'Control',
-    kinds: [
-      'ratelimiter',
-      'loadshedder',
-      'breaker',
-      'bulkhead',
-      'autoscaler',
-      'region',
-      'apigateway',
-      'sidecar',
-    ],
-  },
-];
 
 /**
  * Shown as the row's `title` only. The prose that used to render under
