@@ -79,8 +79,12 @@ system-design terms that established course sites already hold.
 - [x] A visible button to bring the diagram back on screen
 - [x] Minimap for large diagrams (off by default, toggle in Settings)
 - [x] Name the design + a "saved" indicator, so people know work persists
-- [ ] Canvas toggles surfaced in the inspector: snap, grid, minimap, edge labels
-- [ ] Component count by category ("3 network, 2 database")
+- [ ] Toggle snap to grid with a key (#28)
+      The inspector turned out to be the wrong home for these: it is not
+      rendered at all when nothing is selected, so there was nowhere reachable
+      to put them. Minimap and sparklines are set-once preferences and stay in
+      Settings; snap is the one you reach for mid-drag, so it gets a key.
+- [x] Component count by category ("3 network, 2 database")
 - [ ] Baseline rate x pattern multiplier, clearer than a raw slider
 
 ## Product
@@ -91,7 +95,10 @@ system-design terms that established course sites already hold.
   - [x] Defaults derived from published specs, cited in the source
   - [x] Picker in preferences, generic stays the default
   - [x] Vendor pricing gathered and cited (43 hourly prices, all sourced)
-- [ ] Challenges: design a system to meet a stated requirement (#27)
+- [x] Challenges: design a system to meet a stated requirement (#27)
+      Four briefs, each an existing preset with a load and a goal attached.
+      Hints are asked for rather than volunteered, and the lesson only shows
+      once you pass. Blank-canvas briefs and a budget ceiling are on the issue.
 - [x] Request tracer (queued vs service time)
 - [x] Cost model
 - [ ] Traffic scenarios: ramp, spike and diurnal are in the engine and
@@ -110,6 +117,7 @@ system-design terms that established course sites already hold.
 
 - [x] MIT, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, templates
 - [x] CI + pre-push hooks, 23 labels, repo description and topics
+- [x] CI runs the tests and the build on Windows as well as Linux (#18)
 - [x] Engine: 33 components, 23 examples
 - [x] Undo/redo, canvas shortcuts, edge routing, floating panels
 - [x] Light theme, Lucide icons, icon transport controls
