@@ -18,8 +18,7 @@
 
 import { CATEGORY_LABEL, GLOSSARY } from '../src/content/glossary.ts';
 import type { GlossaryCategory, GlossaryEntry } from '../src/content/glossary.ts';
-
-const SITE = 'https://breakscale.vercel.app';
+import { SITE_ORIGIN as SITE } from './site.ts';
 
 /** Escape for HTML text and attribute values. */
 function esc(s: string): string {

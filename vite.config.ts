@@ -1,7 +1,10 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { renderGlossaryPage } from './tools/glossary-page.ts';
+import { SITE_ORIGIN } from './tools/site.ts';
 
 /**
  * Emit /glossary as a static HTML page, generated from the same
@@ -42,8 +45,56 @@ function glossaryPage(): Plugin {
   };
 }
 
+/**
+ * Rewrite the placeholder origin in the static metadata files.
+ *
+ * `index.html`, `sitemap.xml`, `robots.txt` and `llms.txt` all state the site's
+ * absolute URL, because a canonical link, an og:url and a sitemap entry cannot
+ * be relative. Hand-editing them meant fourteen strings across seven files and
+ * one of them silently left behind on the next move.
+ *
+ * They keep the production origin as their literal text, so the files are
+ * readable and correct as they sit in the repo. This only substitutes when the
+ * build is running somewhere else, which is what stops a preview deployment
+ * publishing a canonical that claims to be production.
+ */
+function siteOrigin(): Plugin {
+  const PLACEHOLDER = 'https://breakscale.vercel.app';
+  const swap = (text: string) =>
+    SITE_ORIGIN === PLACEHOLDER ? text : text.split(PLACEHOLDER).join(SITE_ORIGIN);
+
+  return {
+    name: 'breakscale-site-origin',
+    apply: 'build',
+    transformIndexHtml: swap,
+    generateBundle(_options, bundle) {
+      for (const file of Object.values(bundle)) {
+        if (file.type !== 'asset') continue;
+        if (!/\.(xml|txt|html)$/.test(file.fileName)) continue;
+        if (typeof file.source !== 'string') continue;
+        file.source = swap(file.source);
+      }
+    },
+    /*
+     * public/ is copied byte for byte and never enters the bundle, so
+     * sitemap.xml, robots.txt and llms.txt are not reachable from
+     * generateBundle above. They are rewritten on disk once the copy has
+     * happened instead.
+     */
+    closeBundle() {
+      if (SITE_ORIGIN === PLACEHOLDER) return;
+      const out = resolve(process.cwd(), 'dist');
+      for (const name of ['sitemap.xml', 'robots.txt', 'llms.txt']) {
+        const file = resolve(out, name);
+        if (!existsSync(file)) continue;
+        writeFileSync(file, swap(readFileSync(file, 'utf8')));
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), glossaryPage()],
+  plugins: [react(), glossaryPage(), siteOrigin()],
   build: {
     /*
      * Split the dependencies out of the app chunk.
