@@ -5078,6 +5078,9 @@ export default function Canvas({
     setDropHint(false);
   }, []);
 
+  /** Set by a node drop, cleared by the refit effect it suppresses. */
+  const droppedRef = useRef(false);
+
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       setDropHint(false);
@@ -5109,6 +5112,11 @@ export default function Canvas({
       if (!kind) return;
       e.preventDefault();
       const w = toWorld(e.clientX, e.clientY);
+      // A dropped node is already under the cursor, so there is nothing for a
+      // re-fit to reveal and the canvas must not slide out from under the
+      // drop. Measured on an empty canvas: the first drop panned the view 48px
+      // and the second 396px, with no pan input.
+      droppedRef.current = true;
       // Drop centers the node on the cursor rather than pinning its corner.
       onDropNode(kind, snap(w.x - NODE_W / 2), snap(w.y - NODE_H / 2));
     },
@@ -5209,9 +5217,10 @@ export default function Canvas({
 
   /**
    * Re-fit ONLY when the diagram is replaced wholesale: first content on a
-   * previously empty canvas (mount, session restore, the first node added to
-   * a cleared canvas), or an explicit `fitSignal` bump from the shell (a
-   * preset load). Everything else keeps the camera where the student put it.
+   * previously empty canvas (mount, session restore), or an explicit
+   * `fitSignal` bump from the shell (a preset load). Everything else keeps
+   * the camera where the student put it, and a node dropped from the palette
+   * is an edit like any other however empty the canvas was before it.
    *
    * The old trigger — the sorted node-id set — refit on EVERY add, delete
    * and undo-restore, which yanked the viewport under the student each time
@@ -5237,6 +5246,10 @@ export default function Canvas({
     hadContentRef.current = topology.nodes.length > 0;
     const signalChanged = fitSignalRef.current !== fitSignal;
     fitSignalRef.current = fitSignal;
+    // Read and clear in one place, so a drop that lands while some other
+    // guard already holds cannot leave the flag set for a later preset load.
+    const dropped = droppedRef.current;
+    droppedRef.current = false;
     if (topology.nodes.length === 0) return;
     // An edit to an already-populated diagram: keep the camera.
     if (hadContent && !signalChanged) return;
@@ -5247,28 +5260,50 @@ export default function Canvas({
     // px. The clones are born under the pointer, so there is nothing to
     // reveal anyway.
     if (pendingRef.current) return;
+    // A node dropped from the palette lands under the cursor, so the same
+    // argument applies: there is nothing to reveal, and re-aiming here slides
+    // the canvas out from under the drop.
+    if (dropped) return;
     fitToContent();
     // fitToContent is intentionally omitted: it changes identity on every node
     // move, and re-fitting mid-drag is exactly what this guard prevents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topoKey, fitSignal]);
 
+  /** Latest fitToContent, so the resize observer below subscribes once. */
+  const fitToContentRef = useRef(fitToContent);
+  useEffect(() => {
+    fitToContentRef.current = fitToContent;
+  }, [fitToContent]);
+
   /** Re-fit on container resize, but only while the user is idle. */
   useEffect(() => {
     const el = surfaceRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     let raf = 0;
+    // observe() delivers the element's CURRENT size on subscription, which
+    // is not a resize. This effect used to depend on fitToContent, whose
+    // identity moves with every topology change, so every drop re-subscribed
+    // and that initial delivery re-aimed the camera one frame later.
+    // Measured: a node dropped near the canvas edge zoomed the view from
+    // 1.5 to 1.21 with nothing resized anywhere. The observer now lives for
+    // the surface's whole life and ignores the first delivery.
+    let first = true;
     const ro = new ResizeObserver(() => {
+      if (first) {
+        first = false;
+        return;
+      }
       if (pendingRef.current) return;
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => fitToContent());
+      raf = requestAnimationFrame(() => fitToContentRef.current());
     });
     ro.observe(el);
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [fitToContent]);
+  }, []);
 
   const zoomBy = useCallback(
     (factor: number) => zoomCentered((k) => k * factor),
