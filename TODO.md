@@ -69,6 +69,13 @@ system-design terms that established course sites already hold.
 - [x] Import from file, drag-and-drop onto the canvas
 - [x] Export as PNG / SVG
 - [x] Share link: topology encoded in the URL hash, read-only for the recipient
+- [ ] Shorten the share payload (#36)
+      A nine node design is about 3,900 characters, and Discord's limit is
+      2,000, so pasting one there turns it into a message.txt attachment
+      rather than a link. Roughly half the payload is config identical to
+      defaultConfig(kind), so dropping defaults should clear the limit
+      without a server. Whether short links are worth a backend at all is
+      open on the issue.
 - [x] Named saves, a list of your own designs
 - [ ] Live collaboration (later, maybe)
 
