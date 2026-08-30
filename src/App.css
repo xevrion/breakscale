@@ -160,6 +160,7 @@
   flex: none;
   align-items: center;
   gap: var(--sp-1);
+  width: 56px;
   margin: 0;
   font-size: var(--fs-label);
   letter-spacing: var(--tr-label);
