@@ -109,6 +109,105 @@
   color: var(--text);
 }
 
+/* With a star count, the button is no longer a pure icon square: it grows
+   into a pill just wide enough for the mark and the digits, per this app's
+   own rule that every number renders in the mono stack with tabular
+   figures. Width is the only thing that changes, so neighbouring buttons in
+   the bar never shift. */
+.app-source-link.has-stars {
+  width: auto;
+  padding: 0 var(--sp-3) 0 var(--sp-2);
+  gap: var(--sp-1);
+}
+
+.app-source-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px; /* matches the GitHub mark's box exactly, so the two sit on one line */
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+  line-height: 16px;
+  color: var(--text);
+  /* Fades in on arrival rather than snapping in, because the button next to
+     it is otherwise static chrome and a number appearing with no transition
+     reads as a layout bug rather than as data that just arrived. */
+  animation: app-stars-in var(--dur-slow) var(--ease-out);
+}
+
+/* Positioning context for the glyph and its rays, sized to the GitHub
+   mark's own 16px box so the two sit on one line: a visibly smaller glyph
+   is what read as misaligned earlier even though both boxes were already
+   centred vertically. */
+.app-source-star-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  /* --warn rather than --accent: this button's own comment says the accent
+     colour means "you did this" in this app, and a star is not that. --warn
+     is the closest token to the amber GitHub itself stars with. */
+  color: var(--warn);
+}
+
+.app-source-star-glyph {
+  flex: none;
+}
+
+/* A light sweep across the button on hover: the widely used pattern of a
+   narrow skewed gradient strip parked off the left edge and slid across,
+   clipped by the button's own overflow. It is one transform on one
+   pseudo-element, so it composites on the GPU and never touches layout.
+   Chosen over a sparkle burst because this button sits beside live
+   simulation numbers, and a sweep reads as polish where a burst competes
+   for the eye. */
+.app-source-link.has-stars {
+  position: relative;
+  overflow: hidden;
+}
+
+.app-source-link.has-stars::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 28px;
+  background: linear-gradient(90deg, transparent, var(--sheen), transparent);
+  /* Driven as a TRANSITION rather than a keyframe run, so the highlight is a
+     real position the button eases to and back from: entering sweeps it
+     across, leaving sweeps it home again, and a pointer that turns back
+     halfway is followed rather than ignored. Transformed rather than moved
+     by `left`, so each frame is compositor work and the sweep never costs
+     the running simulation a layout pass. */
+  transform: translateX(0) skewX(-20deg);
+  pointer-events: none;
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+
+.app-source-link.has-stars:hover::after {
+  transform: translateX(190px) skewX(-20deg);
+}
+
+@keyframes app-stars-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-source-stars {
+    animation: none;
+  }
+}
+
 /* --------------------------------------------------------------------------
    Wordmark.
 

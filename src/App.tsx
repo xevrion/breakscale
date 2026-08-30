@@ -17,6 +17,7 @@ import type {
 } from 'react';
 import type { NodeConfig, NodeKind, SimNode, SimSnapshot, Topology } from './sim/types';
 import { useCoarsePointer } from './useCoarsePointer';
+import { useGithubStars, useCountUp, formatStars } from './useGithubStars';
 import { Engine } from './sim/engine';
 import { PRESETS, makeNode } from './sim/presets';
 import { CHALLENGES, challengeById } from './sim/challenges';
@@ -664,6 +665,11 @@ export default function App() {
 
   const phone = useSyncExternalStore(subscribePhone, isPhone, isPhoneServer);
   const coarse = useCoarsePointer();
+  /* The real count names the link; the tweened one is only ever drawn, so a
+     screen reader is never read a number the animation happened to be
+     passing through. */
+  const starCount = useGithubStars();
+  const stars = useCountUp(starCount);
 
   /**
    * Where the bar actually ends, so everything that must clear it can.
@@ -2637,11 +2643,15 @@ export default function App() {
             has usually stopped looking. Chrome, so the canvas ignores it.
           */}
           <a
-            className="btn btn-icon app-source-link"
+            className={`btn btn-icon app-source-link${stars !== null ? ' has-stars' : ''}`}
             href="https://github.com/xevrion/breakscale"
             target="_blank"
             rel="noreferrer noopener"
-            aria-label="Source on GitHub"
+            aria-label={
+              starCount !== null
+                ? `Source on GitHub, ${starCount} stars`
+                : 'Source on GitHub'
+            }
             title="Source on GitHub"
             data-chrome=""
           >
@@ -2654,6 +2664,29 @@ export default function App() {
             >
               <path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.53.1.72-.23.72-.5v-1.8c-2.92.63-3.54-1.41-3.54-1.41-.48-1.21-1.17-1.54-1.17-1.54-.95-.65.07-.64.07-.64 1.06.08 1.61 1.09 1.61 1.09.94 1.6 2.46 1.14 3.06.87.1-.68.37-1.14.67-1.4-2.33-.27-4.78-1.17-4.78-5.19 0-1.15.41-2.09 1.08-2.82-.11-.27-.47-1.34.1-2.79 0 0 .88-.28 2.88 1.07a9.9 9.9 0 0 1 5.24 0c2-1.35 2.88-1.07 2.88-1.07.57 1.45.21 2.52.1 2.79.67.73 1.08 1.67 1.08 2.82 0 4.03-2.45 4.92-4.79 5.18.38.33.71.97.71 1.96v2.9c0 .28.19.61.72.5A10.5 10.5 0 0 0 12 1.5z" />
             </svg>
+            {/* Absent until the fetch resolves, not rendered empty and filled
+                later: a reserved-but-blank slot would shift nothing today but
+                invites a layout-shift bug the day the icon gets a neighbour
+                that shows before this does. aria-hidden because the accessible
+                name above already carries the count. A bare number next to
+                the mark reads as nothing in particular, so a small star
+                glyph says what it is without a word of copy. */}
+            {stars !== null && (
+              <span className="app-source-stars" aria-hidden="true">
+                <span className="app-source-star-wrap">
+                  <svg
+                    className="app-source-star-glyph"
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M12 2.5l2.9 6.6 7.1.7-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7-5.4-4.7 7.1-.7z" />
+                  </svg>
+                </span>
+                {formatStars(stars)}
+              </span>
+            )}
           </a>
 
           <div className="app-menu-wrap">

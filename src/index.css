@@ -185,6 +185,11 @@
   --shadow-md: 0 1px 2px rgba(60, 50, 40, 0.05), 0 4px 10px rgba(60, 50, 40, 0.07);
   --shadow-lg: 0 2px 4px rgba(60, 50, 40, 0.05), 0 12px 28px rgba(60, 50, 40, 0.1);
 
+  /* The highlight a light sweep carries across a surface. Warm-neutral like
+     the shadows, and a DARK wash here because the light theme's chrome is
+     near white: a white sheen on white is invisible. */
+  --sheen: rgba(60, 50, 40, 0.14);
+
   /* Scrim behind a temporary surface. The same warm-neutral as the shadows,
      kept deliberately light: it marks the layer above as active without
      hiding the running simulation, which is the thing the student opened
@@ -757,6 +762,9 @@
   --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.36), 0 4px 10px rgba(0, 0, 0, 0.44);
   --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.36), 0 12px 28px rgba(0, 0, 0, 0.52);
   --scrim: rgba(0, 0, 0, 0.56);
+  /* Inverted for the dark ground: a light wash, where the light theme uses
+     a dark one. */
+  --sheen: rgba(255, 255, 255, 0.16);
 
   /* A lit edge on a dark surface is a faint lift, not a white line. At the
      light theme's 0.9 this reads as a glowing seam across every control. */
@@ -959,6 +967,7 @@
     --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.36), 0 4px 10px rgba(0, 0, 0, 0.44);
     --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.36), 0 12px 28px rgba(0, 0, 0, 0.52);
     --scrim: rgba(0, 0, 0, 0.56);
+    --sheen: rgba(255, 255, 255, 0.16);
 
     --bevel: rgba(255, 255, 255, 0.07);
     --bevel-on-accent: rgba(255, 255, 255, 0.14);
