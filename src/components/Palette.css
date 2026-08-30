@@ -424,6 +424,71 @@
   transform: scale(1.06);
 }
 
+/* The carry: what the pointer holds once a row is picked up. Three layers,
+   each owning ONE transform so none of them fight. The outer .pal-carry
+   jumps to the pointer with no easing at all, because position lagging the
+   cursor reads as sluggishness; .pal-carry-pop owns centring and the pickup
+   pop; the card itself owns the velocity tilt, eased by its own transition.
+   pointer-events: none keeps it out of every hit test, so the canvas's drop
+   handling never knows it exists. Everything here is transform and opacity,
+   compositor work only, and the global reduced-motion rule in index.css
+   flattens the pop and the tilt to nothing. */
+.pal-carry {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 500; /* above the tooltip layer (400): nothing outranks the hand */
+  pointer-events: none;
+  will-change: transform;
+}
+
+@keyframes pal-carry-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.pal-carry-pop {
+  transform: translate(-50%, -50%);
+  animation: pal-carry-pop var(--dur-base) var(--ease-out);
+}
+
+/* The card: the row's chip and name on the node radius with a lift shadow,
+   because the thing being carried is a component about to exist on the
+   canvas, not a line of a list. Colour comes through the same [data-kind]
+   contract as the chip it clones. */
+.pal-carry-card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-3);
+  border: var(--bw) solid var(--k-stroke, var(--border-strong));
+  border-radius: var(--r-node);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  transition: transform var(--dur-base) var(--ease);
+}
+
+.pal-carry-name {
+  font-weight: var(--fw-med);
+}
+
+/* Off-screen parking for the static fallback, when the blank drag image is
+   not decoded yet: the same card, sampled once by setDragImage. */
+.pal-carry-park {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+}
+
 /* The concept over the product. Stacked rather than side by side: a rail is
    224px and "Elastic Load Balancing (Application Load Balancer)" does not
    share a line with anything. */

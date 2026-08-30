@@ -186,17 +186,141 @@ export interface PaletteProps {
   armedTool?: AnnotationTool | null;
 }
 
+/* ------------------------------------------------------------------ *
+ * The pickup.
+ *
+ * The browser's default drag image is a translucent screenshot of the whole
+ * row, list chrome and all, which reads as dragging a menu entry. The thing
+ * being carried is a component about to exist on the canvas, so what follows
+ * the cursor is a small card instead: the row's own chip and name on the
+ * node radius with a lift shadow.
+ *
+ * A native drag image is sampled ONCE at dragstart and can never animate,
+ * so the card is not handed to setDragImage. The native image is replaced
+ * with a transparent pixel and the card is a real element that follows the
+ * pointer from `dragover` on the document: it pops in when picked up and
+ * banks a few degrees with the horizontal velocity of the hand, the way a
+ * card carried across a desk would. Cost per move is one translate3d write
+ * on a fixed, pointer-events-none element, which is compositor work only;
+ * nothing re-renders and nothing lays out.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Transparent stand-in for the native drag image. Created once and kept hot:
+ * setDragImage needs a DECODED image at dragstart, and a data URI this size
+ * is decoded long before a human can begin a drag.
+ */
+const BLANK_DRAG_IMAGE = typeof Image !== 'undefined' ? new Image() : null;
+if (BLANK_DRAG_IMAGE) {
+  BLANK_DRAG_IMAGE.src =
+    'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+}
+
+/**
+ * The card, built from the row's rendered DOM rather than re-created in
+ * React: the glyph is cloned as-is, the name is read back as text, and the
+ * `data-kind` attribute rides along so the chip keeps its colour trio
+ * through the same contract every other surface uses.
+ */
+function buildCard(row: HTMLButtonElement): HTMLDivElement | null {
+  const glyph = row.querySelector('.pal-glyph');
+  const name = row.querySelector('.pal-name')?.textContent;
+  if (!glyph || !name) return null;
+  const card = document.createElement('div');
+  card.className = 'pal-carry-card';
+  const kind = row.getAttribute('data-kind');
+  if (kind !== null) card.setAttribute('data-kind', kind);
+  card.appendChild(glyph.cloneNode(true));
+  const label = document.createElement('span');
+  label.className = 'pal-carry-name';
+  label.textContent = name;
+  card.appendChild(label);
+  return card;
+}
+
+/* Module state for the one live preview. A drag is a singleton gesture: the
+   browser will not start a second before dragend ends the first. */
+let carryEl: HTMLDivElement | null = null;
+let carryCard: HTMLDivElement | null = null;
+let carryX = 0;
+
+function moveCarry(e: globalThis.DragEvent): void {
+  if (!carryEl) return;
+  carryEl.style.transform = `translate3d(${e.clientX}px, ${e.clientY}px, 0)`;
+  // Bank with the hand. The inner card owns the rotation and eases it with
+  // its own transition, so the outer element can jump to the pointer with no
+  // easing at all: position must never lag the cursor, only the tilt may.
+  const dx = e.clientX - carryX;
+  carryX = e.clientX;
+  if (carryCard) {
+    const tilt = Math.max(-6, Math.min(6, dx * 0.5));
+    carryCard.style.transform = `rotate(${tilt}deg)`;
+  }
+}
+
+function endCarry(): void {
+  document.removeEventListener('dragover', moveCarry);
+  carryEl?.remove();
+  carryEl = null;
+  carryCard = null;
+}
+
+/**
+ * Fallback when the blank image is somehow not ready: the same card, parked
+ * off screen and sampled once by setDragImage. Static, but still a card.
+ */
+function setStaticCardImage(event: DragEvent<HTMLButtonElement>): void {
+  const card = buildCard(event.currentTarget);
+  if (!card) return;
+  const park = document.createElement('div');
+  park.className = 'pal-carry-park';
+  park.appendChild(card);
+  document.body.appendChild(park);
+  const rect = card.getBoundingClientRect();
+  event.dataTransfer.setDragImage(card, rect.width / 2, rect.height / 2);
+  setTimeout(() => park.remove(), 0);
+}
+
+function startCarry(event: DragEvent<HTMLButtonElement>): void {
+  const dt = event.dataTransfer;
+  if (typeof dt.setDragImage !== 'function') return;
+  if (!BLANK_DRAG_IMAGE?.complete) {
+    setStaticCardImage(event);
+    return;
+  }
+  const card = buildCard(event.currentTarget);
+  if (!card) return;
+  endCarry(); // a stale preview from an interrupted drag must not linger
+  dt.setDragImage(BLANK_DRAG_IMAGE, 0, 0);
+
+  const outer = document.createElement('div');
+  outer.className = 'pal-carry';
+  const pop = document.createElement('div');
+  pop.className = 'pal-carry-pop';
+  pop.appendChild(card);
+  outer.appendChild(pop);
+  outer.style.transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0)`;
+  document.body.appendChild(outer);
+
+  carryEl = outer;
+  carryCard = card;
+  carryX = event.clientX;
+  document.addEventListener('dragover', moveCarry);
+}
+
 function handleDragStart(event: DragEvent<HTMLButtonElement>, kind: NodeKind) {
   const dt = event.dataTransfer;
   // Must match what Canvas checks for in onDragOver / onDrop.
   dt.setData(NODE_DND_MIME, kind);
   dt.effectAllowed = 'copy';
+  startCarry(event);
 }
 
 function handleAnnDragStart(event: DragEvent<HTMLButtonElement>, tool: AnnotationTool) {
   const dt = event.dataTransfer;
   dt.setData(ANN_DND_MIME, tool);
   dt.effectAllowed = 'copy';
+  startCarry(event);
 }
 
 export function Palette({ onAdd, onAddAnnotation, armedTool }: PaletteProps) {
@@ -398,6 +522,7 @@ export function Palette({ onAdd, onAddAnnotation, armedTool }: PaletteProps) {
                       data-kind={kind}
                       draggable
                       onDragStart={(e) => handleDragStart(e, kind)}
+                      onDragEnd={endCarry}
                       onClick={() => onAdd(kind)}
                       onKeyDown={(e) => onRowKeyDown(e, kind)}
                       title={KIND_HINT[kind]}
@@ -454,6 +579,7 @@ export function Palette({ onAdd, onAddAnnotation, armedTool }: PaletteProps) {
                       aria-pressed={armedTool === row.tool}
                       draggable
                       onDragStart={(e) => handleAnnDragStart(e, row.tool)}
+                      onDragEnd={endCarry}
                       onClick={() => onAddAnnotation(row.tool)}
                       onKeyDown={(e) => {
                         if (e.key === ' ' || e.key === 'Spacebar') {
