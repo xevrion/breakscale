@@ -62,6 +62,7 @@ import {
   isPalmTouch,
   pinchFrame,
   pressAction,
+  snapsToGrid,
 } from './pointerInput';
 import type { PinchState, TouchMap } from './pointerInput';
 import {
@@ -2614,10 +2615,14 @@ const NodeView = memo(function NodeView({
       }
       /*
        * Arrows nudge by one grid step; SHIFT+arrow moves by a single pixel.
-       * The inversion is deliberate: with an 8px snap always on, the fine
+       * The inversion is deliberate: the arrow step is the grid, so the fine
        * step is the escape hatch a grid user actually needs, where a coarser
        * shift step would just be a faster version of what plain arrows
        * already do.
+       *
+       * This pair is its own feature and does not read the snap preference:
+       * Shortcuts calls them "one grid step" and "1px, off the grid", so the
+       * escape hatch is already the shift key rather than the setting.
        *
        * A SELECTED node lets the event through untouched: the canvas-level
        * handler moves the whole selection (this node included), and handling
@@ -3308,6 +3313,13 @@ export default function Canvas({
      re-renders only when THIS flag changes, and the shell does not gain a
      prop it would only be passing through. */
   const showMinimap = usePreference('minimap');
+  /*
+   * Snap was hard-wired on, and `snapToGrid` was stored, defaulted and
+   * offered in Settings while nothing read it: the toggle moved a boolean
+   * nobody asked. Ctrl was the only real bypass, which is a bad deal on a
+   * trackpad and no deal at all on a touchscreen.
+   */
+  const snapOn = usePreference('snapToGrid');
 
   /**
    * The surface's size in screen px, for the minimap's viewport rectangle.
@@ -4187,6 +4199,13 @@ export default function Canvas({
         return;
       }
 
+      /*
+       * Where this drag puts things. One decision for the whole gesture:
+       * every branch below used to compute the same line, which meant four
+       * copies to keep in step the moment the snap gained a second input.
+       */
+      const place = snapsToGrid(snapOn, e.ctrlKey || e.metaKey) ? snap : Math.round;
+
       if (!p.active) {
         const dx = e.clientX - p.screenX;
         const dy = e.clientY - p.screenY;
@@ -4217,7 +4236,6 @@ export default function Canvas({
          * to whole pixels so a free-placed node never carries fractional
          * world coordinates into the saved session.
          */
-        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
         const nx = place(w.x + p.grabDx);
         const ny = place(w.y + p.grabDy);
         onMoveNode(id, nx, ny);
@@ -4247,7 +4265,6 @@ export default function Canvas({
       if (p.mode === 'ann') {
         const id = p.hit.id!;
         // The same live snap-bypass a node drag honours.
-        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
         const nx = place(w.x + p.grabDx);
         const ny = place(w.y + p.grabDy);
         onMoveAnnotation?.(id, nx, ny);
@@ -4267,7 +4284,6 @@ export default function Canvas({
       }
 
       if (p.mode === 'ann-resize' && p.annRect) {
-        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
         const r = resizeRect(
           p.annRect,
           p.hit.dir as ResizeDir,
@@ -4282,7 +4298,6 @@ export default function Canvas({
       }
 
       if (p.mode === 'note-resize' && p.annRect) {
-        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
         // Only the dragged edge moves. Pulling the WEST handle moves the
         // note's x as well as its width, so the east edge stays put and the
         // note grows leftward rather than sliding across the canvas.
@@ -4374,6 +4389,7 @@ export default function Canvas({
       nodeAt,
       cancelGesture,
       zoomAt,
+      snapOn,
     ],
   );
 
@@ -5118,9 +5134,13 @@ export default function Canvas({
       // and the second 396px, with no pan input.
       droppedRef.current = true;
       // Drop centers the node on the cursor rather than pinning its corner.
-      onDropNode(kind, snap(w.x - NODE_W / 2), snap(w.y - NODE_H / 2));
+      // A node dragged in from the rail is a component being dragged like any
+      // other, so it honours the same preference a move does. Without this,
+      // turning the snap off and dropping still landed on the grid.
+      const place = snapsToGrid(snapOn, e.ctrlKey || e.metaKey) ? snap : Math.round;
+      onDropNode(kind, place(w.x - NODE_W / 2), place(w.y - NODE_H / 2));
     },
-    [toWorld, onDropNode, onCreateNote, onCreateSection],
+    [toWorld, onDropNode, onCreateNote, onCreateSection, snapOn],
   );
 
   /* ---------------- fit to content ---------------- */
@@ -5363,9 +5383,11 @@ export default function Canvas({
 
       /*
        * Arrows move the whole SELECTION: one grid step plain, ONE PIXEL with
-       * shift. The inversion (shift = finer, not coarser) is deliberate —
-       * with an 8px snap always on, the escape hatch a grid user needs is
-       * fine placement, and shift is where every grid editor puts it. A
+       * shift. The inversion (shift = finer, not coarser) is deliberate: the
+       * arrow step IS the grid, so the escape hatch a grid user needs is fine
+       * placement, and shift is where every grid editor puts it. Like the
+       * per-node arrows, this pair is its own feature and does not read the
+       * snap preference. A
        * focused UNSELECTED node handles its own arrows in NodeView and stops
        * propagation, so it never arrives here; a focused selected node lets
        * the event through precisely so this handler moves it with its group.

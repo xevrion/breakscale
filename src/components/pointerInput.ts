@@ -191,3 +191,26 @@ export function endPointer(
   if (pinch && (pinch.a === pointerId || pinch.b === pointerId)) return null;
   return pinch;
 }
+
+/* ------------------------------------------------------------------ *
+ * Grid snap
+ * ------------------------------------------------------------------ */
+
+/**
+ * Does this drag land on the grid?
+ *
+ * Two inputs, and they are different kinds of thing. `snapOn` is the standing
+ * preference, which persists and is what the G key and the Settings switch
+ * both write. `ctrlHeld` is a momentary override for the drag in progress and
+ * changes nothing that outlives it.
+ *
+ * Ctrl only ever loosens. Holding it with the preference already off does not
+ * turn snapping back on, which would be a strange thing for a bypass to do.
+ *
+ * Here rather than inline in Canvas for the same reason the rest of this
+ * module is: it is a decision the pointer router makes, and pinning it in a
+ * test should not require mounting the canvas.
+ */
+export function snapsToGrid(snapOn: boolean, ctrlHeld: boolean): boolean {
+  return snapOn && !ctrlHeld;
+}
