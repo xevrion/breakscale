@@ -24,6 +24,7 @@ import {
   midpoint,
   pinchFrame,
   pressAction,
+  snapsToGrid,
 } from './pointerInput';
 import type { PinchState, PointerPoint, TouchMap } from './pointerInput';
 
@@ -290,5 +291,34 @@ describe('midpoint and distance', () => {
   it('compute the obvious values', () => {
     expect(midpoint({ x: 0, y: 0 }, { x: 10, y: 20 })).toEqual({ x: 5, y: 10 });
     expect(distance({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(5);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Grid snap
+ *
+ * The preference used to be decoration. `snapToGrid` was stored, defaulted,
+ * sanitised on read and offered as a switch in Settings, and nothing anywhere
+ * read it: every drag chose its rounding from the Ctrl key alone, so turning
+ * the switch off moved a boolean and changed nothing on the canvas. A
+ * typecheck cannot see that and neither can a screenshot, so it is pinned
+ * here.
+ * ------------------------------------------------------------------ */
+
+describe('grid snap', () => {
+  it('snaps when the preference is on and nothing is held', () => {
+    expect(snapsToGrid(true, false)).toBe(true);
+  });
+
+  it('does not snap when the preference is off', () => {
+    expect(snapsToGrid(false, false)).toBe(false);
+  });
+
+  it('lets Ctrl bypass the snap for the drag in progress', () => {
+    expect(snapsToGrid(true, true)).toBe(false);
+  });
+
+  it('never turns snapping back on: Ctrl only ever loosens', () => {
+    expect(snapsToGrid(false, true)).toBe(false);
   });
 });

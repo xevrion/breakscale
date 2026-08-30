@@ -68,7 +68,7 @@ function toggles(coarse: boolean): ToggleRow[] {
       label: 'Snap to the grid',
       hint: coarse
         ? 'Keep components aligned while dragging.'
-        : 'Keep components aligned while dragging. Hold Ctrl to bypass it.',
+        : 'Keep components aligned while dragging. G toggles it, and holding Ctrl bypasses it for one drag.',
     },
     {
       key: 'minimap',
