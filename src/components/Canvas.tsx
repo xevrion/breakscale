@@ -62,6 +62,7 @@ import {
   isPalmTouch,
   pinchFrame,
   pressAction,
+  snapsToGrid,
 } from './pointerInput';
 import type { PinchState, TouchMap } from './pointerInput';
 import {
@@ -3308,6 +3309,13 @@ export default function Canvas({
      re-renders only when THIS flag changes, and the shell does not gain a
      prop it would only be passing through. */
   const showMinimap = usePreference('minimap');
+  /*
+   * Snap was hard-wired on, and `snapToGrid` was stored, defaulted and
+   * offered in Settings while nothing read it: the toggle moved a boolean
+   * nobody asked. Ctrl was the only real bypass, which is a bad deal on a
+   * trackpad and no deal at all on a touchscreen.
+   */
+  const snapOn = usePreference('snapToGrid');
 
   /**
    * The surface's size in screen px, for the minimap's viewport rectangle.
@@ -4217,7 +4225,7 @@ export default function Canvas({
          * to whole pixels so a free-placed node never carries fractional
          * world coordinates into the saved session.
          */
-        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
+        const place = snapsToGrid(snapOn, e.ctrlKey || e.metaKey) ? snap : Math.round;
         const nx = place(w.x + p.grabDx);
         const ny = place(w.y + p.grabDy);
         onMoveNode(id, nx, ny);
@@ -4247,7 +4255,7 @@ export default function Canvas({
       if (p.mode === 'ann') {
         const id = p.hit.id!;
         // The same live snap-bypass a node drag honours.
-        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
+        const place = snapsToGrid(snapOn, e.ctrlKey || e.metaKey) ? snap : Math.round;
         const nx = place(w.x + p.grabDx);
         const ny = place(w.y + p.grabDy);
         onMoveAnnotation?.(id, nx, ny);
@@ -4267,7 +4275,7 @@ export default function Canvas({
       }
 
       if (p.mode === 'ann-resize' && p.annRect) {
-        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
+        const place = snapsToGrid(snapOn, e.ctrlKey || e.metaKey) ? snap : Math.round;
         const r = resizeRect(
           p.annRect,
           p.hit.dir as ResizeDir,
@@ -4282,7 +4290,7 @@ export default function Canvas({
       }
 
       if (p.mode === 'note-resize' && p.annRect) {
-        const place = e.ctrlKey || e.metaKey ? Math.round : snap;
+        const place = snapsToGrid(snapOn, e.ctrlKey || e.metaKey) ? snap : Math.round;
         // Only the dragged edge moves. Pulling the WEST handle moves the
         // note's x as well as its width, so the east edge stays put and the
         // note grows leftward rather than sliding across the canvas.
@@ -4374,6 +4382,7 @@ export default function Canvas({
       nodeAt,
       cancelGesture,
       zoomAt,
+      snapOn,
     ],
   );
 

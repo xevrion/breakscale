@@ -58,7 +58,7 @@ import type { Annotation, AnnotationFont, Note } from './sim/annotations';
 import { NEW_NOTE_TEXT } from './components/annotationLayout';
 import type { AnnotationTool } from './components/Palette';
 import { TooltipLayer, setGlossaryNavigate } from './components/Tooltip';
-import { usePreference } from './content/preferences';
+import { togglePreference, usePreference } from './content/preferences';
 import { Settings } from './components/Settings';
 import { MainMenu } from './components/MainMenu';
 import { Designs } from './components/Designs';
@@ -2405,6 +2405,22 @@ export default function App() {
             e.preventDefault();
             toggleInspector();
           }
+          return;
+        }
+        /*
+         * G for the grid snap. It sits with the panel toggles because it
+         * obeys the same rules, but it is the one of these you press while
+         * a drag is already in flight, which is the whole reason it is a
+         * key: it was in Settings, and opening a modal mid-arrangement is
+         * not something anyone does.
+         *
+         * Ctrl held during a drag still bypasses the snap for that drag
+         * alone. The two do not fight: this is the standing setting, that
+         * is the momentary override.
+         */
+        if (e.key === 'g' || e.key === 'G') {
+          e.preventDefault();
+          togglePreference('snapToGrid');
           return;
         }
       }
