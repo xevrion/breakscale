@@ -48,6 +48,58 @@ describe('determinism', () => {
     const b = JSON.stringify(run(structuredClone(topology), 12, 2));
     expect(a).not.toBe(b);
   });
+
+  it('keeps a retained client arrival stream across topology edits', () => {
+    const client = { ...makeNode('client', 0, 0), id: 'client' };
+    client.config = { ...client.config, rps: 50 };
+    const topology: Topology = { nodes: [client], edges: [] };
+    const untouched = new Engine(topology, 42);
+    const edited = new Engine(topology, 42);
+
+    for (let i = 0; i < 10; i += 1) edited.setTopology(topology);
+    for (let i = 0; i < 600; i += 1) {
+      untouched.advance(1000 / 60);
+      edited.advance(1000 / 60);
+    }
+
+    expect(edited.snapshot()).toEqual(untouched.snapshot());
+  });
+
+  it.each(['added', 'retyped'] as const)(
+    'starts an arrival stream for a %s client',
+    (change) => {
+      const original = { ...makeNode('service', 0, 0), id: 'source' };
+      const engine = new Engine(
+        change === 'added'
+          ? { nodes: [], edges: [] }
+          : {
+              nodes: [original],
+              edges: [],
+            },
+        42,
+      );
+      const client = { ...makeNode('client', 0, 0), id: 'source' };
+      client.config = { ...client.config, rps: 50 };
+
+      engine.setTopology({ nodes: [client], edges: [] });
+      for (let i = 0; i < 600; i += 1) engine.advance(1000 / 60);
+
+      expect(engine.snapshot().system.totalRequests).toBe(485);
+    },
+  );
+
+  it('replays the initial arrival stream after reset', () => {
+    const client = { ...makeNode('client', 0, 0), id: 'client' };
+    client.config = { ...client.config, rps: 50 };
+    const engine = new Engine({ nodes: [client], edges: [] }, 42);
+
+    for (let i = 0; i < 600; i += 1) engine.advance(1000 / 60);
+    const first = JSON.stringify(engine.snapshot());
+    engine.reset();
+    for (let i = 0; i < 600; i += 1) engine.advance(1000 / 60);
+
+    expect(JSON.stringify(engine.snapshot())).toBe(first);
+  });
 });
 
 describe.each(PRESETS.map((p) => [p.id, p] as const))('preset %s', (_id, preset) => {

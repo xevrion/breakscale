@@ -420,6 +420,8 @@ interface NodeState {
   totalCompleted: number;
   totalFailed: number;
 
+  /** Identifies the arrival stream for this incarnation of a load generator. */
+  arrivalGeneration: number;
   /** True once a worker poll event is scheduled, so we do not stack pollers. */
   pollScheduled: boolean;
   /**
@@ -498,6 +500,7 @@ export class Engine implements BehaviourCtx {
 
   private nodes = new Map<string, NodeState>();
   private clientIds: string[] = [];
+  private nextArrivalGeneration = 1;
   /**
    * Nodes whose behaviour declares onTick. Kept as a separate list so the
    * per-advance walk costs nothing at all while no such kind exists.
@@ -997,6 +1000,7 @@ export class Engine implements BehaviourCtx {
     this.rng = new Rng(this.seed);
     this.now = 0;
     this.seq = 0;
+    this.nextArrivalGeneration = 1;
     this.heap.clear();
     this.freeReq = null;
     this.freeEv.length = 0;
@@ -1058,6 +1062,7 @@ export class Engine implements BehaviourCtx {
 
   private buildNodes(previous: Map<string, NodeState> | null): void {
     const next = new Map<string, NodeState>();
+    const newClientIds: string[] = [];
     this.clientIds = [];
 
     for (const node of this.topology.nodes) {
@@ -1072,6 +1077,8 @@ export class Engine implements BehaviourCtx {
         state.sources = [];
       } else {
         state = createNodeState(node);
+        state.arrivalGeneration = this.nextArrivalGeneration++;
+        if (state.behaviour.generatesLoad) newClientIds.push(node.id);
       }
       state.lastIntegrateMs = this.now;
       next.set(node.id, state);
@@ -1131,8 +1138,9 @@ export class Engine implements BehaviourCtx {
     }
     this.edgeFlow = flow;
 
-    // Restart the generators/pollers; stale ones are ignored via node lookup.
-    for (const id of this.clientIds) {
+    // Retained clients keep their already scheduled arrival. Only a new or
+    // retyped client needs an initial event to start its generator.
+    for (const id of newClientIds) {
       this.scheduleArrival(id);
     }
     this.tickNodes = [];
@@ -1167,7 +1175,9 @@ export class Engine implements BehaviourCtx {
 
     switch (ev.kind) {
       case EV_ARRIVAL:
-        this.onClientArrival(state);
+        if (state.behaviour.generatesLoad && state.arrivalGeneration === ev.token) {
+          this.onClientArrival(state);
+        }
         break;
       case EV_SERVICE_DONE:
         if (ev.req && ev.req.token === ev.token) this.onServiceDone(state, ev.req);
@@ -1206,11 +1216,11 @@ export class Engine implements BehaviourCtx {
     if (!(rps > 0)) {
       // Poll again shortly so raising the slider, or a pattern coming back up
       // off its trough, resumes traffic.
-      this.push(this.now + 50, EV_ARRIVAL, nodeId, null, 0);
+      this.push(this.now + 50, EV_ARRIVAL, nodeId, null, state.arrivalGeneration);
       return;
     }
     const gap = this.rng.exponential(1000 / rps);
-    this.push(this.now + gap, EV_ARRIVAL, nodeId, null, 0);
+    this.push(this.now + gap, EV_ARRIVAL, nodeId, null, state.arrivalGeneration);
   }
 
   private onClientArrival(state: NodeState): void {
@@ -2659,6 +2669,7 @@ function createNodeState(node: SimNode): NodeState {
     latency: new LatencyRing(),
     totalCompleted: 0,
     totalFailed: 0,
+    arrivalGeneration: 0,
     pollScheduled: false,
     shardUtil: [],
     instanceUnits: [],
