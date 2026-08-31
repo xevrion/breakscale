@@ -320,7 +320,12 @@ const autoscaler: ComponentBehaviour = {
     const st = asAutoscaler(state);
     if (!st) return;
     const scaling = st.warmupDueMs >= 0;
-    const live = st.watchedId ? (ctx.scaleOf(st.watchedId) ?? 0) : 0;
+    // scaleOf returns null for a kind with no fleet to move. That is not the
+    // same as zero instances, and the panel has to be able to tell them apart
+    // or it reports a controller that reads the load and mysteriously does
+    // nothing.
+    const scale = st.watchedId ? ctx.scaleOf(st.watchedId) : 0;
+    const live = scale ?? 0;
     // While warming up, report the fleet size being BOOKED rather than the one
     // in force: paired with watchedInstances, the gap between the two numbers
     // is the visible form of the lag this component exists to teach.
@@ -329,6 +334,7 @@ const autoscaler: ComponentBehaviour = {
     stats.watchedId = st.watchedId;
     stats.targetInstances = wanted;
     stats.watchedInstances = live;
+    stats.watchedUnscalable = st.watchedId !== '' && scale === null;
     stats.pendingInstances = scaling ? Math.max(0, wanted - live) : 0;
     stats.scaling = scaling;
     stats.watchedUtil = st.watchedId ? (ctx.utilizationOf(st.watchedId) ?? 0) : 0;

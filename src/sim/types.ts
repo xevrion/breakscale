@@ -789,6 +789,19 @@ export interface NodeStats {
   /** Autoscaler only: the watched node's live instance count right now. */
   watchedInstances?: number;
   /**
+   * Autoscaler only: true when the watched node has no fleet to resize, so
+   * the controller can read the load correctly and still be unable to act.
+   *
+   * An object store is the case that prompted this: it is modelled as one
+   * managed service rather than a pool of machines, exactly as S3 is, so
+   * there is no instance count for a controller to move. Without this flag
+   * the panel showed a healthy-looking readout beside a fleet that never
+   * changed, and the only reasonable conclusion for a reader was that the
+   * autoscaler was broken. That it cannot help here is the lesson: when a
+   * blob store melts there is no "add servers" knob to reach for.
+   */
+  watchedUnscalable?: boolean;
+  /**
    * Autoscaler only: instances decided but still booting. Equal to
    * `targetInstances - watchedInstances` while warming up, else 0. The same
    * number is attached to the WATCHED node as `instancesPending`, so the

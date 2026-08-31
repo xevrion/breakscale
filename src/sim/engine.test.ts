@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Engine } from './engine';
 import { PRESETS, defaultConfig, makeNode } from './presets';
-import type { SimSnapshot, Topology } from './types';
+import type { NodeKind, SimSnapshot, Topology } from './types';
 
 /**
  * Engine correctness tests.
@@ -243,5 +243,53 @@ describe('hostile topologies', () => {
     const bad: string[] = [];
     walkNumbers(snapshot, 'snapshot', bad);
     expect(bad).toEqual([]);
+  });
+});
+
+/**
+ * An autoscaler wired to a kind with no fleet.
+ *
+ * Reported as a bug (#26): the controller read the load correctly, showed 99%,
+ * and never moved a thing, which from the outside is indistinguishable from a
+ * broken autoscaler. It is not broken. An object store is modelled as one
+ * managed service rather than a pool of machines, so `scaleOf` returns null
+ * and the controller has nothing to resize.
+ *
+ * The stat exists so the panel can SAY that. Pinned here because the failure
+ * it prevents is silence, and silence is exactly what no test notices.
+ */
+describe('autoscaler on a kind with no fleet', () => {
+  function watching(kind: NodeKind): SimSnapshot {
+    const client = { ...makeNode('client', 0, 0), id: 'client' };
+    client.config = { ...client.config, rps: 5000 };
+    const target = { ...makeNode(kind, 260, 0), id: 'target' };
+    const scaler = { ...makeNode('autoscaler', 260, 200), id: 'scaler' };
+    return run(
+      {
+        nodes: [client, target, scaler],
+        edges: [
+          { id: 'e1', from: 'client', to: 'target', weight: 1 },
+          { id: 'e2', from: 'scaler', to: 'target', weight: 1, control: true },
+        ],
+      },
+      20,
+    );
+  }
+
+  it('says an object store cannot be scaled', () => {
+    expect(watching('objectstore').nodes.scaler.watchedUnscalable).toBe(true);
+  });
+
+  it('says the same of cold storage, which also has no instance count', () => {
+    expect(watching('coldstorage').nodes.scaler.watchedUnscalable).toBe(true);
+  });
+
+  it('does not say it of a service, which scales along instances', () => {
+    expect(watching('service').nodes.scaler.watchedUnscalable).toBe(false);
+  });
+
+  it('still reports the load it is reading, so the panel is not blank', () => {
+    const stats = watching('objectstore').nodes.scaler;
+    expect(stats.watchedUtil).toBeGreaterThan(0.9);
   });
 });

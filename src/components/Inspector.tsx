@@ -2273,6 +2273,35 @@ function AutoscalerPanel({ stats }: { stats: NodeStats }) {
     );
   }
 
+  /* Wired to something with no fleet to resize. Reported rather than left
+     silent: the controller reads the load correctly and then cannot act, and
+     a panel that showed only the utilisation would look like a bug. Saying so
+     is also the lesson, because the reason an object store has no instance
+     count is that a managed blob store is not a pool of machines you can add
+     to when a prefix melts. */
+  if (stats.watchedUnscalable) {
+    return (
+      <Section title="What it is doing">
+        <p className="ins-blurb">
+          Watching <strong>{watching}</strong>, which has no instances to add or remove.
+          This autoscaler cannot help it.
+        </p>
+        <div className="ins-stats">
+          <StatRow
+            label="It is at"
+            value={formatPct(util)}
+            tone={toneClass(healthOfLoad(util))}
+          />
+        </div>
+        <p className="ins-hint">
+          A managed store is one logical service rather than a pool of machines, so
+          there is no fleet to grow. If it is overloaded, the answer is spreading the
+          load across its keyspace rather than adding capacity.
+        </p>
+      </Section>
+    );
+  }
+
   return (
     <Section title="What it is doing">
       <p className="ins-blurb">
