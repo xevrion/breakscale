@@ -62,6 +62,16 @@
         "currency": "USD",
         "frequency": "monthly",
         "channels": ["github-sponsors", "ko-fi"]
+      },
+      {
+        "guid": "six-month-teaching-grant",
+        "status": "active",
+        "name": "Six month teaching and accessibility grant",
+        "description": "INR 300,000 over six months: INR 210,000 for maintainer time, INR 40,000 for per-example teaching pages so the 23 worked examples are readable outside the app bundle, INR 30,000 for an accessibility pass over the canvas and glossary, and INR 20,000 for infrastructure and testing. Traffic scenarios already implemented in the engine would gain controls in the interface, and contribution review would be funded rather than squeezed. Public progress reports monthly, in the repository.",
+        "amount": 300000,
+        "currency": "INR",
+        "frequency": "one-time",
+        "channels": ["github-sponsors"]
       }
     ]
   }
