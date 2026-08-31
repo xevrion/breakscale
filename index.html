@@ -109,6 +109,38 @@
     </script>
   </head>
   <body>
+    <!--
+      The app is client rendered, so a crawler that does not run JavaScript
+      sees an empty document and a reader with JavaScript off sees nothing at
+      all. This heading and paragraph are the one piece of the page that does
+      not need the bundle: they name what this is in the markup itself.
+
+      Styled inline rather than through .sr-only in index.css, because that
+      stylesheet arrives with the bundle and the text would be visible until
+      it did. Hidden from the accessibility tree is NOT wanted here: a screen
+      reader landing on the page should hear the name before the canvas
+      loads, which is the same reason the h1 is a real heading rather than a
+      meta tag.
+    -->
+    <div
+      style="
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      "
+    >
+      <h1>Breakscale: a system design simulator you can break</h1>
+      <p>
+        Build a distributed system on a canvas, push traffic through it, and watch real
+        queueing behaviour emerge: latency percentiles climbing, queues filling, circuit
+        breakers tripping and retry storms collapsing a system that was healthy a moment
+        earlier. Every number comes from a discrete-event simulation rather than a
+        formula. Free, open source, and it runs entirely in your browser.
+      </p>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
