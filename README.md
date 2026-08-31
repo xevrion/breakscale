@@ -7,6 +7,8 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/xevrion/breakscale/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/xevrion/breakscale?style=flat&color=blue" /></a>
+  <a href="https://github.com/xevrion/breakscale/forks"><img alt="Forks" src="https://img.shields.io/github/forks/xevrion/breakscale?style=flat&color=blue" /></a>
   <a href="LICENSE"><img alt="MIT licensed" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
   <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" /></a>
 </p>
@@ -136,6 +138,16 @@ looking number is worse than no number at all.
 React, TypeScript and Vite, with Lucide for icons. The canvas is hand-rolled SVG and the charts are
 drawn directly rather than pulled from a charting library, which keeps the bundle small and the
 rendering predictable.
+
+## Star history
+
+<a href="https://star-history.com/#xevrion/breakscale&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=xevrion/breakscale&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=xevrion/breakscale&type=Date" />
+    <img alt="Star history for xevrion/breakscale" src="https://api.star-history.com/svg?repos=xevrion/breakscale&type=Date" />
+  </picture>
+</a>
 
 ## License
 

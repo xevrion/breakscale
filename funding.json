@@ -1,0 +1,68 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "individual",
+    "role": "maintainer",
+    "name": "Yash Bavadiya",
+    "email": "krbavadiya11@gmail.com",
+    "description": "Yash Bavadiya is the creator and maintainer of Breakscale, an open source system design simulator used for teaching how distributed systems behave under load. He maintains the discrete-event engine, the component library, the worked examples, the test suite and the contributor workflow.",
+    "webpageUrl": {
+      "url": "https://github.com/xevrion"
+    }
+  },
+  "projects": [
+    {
+      "guid": "breakscale",
+      "name": "Breakscale",
+      "description": "Breakscale is an MIT-licensed system design simulator that runs the diagram instead of drawing it. A student places components on a canvas, pushes traffic through them, and watches real queueing behaviour emerge: latency percentiles climbing, queues filling, circuit breakers tripping and retry storms collapsing a system that was healthy a moment earlier. Every number comes from a discrete-event simulation rather than a formula, and vendor pricing is cited from published rates with the date it was read, because a teaching tool that shows a plausible number is worse than one that shows none. It ships 33 component types, 23 worked examples and a 100 term glossary, and runs entirely in the browser with no account and no backend. Funding would support per-example teaching pages, accessibility work, the traffic scenario controls, and time spent reviewing contributions.",
+      "webpageUrl": {
+        "url": "https://breakscale.tech"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/xevrion/breakscale"
+      },
+      "licenses": ["spdx:MIT"],
+      "tags": [
+        "open-source",
+        "education",
+        "system-design",
+        "distributed-systems",
+        "queueing-theory",
+        "simulator",
+        "teaching-tool",
+        "typescript",
+        "react",
+        "developer-tools"
+      ]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "github-sponsors",
+        "type": "payment-provider",
+        "address": "https://github.com/sponsors/xevrion",
+        "description": "GitHub Sponsors, for recurring or one off support."
+      },
+      {
+        "guid": "ko-fi",
+        "type": "payment-provider",
+        "address": "https://ko-fi.com/xevrion",
+        "description": "Ko-fi, for one off support without a GitHub account."
+      }
+    ],
+    "plans": [
+      {
+        "guid": "maintenance",
+        "status": "active",
+        "name": "Ongoing maintenance",
+        "description": "Supports maintainer time on the engine, the worked examples and reviewing contributions from the wider community.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "monthly",
+        "channels": ["github-sponsors", "ko-fi"]
+      }
+    ]
+  }
+}
