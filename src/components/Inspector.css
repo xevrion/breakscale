@@ -507,7 +507,8 @@
    leave the canvas the height it deserves. */
 .traffic-load {
   display: flex;
-  flex: 0 1 420px;
+  flex: 1 1 280px;
+  max-width: 420px;
   align-items: center;
   gap: var(--sp-4);
   min-width: 280px;
@@ -615,10 +616,11 @@
   white-space: nowrap;
 }
 
-/* Whitespace between the control half of the bar and the readout half. */
+/* Whitespace between the control half of the bar and the readout half.
+   A fixed gap only: leftover width goes to the slider first (see
+   .traffic-load), not into this spacer. */
 .traffic-spacer {
-  flex: 1 1 auto;
-  min-width: var(--sp-4);
+  flex: 0 0 var(--sp-4);
 }
 
 /* --------------------------------------------------------------------------
@@ -669,6 +671,14 @@
 .traffic-metric .label {
   color: var(--text-faint);
   white-space: nowrap;
+}
+
+/* Fixed width for the p99 column (~98px measured at the hero step), so the
+   offered-load slider does not resize as p99 steps between "17ms" and
+   "117ms". Same rationale as .traffic-load-readout .num-lg. */
+.traffic-headline > .traffic-metric:first-child {
+  flex: none;
+  width: 98px;
 }
 
 /* The secondary readouts. Grouped so they read as a set beside the hero
@@ -760,7 +770,7 @@
           student drives, so the figures go and the slider springs back.
           The charts strip still carries every one of these numbers.
      620  the slider's floor comes down to 260 and the headline tightens.
-     560  the "requests / sec" unit and the spacer's guarantee go, and the
+     560  the "requests / sec" unit and the spacer gap go to zero, and the
           slider may reach 220. The slider's aria-valuetext still says the
           unit, and this fires only in sub-900px windows where the p99
           hero, the slider and the transport are worth more than a word.
@@ -794,7 +804,7 @@
   }
 
   .traffic-spacer {
-    min-width: 0;
+    flex-basis: 0;
   }
 }
 
