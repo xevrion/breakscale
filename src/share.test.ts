@@ -15,6 +15,7 @@ import type { NodeConfig, Topology } from './sim/types';
  * ------------------------------------------------------------------ */
 
 const CONFIG: NodeConfig = {
+  instances: 1,
   capacity: 8,
   serviceMs: 25,
   serviceCv: 0.6,
@@ -221,7 +222,7 @@ describe('hostile input', () => {
     expect((await decodeTopology('')).status).toBe('absent');
     expect((await decodeTopology('#')).status).toBe('absent');
     expect((await decodeTopology('#about')).status).toBe('absent');
-    expect((await decodeTopology('#d2.abcdef')).status).toBe('absent');
+    expect((await decodeTopology('#d3.abcdef')).status).toBe('absent');
   });
 
   it('rejects a truncated hash', async () => {

@@ -1,6 +1,7 @@
 import { isTopology } from './clipboard';
 import { sanitizeAnnotations } from './sim/annotations';
-import type { Topology } from './sim/types';
+import type { Topology, NodeKind } from './sim/types';
+import { defaultConfig } from './sim/presets';
 
 /* ------------------------------------------------------------------ *
  * Share links.
@@ -43,7 +44,7 @@ import type { Topology } from './sim/types';
  * which point an old reader reports an unreadable link instead of showing
  * a wrong one.
  */
-export const SHARE_VERSION = 'd1';
+export const SHARE_VERSION = 'd2';
 
 const PREFIX = `${SHARE_VERSION}.`;
 
@@ -230,8 +231,25 @@ function concat(chunks: Bytes[], limit: number): Bytes {
  */
 function payloadOf(topology: Topology): string {
   const annotations = topology.annotations ?? [];
+
+  const optimizedNodes = topology.nodes.map((node) => {
+    const def = defaultConfig(node.kind);
+    const optimizedConfig: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node.config)) {
+      if (v !== (def as unknown as Record<string, unknown>)[k]) {
+        optimizedConfig[k] = v;
+      }
+    }
+    return {
+      ...node,
+      x: Math.round(node.x),
+      y: Math.round(node.y),
+      config: optimizedConfig,
+    };
+  });
+
   return JSON.stringify({
-    nodes: topology.nodes,
+    nodes: optimizedNodes,
     edges: topology.edges,
     ...(annotations.length > 0 ? { annotations } : {}),
   });
@@ -302,7 +320,8 @@ const BAD_LINK =
  * paying for the decode itself.
  */
 export function hasShareHash(hash: string): boolean {
-  return normalize(hash).startsWith(PREFIX);
+  const norm = normalize(hash);
+  return norm.startsWith('d1.') || norm.startsWith('d2.');
 }
 
 function normalize(hash: string): string {
@@ -321,7 +340,11 @@ function normalize(hash: string): string {
 export async function decodeTopology(hash: string): Promise<ShareResult> {
   const text = normalize(hash);
   if (!text) return { status: 'absent' };
-  if (!text.startsWith(PREFIX)) {
+
+  const isD1 = text.startsWith('d1.');
+  const isD2 = text.startsWith('d2.');
+
+  if (!isD1 && !isD2) {
     // Some other fragment: a deep link, a scroll anchor, a router path.
     // Not ours, so not an error.
     return { status: 'absent' };
@@ -330,7 +353,8 @@ export async function decodeTopology(hash: string): Promise<ShareResult> {
     return { status: 'invalid', message: BAD_LINK };
   }
 
-  const body = fromBase64Url(text.slice(PREFIX.length));
+  const prefixLen = 3;
+  const body = fromBase64Url(text.slice(prefixLen));
   if (!body || body.length < 2) return { status: 'invalid', message: BAD_LINK };
 
   const flag = body[0];
@@ -361,7 +385,21 @@ export async function decodeTopology(hash: string): Promise<ShareResult> {
     return { status: 'invalid', message: BAD_LINK };
   }
 
-  const p = parsed as { nodes?: unknown; edges?: unknown; annotations?: unknown };
+  const p = parsed as { nodes?: unknown[]; edges?: unknown; annotations?: unknown };
+
+  if (isD2 && Array.isArray(p.nodes)) {
+    for (const node of p.nodes) {
+      if (
+        node &&
+        typeof node === 'object' &&
+        typeof (node as Record<string, unknown>).kind === 'string'
+      ) {
+        const n = node as { kind: NodeKind; config?: Record<string, unknown> };
+        n.config = { ...defaultConfig(n.kind), ...n.config };
+      }
+    }
+  }
+
   const candidate = { nodes: p.nodes, edges: p.edges };
   // The SAME structural gate the clipboard and the saved session use. A
   // dangling edge, an unknown kind or a non-finite coordinate is rejected
