@@ -675,10 +675,14 @@
 
 /* Fixed width for the p99 column (~98px measured at the hero step), so the
    offered-load slider does not resize as p99 steps between "17ms" and
-   "117ms". Same rationale as .traffic-load-readout .num-lg. */
-.traffic-headline > .traffic-metric:first-child {
-  flex: none;
-  width: 98px;
+   "117ms". Same rationale as .traffic-load-readout .num-lg. Desktop only:
+   on phone the metric is a row (label beside value) and a fixed column
+   width clips it; the slider is on its own line there anyway. */
+@media (min-width: 721px) {
+  .traffic-headline > .traffic-metric:first-child {
+    flex: none;
+    width: 98px;
+  }
 }
 
 /* The secondary readouts. Grouped so they read as a set beside the hero
