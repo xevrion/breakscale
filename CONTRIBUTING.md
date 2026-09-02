@@ -137,6 +137,33 @@ Presets are the main teaching surface, so they get held to a standard:
 Do the arithmetic before tuning by feel: a node's ceiling is
 `capacity * instances * (1000 / serviceMs)` requests per second.
 
+## Adding a vendor size
+
+Vendor mode (`src/content/vendors/`) turns a published instance size, like `db.r6g.large`, into
+simulator config. Two kinds of file are involved, and they are kept strictly apart:
+
+- `aws.ts`, `gcp.ts`, `azure.ts` hold **published spec only**: vCPU, memory, network, price, each
+  with the URL it came from and, for prices, the date it was read. Every field here must be a fact
+  you can point at, not a guess.
+- `derive.ts` holds the **one model** that turns a spec into engine knobs (`capacity` and
+  `serviceMs`). It is the only place that mapping happens, and it makes one decision worth knowing
+  before you touch it: it derives `capacity` from vCPU, and it refuses to touch `serviceMs` at all.
+  A bigger machine does not make a query faster, it makes more queries run at once, so changing
+  `serviceMs` when someone picks a larger instance would teach the opposite of what this simulator
+  is for. `derive.test.ts` has the tests that pin that refusal down.
+
+What this means for adding a new vendor size:
+
+- Only add fields you can cite. If the vendor does not publish a number in readable text, leave the
+  field out rather than estimate it, the same way the existing files leave `vcpu` off an Azure
+  Managed Redis SKU that only states it inside an image. `derive.ts` already treats a missing vCPU
+  as "nothing honest to say" and skips the size rather than inventing a slot count.
+- A published `maxConnections` figure is a real ceiling, so where the vendor states one it is used
+  as-is and wins over the vCPU-based estimate. Where it does not, only `vcpu` feeds the estimate.
+- Do not add a mapping from size to `serviceMs`. There isn't one, on purpose; see above.
+- Follow the citation style already in `aws.ts`, `gcp.ts` and `azure.ts`: a `source` URL on every
+  size, and a `pricedOn` date on every price.
+
 ## Writing for students
 
 The audience is a first-year CS student who has not taken a queueing theory course.
