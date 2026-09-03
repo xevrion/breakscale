@@ -1478,17 +1478,14 @@ export default function App() {
 
   const handleAddNode = useCallback(
     (kind: NodeKind, x: number, y: number) => {
+      const t = topoLiveRef.current;
       const node = makeNode(kind, x, y);
-      const used = new Set(topoLiveRef.current.nodes.map((n) => n.id));
-      node.id = freshId(kind, used);
+      node.id = freshId(kind, new Set(t.nodes.map((n) => n.id)));
       history.commit('add', snapRef.current);
-      applyTopology({
-        ...topology,
-        nodes: [...topology.nodes, node],
-      });
+      applyTopology({ ...t, nodes: [...t.nodes, node] });
       setSelectedIds(new Set([node.id]));
     },
-    [applyTopology, topology, history],
+    [applyTopology, history],
   );
 
   /**
