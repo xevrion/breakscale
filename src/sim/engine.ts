@@ -573,6 +573,13 @@ export class Engine implements BehaviourCtx {
   private authoredCapacity = new Map<string, number>();
   /** Same, for the per-shard knob a sharded store is scaled through. */
   private authoredShardCapacity = new Map<string, number>();
+  /**
+   * Same, for the instance count a plain service is scaled through. `instances`
+   * is optional in NodeConfig, so an entry can be `undefined`: that records
+   * "the preset left it unset", and reset() has to put the field back to unset
+   * rather than skip it, because a scale-up will have written a number there.
+   */
+  private authoredInstances = new Map<string, number | undefined>();
 
   constructor(topology: Topology, seed = 1) {
     this.seed = seed >>> 0;
@@ -583,20 +590,38 @@ export class Engine implements BehaviourCtx {
   }
 
   /**
-   * Snapshot the authored capacity of every node, for reset() to restore.
+   * Snapshot the authored scale of every node, for reset() to restore.
    *
-   * Both scalable knobs are recorded, because a controller may write either
-   * one depending on the target kind's `capacityField`. Restoring only
-   * `capacity` would let a controller-scaled sharded store carry its grown
-   * `shardCapacity` across a reset, so the same seed would not replay.
+   * All three scalable knobs are recorded, because a controller may write any
+   * one depending on the target kind's `scaleField`. Restoring only `capacity`
+   * would let a controller-scaled sharded store carry its grown `shardCapacity`
+   * across a reset, or an autoscaled service its grown `instances`, so the same
+   * seed would not replay.
    */
   private recordAuthoredCapacity(): void {
     this.authoredCapacity.clear();
     this.authoredShardCapacity.clear();
+    this.authoredInstances.clear();
     for (const n of this.topology.nodes) {
       this.authoredCapacity.set(n.id, n.config.capacity);
       this.authoredShardCapacity.set(n.id, n.config.shardCapacity);
+      this.authoredInstances.set(n.id, n.config.instances);
     }
+  }
+
+  /**
+   * The authored value of whichever knob a kind scales along, or undefined when
+   * the preset left it unset. The hot-swap preserve rule in buildNodes() reads
+   * this to tell a controller write (which moves state.config but not the
+   * authored map) from a student edit (which moves both).
+   */
+  private authoredScale(
+    nodeId: string,
+    field: 'instances' | 'shardCapacity',
+  ): number | undefined {
+    return field === 'shardCapacity'
+      ? this.authoredShardCapacity.get(nodeId)
+      : this.authoredInstances.get(nodeId);
   }
 
   /* ---------------- public API ---------------- */
@@ -618,15 +643,19 @@ export class Engine implements BehaviourCtx {
   updateNodeConfig(id: string, patch: Partial<NodeConfig>): void {
     const node = this.topology.nodes.find((n) => n.id === id);
     if (node) Object.assign(node.config, patch);
-    // A capacity the student typed is a new authored value, so reset() should
-    // return to it rather than to the one the preset shipped with. A capacity
-    // written by a controller goes through setCapacity() and deliberately does
-    // NOT land here.
+    // A scale value the student typed is a new authored value, so reset() should
+    // return to it rather than to the one the preset shipped with, and a later
+    // hot swap should treat it as authored, not as a controller write. A value
+    // written by a controller goes through setScale() and deliberately does NOT
+    // land here.
     if (patch.capacity !== undefined) {
       this.authoredCapacity.set(id, Math.max(1, Math.floor(patch.capacity)));
     }
     if (patch.shardCapacity !== undefined) {
       this.authoredShardCapacity.set(id, Math.max(1, Math.floor(patch.shardCapacity)));
+    }
+    if (patch.instances !== undefined) {
+      this.authoredInstances.set(id, Math.max(1, Math.floor(patch.instances)));
     }
     const state = this.nodes.get(id);
     if (!state) return;
@@ -1054,6 +1083,12 @@ export class Engine implements BehaviourCtx {
       if (authored !== undefined) n.config.capacity = authored;
       const authoredShard = this.authoredShardCapacity.get(n.id);
       if (authoredShard !== undefined) n.config.shardCapacity = authoredShard;
+      // `instances` is optional, so an authored value of undefined is a real
+      // state to restore to, not a missing entry: a scale-up wrote a number
+      // here, and leaving it would replay the run from the grown fleet.
+      if (this.authoredInstances.has(n.id)) {
+        n.config.instances = this.authoredInstances.get(n.id);
+      }
     }
     this.buildNodes(null);
   }
@@ -1071,7 +1106,25 @@ export class Engine implements BehaviourCtx {
       if (kept && kept.kind === node.kind) {
         // Preserve in-flight work across a hot swap.
         state = kept;
+        // A controller (the autoscaler) writes its scale decision into
+        // state.config[scaleField] and into this.topology, but never into the
+        // authored map. `node.config` here is the shell topology's, which still
+        // carries the authored value, so `{ ...node.config }` would revert a
+        // live autoscaled fleet and leave the controller's target pointing at a
+        // size the node no longer has. Keep the live value whenever it diverges
+        // from authored. A student edit cannot be mistaken for a controller
+        // write: updateNodeConfig moves node.config, the authored map and
+        // state.config together, so it shows no divergence and flows through.
+        const field = state.behaviour.scaleField;
+        const liveScale =
+          field !== undefined &&
+          state.config[field] !== this.authoredScale(node.id, field)
+            ? state.config[field]
+            : undefined;
         state.config = { ...node.config };
+        if (field !== undefined && liveScale !== undefined) {
+          state.config[field] = liveScale;
+        }
         state.out = [];
         state.ctrl = [];
         state.sources = [];
