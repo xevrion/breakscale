@@ -158,8 +158,10 @@ What this means for adding a new vendor size:
   field out rather than estimate it, the same way the existing files leave `vcpu` off an Azure
   Managed Redis SKU that only states it inside an image. `derive.ts` already treats a missing vCPU
   as "nothing honest to say" and skips the size rather than inventing a slot count.
-- A published `maxConnections` figure is a real ceiling, so where the vendor states one it is used
-  as-is and wins over the vCPU-based estimate. Where it does not, only `vcpu` feeds the estimate.
+- A published `maxConnections` figure is a real ceiling, so where the vendor states one, `derive.ts`
+  takes the smaller of it and the vCPU-based estimate (`Math.min`). It does not replace the vCPU
+  estimate, it only caps it: if vCPU already implies fewer slots than `maxConnections`, vCPU still
+  wins. Where the vendor does not state one, only `vcpu` feeds the estimate.
 - Do not add a mapping from size to `serviceMs`. There isn't one, on purpose; see above.
 - Follow the citation style already in `aws.ts`, `gcp.ts` and `azure.ts`: a `source` URL on every
   size, and a `pricedOn` date on every price.
