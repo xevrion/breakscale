@@ -186,7 +186,7 @@ export function parseClipboardText(text: string): ClipboardSubgraph | null {
  * the clipboard may come from another tab whose counter this session never
  * saw, and a collision would silently merge two different nodes.
  */
-function freshId(kind: NodeKind, used: Set<string>): string {
+export function freshId(kind: NodeKind, used: Set<string>): string {
   let n = 1;
   while (used.has(`${kind}-${n}`)) n += 1;
   const id = `${kind}-${n}`;

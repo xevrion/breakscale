@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildClipboardText,
   cloneSubgraph,
+  freshId,
   isTopology,
   parseClipboardText,
   selectionSubgraph,
@@ -192,5 +193,60 @@ describe('cloneSubgraph', () => {
     const sub = selectionSubgraph(t, new Set(['service-1', 'service-3']))!;
     const clones = cloneSubgraph(sub, t, 0, 0);
     expect(clones.nodes.map((n) => n.x)).toEqual(sub.nodes.map((n) => n.x));
+  });
+});
+
+describe('freshId (palette-add dedup, issue #46)', () => {
+  it('two mints of the same kind against an existing topology produce unique ids', () => {
+    const existing: Topology = {
+      nodes: [
+        { ...node('client', 0, 0), kind: 'client', id: 'client' },
+        { ...node('service-1'), kind: 'service', id: 'service-1' },
+        { ...node('db', 480, 0), kind: 'db', id: 'db' },
+      ],
+      edges: [],
+    };
+
+    const used = new Set(existing.nodes.map((n) => n.id));
+    const id1 = freshId('cache', used);
+    const id2 = freshId('cache', used);
+
+    expect(id1).not.toBe(id2);
+    expect(new Set([...existing.nodes.map((n) => n.id), id1, id2]).size).toBe(5);
+  });
+
+  it('skips ids already present in the topology', () => {
+    const existing: Topology = {
+      nodes: [node('cache-1', 0, 0)],
+      edges: [],
+    };
+    // Simulate: topology already has cache-1 (from an earlier add).
+    // A second palette-add of cache must NOT mint cache-1 again.
+    const used = new Set(existing.nodes.map((n) => n.id));
+    const id = freshId('cache', used);
+    expect(id).toBe('cache-2');
+  });
+
+  it('result passes isTopology (no duplicate ids)', () => {
+    const base: Topology = {
+      nodes: [
+        { ...node('client', 0, 0), kind: 'client', id: 'client' },
+        { ...node('service-1'), kind: 'service', id: 'service-1' },
+        { ...node('db', 480, 0), kind: 'db', id: 'db' },
+      ],
+      edges: [],
+    };
+    const used = new Set(base.nodes.map((n) => n.id));
+    const id1 = freshId('cache', used);
+    const id2 = freshId('cache', used);
+    const after: Topology = {
+      nodes: [
+        ...base.nodes,
+        { ...node(id1, 240, 100), kind: 'cache', id: id1 },
+        { ...node(id2, 240, 200), kind: 'cache', id: id2 },
+      ],
+      edges: [],
+    };
+    expect(isTopology(after)).toBe(true);
   });
 });
