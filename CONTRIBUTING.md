@@ -137,6 +137,34 @@ Presets are the main teaching surface, so they get held to a standard:
 Do the arithmetic before tuning by feel: a node's ceiling is
 `capacity * instances * (1000 / serviceMs)` requests per second.
 
+## Adding a vendor
+
+Vendor mode maps a published instance size (a `db.r6g.large`, an `n2-standard-4`) onto the
+engine's knobs. `src/content/vendors/derive.ts` is the only place that mapping happens, and it
+makes two decisions a new contributor should know before touching it:
+
+- Capacity is derived from vCPU count: one vCPU is assumed to hold one concurrent request, so an
+  8 vCPU size gets a capacity of 8 (clamped by a published `maxConnections` where the vendor
+  states one).
+- Service time is never derived. A bigger machine does not make a query faster; it runs more of
+  them at once. Changing `serviceMs` when someone picks a larger size would teach the opposite of
+  what the simulator exists to teach, so `deriveFromSize` always returns `serviceMs: null` and the
+  caller leaves whatever the component already had. `derive.test.ts` asserts this for every sized
+  kind.
+
+A vendor's size data (`aws.ts`, `gcp.ts`, `azure.ts`) is kept separate from that model. Every field
+in a size record is a published fact and carries the URL it came from and the date it was read, in
+the style already used in those files; `derive.ts` is the only file allowed to turn those facts
+into simulator behaviour. A size that does not publish a vCPU count (for example, Azure Managed
+Redis publishes its per-SKU counts only inside an image) omits the field rather than guessing one;
+`derive.ts` already treats a missing count as "nothing honest to say" and leaves the component
+alone.
+
+Adding a new vendor means writing a data file in that citation style, listing its sizes for the
+`NodeKind`s in `SIZED_KINDS`, and wiring it into `index.ts` and `lookup.ts`. It does not mean
+touching `derive.ts` unless the model itself is wrong for every vendor, not just inconvenient for
+one.
+
 ## Writing for students
 
 The audience is a first-year CS student who has not taken a queueing theory course.
