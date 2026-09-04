@@ -97,22 +97,56 @@ function parseEntry(raw: unknown): SavedDesign | null {
   };
 }
 
-/** Everything on the shelf, newest first. */
-export function loadDesigns(): SavedDesign[] {
+/**
+ * The shelf as it actually sits in storage: the rows this version understands,
+ * and the rows it does not.
+ *
+ * The second list is why this exists. Dropping a row that fails to parse is
+ * right for DISPLAY, but every mutation here is read, change, write, so a row
+ * dropped on the way in is a row deleted on the way out. Saving an unrelated
+ * design was enough to erase someone else's, permanently, with nothing said.
+ *
+ * So the unreadable rows are carried through verbatim. A row this build cannot
+ * open is not necessarily a row that is gone: it may be a newer format, or a
+ * design tripped by a bug that a later build fixes. Keeping the bytes leaves
+ * that recovery possible; rewriting the shelf without them does not.
+ */
+interface Shelf {
+  designs: SavedDesign[];
+  /** Rows that failed to parse, exactly as stored. Never inspected further. */
+  unreadable: unknown[];
+}
+
+function readShelf(): Shelf {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) return { designs: [], unreadable: [] };
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map(parseEntry)
-      .filter((d): d is SavedDesign => d !== null)
-      .sort((a, b) => b.savedAt - a.savedAt);
+    if (!Array.isArray(parsed)) return { designs: [], unreadable: [] };
+
+    const designs: SavedDesign[] = [];
+    const unreadable: unknown[] = [];
+    for (const row of parsed) {
+      const entry = parseEntry(row);
+      if (entry) designs.push(entry);
+      // Bounded for the same reason MAX_SAVED exists: localStorage is a
+      // shared 5MB budget, and rows nobody can open must not grow without
+      // limit. Past the cap the oldest bytes go, which is the same trade the
+      // readable half already makes.
+      else if (unreadable.length < MAX_SAVED) unreadable.push(row);
+    }
+    designs.sort((a, b) => b.savedAt - a.savedAt);
+    return { designs, unreadable };
   } catch {
     // Corrupt JSON or blocked storage. An empty shelf is a survivable
     // outcome; a thrown error during boot is not.
-    return [];
+    return { designs: [], unreadable: [] };
   }
+}
+
+/** Everything on the shelf this build can open, newest first. */
+export function loadDesigns(): SavedDesign[] {
+  return readShelf().designs;
 }
 
 /** The list the interface renders, without the topologies. */
@@ -125,9 +159,12 @@ export function listDesigns(): SavedSummary[] {
   }));
 }
 
-function write(designs: SavedDesign[]): boolean {
+function write(designs: SavedDesign[], unreadable: readonly unknown[]): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(designs));
+    // The rows we could not parse go back untouched, after the ones we could.
+    // Order among them does not matter: nothing reads them, and the readable
+    // half is sorted on the way in.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...designs, ...unreadable]));
     return true;
   } catch {
     // Quota exceeded, or storage disabled. Reported rather than swallowed:
@@ -151,7 +188,7 @@ export function saveDesign(name: string, topology: Topology): SaveResult {
   const clean = name.trim().slice(0, MAX_NAME);
   if (!clean) return { ok: false, error: 'Give the design a name first.' };
 
-  const designs = loadDesigns();
+  const { designs, unreadable } = readShelf();
   const existing = designs.findIndex(
     (d) => d.name.toLowerCase() === clean.toLowerCase(),
   );
@@ -173,7 +210,7 @@ export function saveDesign(name: string, topology: Topology): SaveResult {
     next.length = MAX_SAVED;
   }
 
-  if (!write(next)) {
+  if (!write(next, unreadable)) {
     return {
       ok: false,
       error: 'There is no room left in this browser to save another design.',
@@ -188,14 +225,18 @@ export function getDesign(id: string): SavedDesign | null {
 }
 
 export function deleteDesign(id: string): void {
-  write(loadDesigns().filter((d) => d.id !== id));
+  const { designs, unreadable } = readShelf();
+  write(
+    designs.filter((d) => d.id !== id),
+    unreadable,
+  );
 }
 
 /** Rename in place. Returns false when the name is empty or already taken. */
 export function renameDesign(id: string, name: string): boolean {
   const clean = name.trim().slice(0, MAX_NAME);
   if (!clean) return false;
-  const designs = loadDesigns();
+  const { designs, unreadable } = readShelf();
   if (
     designs.some((d) => d.id !== id && d.name.toLowerCase() === clean.toLowerCase())
   ) {
@@ -203,7 +244,7 @@ export function renameDesign(id: string, name: string): boolean {
   }
   const i = designs.findIndex((d) => d.id === id);
   if (i < 0) return false;
-  return write(designs.with(i, { ...designs[i]!, name: clean }));
+  return write(designs.with(i, { ...designs[i]!, name: clean }), unreadable);
 }
 
 /**
