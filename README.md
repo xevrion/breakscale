@@ -9,21 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/xevrion/breakscale/actions/workflows/ci.yml">
-    <img src="https://github.com/xevrion/breakscale/actions/workflows/ci.yml/badge.svg" alt="CI" />
-  </a>
-  <a href="https://github.com/xevrion/breakscale/stargazers">
-    <img src="https://img.shields.io/github/stars/xevrion/breakscale?style=flat&color=blue" alt="Stars" />
-  </a>
-  <a href="https://github.com/xevrion/breakscale/forks">
-    <img src="https://img.shields.io/github/forks/xevrion/breakscale?style=flat&color=blue" alt="Forks" />
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT licensed" />
-  </a>
-  <a href="CONTRIBUTING.md">
-    <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" />
-  </a>
+  <a href="https://github.com/xevrion/breakscale/actions/workflows/ci.yml"><img src="https://github.com/xevrion/breakscale/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/xevrion/breakscale/stargazers"><img src="https://img.shields.io/github/stars/xevrion/breakscale?style=flat&color=blue" alt="Stars" /></a>
+  <a href="https://github.com/xevrion/breakscale/forks"><img src="https://img.shields.io/github/forks/xevrion/breakscale?style=flat&color=blue" alt="Forks" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT licensed" /></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
 </p>
 
 <p align="center">
