@@ -4,9 +4,12 @@
 
 <p align="center">
   <a href="https://breakscale.tech"><strong>Try it</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://docs.breakscale.tech">Docs</a>
 </p>
 
 <p align="center">
+  <a href="https://github.com/xevrion/breakscale/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/xevrion/breakscale/actions/workflows/ci.yml/badge.svg" /></a>
   <a href="https://github.com/xevrion/breakscale/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/xevrion/breakscale?style=flat&color=blue" /></a>
   <a href="https://github.com/xevrion/breakscale/forks"><img alt="Forks" src="https://img.shields.io/github/forks/xevrion/breakscale?style=flat&color=blue" /></a>
   <a href="LICENSE"><img alt="MIT licensed" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
