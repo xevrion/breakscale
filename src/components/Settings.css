@@ -190,6 +190,13 @@
 .st-seg.is-active {
   background: var(--surface);
   color: var(--text);
+  border: var(--bw) solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.st-seg.is-active-4 {
+  background: var(--surface);
+  color: var(--text);
   box-shadow: var(--shadow-sm);
 }
 
