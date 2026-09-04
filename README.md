@@ -2,11 +2,11 @@
   <img src="docs/banner.png" alt="Breakscale: build a system, load it until it breaks, watch why" width="100%" />
 </p>
 
-<p align="center">
-  <a href="https://breakscale.tech"><strong>Try it</strong></a>
-  &nbsp;·&nbsp;
-  <a href="https://docs.breakscale.tech">Docs</a>
-</p>
+<h4 align="center">
+  <a href="https://breakscale.tech">Try it</a> |
+  <a href="https://docs.breakscale.tech">Documentation</a> |
+  <a href="CONTRIBUTING.md">Contributing</a>
+</h4>
 
 <p align="center">
   <a href="https://github.com/xevrion/breakscale/actions/workflows/ci.yml"><img src="https://github.com/xevrion/breakscale/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
@@ -19,6 +19,15 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/194049" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/194049/daily?language=TypeScript" alt="xevrion/breakscale | Trendshift" width="250" height="55" /></a>
 </p>
+
+<div align="center">
+  <img src="docs/retry-storm.png" alt="The Retry Storm example at 100 requests a second: the database is 99.9% busy while goodput is zero" width="100%" />
+  <p align="center">
+    <sub>The Retry Storm example at 100 requests a second. The database is at 99.9% busy and
+    goodput is zero, because retries have tripled 100 offered requests into 348 hitting a
+    database that was already full.</sub>
+  </p>
+</div>
 
 Breakscale is a system design simulator for learning how distributed systems behave under load.
 You place components on a canvas, wire them together, then drag a slider and watch real queueing
@@ -52,13 +61,23 @@ bun dev
 Open http://localhost:5173, pick an example from the left, and raise the traffic slider until
 something goes red.
 
+## Features
+
+- **33 components.** Load balancers, caches, databases, queues and workers, plus CDNs, rate
+  limiters, circuit breakers, read replicas, sharded stores, autoscalers, stream brokers,
+  WebSocket gateways, serverless functions and bulkheads.
+- **23 worked examples.** Sixteen teaching scenarios and seven reconstructions of real
+  architectures, each one loadable in a click.
+- **A real discrete-event engine.** Finite server slots, gamma-distributed service times, measured
+  percentiles. No formulas standing in for a simulation.
+- **Chaos controls.** Crash a node, slow it down, force an error rate, or cut a single link.
+- **Deterministic.** The same seed and topology replay identically, every time.
+- **Explanations built in.** Every metric and unit has a plain-language definition.
+- **Runs entirely in the browser.** No account, no backend, no telemetry. Your designs stay local.
+
 ## What is in it
 
-**33 components.** Load balancers, caches, databases, queues and workers, plus the things real
-systems are actually made of: CDNs, rate limiters, circuit breakers, read replicas, sharded
-stores, autoscalers, stream brokers, WebSocket gateways, serverless functions, bulkheads and more.
-
-**23 worked examples.** Sixteen teaching scenarios, each isolating one failure mode, plus seven
+The 23 examples are sixteen teaching scenarios, each isolating one failure mode, plus seven
 reconstructions of real architectures:
 
 | Example             | What it teaches                                                  |
@@ -76,12 +95,6 @@ reconstructions of real architectures:
 Plus **Netflix**, **Spotify**, **Discord**, **Uber**, **Twitter/X**, **Stripe** and **WhatsApp**,
 reconstructed from published engineering material. Each names what it models and what it leaves
 out. They are teaching diagrams, not insider knowledge.
-
-**Chaos controls.** Crash a node, slow it down, force an error rate, or cut a specific link, then
-watch the failure propagate and see whether the design survives it.
-
-**Explanations built in.** Every metric and unit has a plain-language definition covering both what
-it means and why it matters, because a number a student cannot act on is trivia.
 
 ## How the simulation works
 
