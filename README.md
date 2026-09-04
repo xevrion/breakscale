@@ -13,6 +13,10 @@
   <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" /></a>
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/194049" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/194049/daily?language=TypeScript" alt="xevrion/breakscale | Trendshift" width="250" height="55" /></a>
+</p>
+
 Breakscale is a system design simulator for learning how distributed systems behave under load.
 You place components on a canvas, wire them together, then drag a slider and watch real queueing
 behaviour emerge: latency percentiles climbing, queues filling, circuit breakers tripping, whole
