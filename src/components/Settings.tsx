@@ -373,7 +373,7 @@ export function Settings({
                     type="button"
                     role="radio"
                     aria-checked={prefs.vendor === v.id}
-                    className={`st-seg${prefs.vendor === v.id ? ' is-active' : ''}`}
+                    className={`st-seg st-seg-4${prefs.vendor === v.id ? ' is-active-4' : ''}`}
                     onClick={() => setPreference('vendor', v.id)}
                   >
                     {v.label}
