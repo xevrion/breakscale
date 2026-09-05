@@ -203,6 +203,80 @@ describe('load response', () => {
   });
 });
 
+/**
+ * A load balancer's pool used to be theatre: onAdmit returned passthru, so
+ * capacity, instances and queueLimit never met an admission check (#52).
+ *
+ * The ceiling is AGENTS.md's sizing rule, capacity * instances * (1000 /
+ * serviceMs). The service behind the lb is deliberately far above that, so
+ * if throughput still ignores the pool, the lb is the thing that is lying.
+ */
+describe('load balancer pool', () => {
+  function topology(lb: {
+    capacity: number;
+    instances: number;
+    queueLimit: number;
+    serviceMs: number;
+  }): Topology {
+    const client = makeNode('client', 0, 0);
+    client.id = 'client';
+    client.config = { ...defaultConfig('client'), rps: 3000, timeoutMs: 10_000 };
+
+    const balancer = makeNode('lb', 260, 0);
+    balancer.id = 'lb';
+    balancer.config = { ...defaultConfig('lb'), ...lb, serviceCv: 0 };
+
+    const service = makeNode('service', 520, 0);
+    service.id = 'service';
+    service.config = {
+      ...defaultConfig('service'),
+      capacity: 64,
+      instances: 8,
+      serviceMs: 8,
+      queueLimit: 10_000,
+    };
+
+    return {
+      nodes: [client, balancer, service],
+      edges: [
+        { id: 'e1', from: 'client', to: 'lb', weight: 1 },
+        { id: 'e2', from: 'lb', to: 'service', weight: 1 },
+      ],
+    };
+  }
+
+  it('caps throughput at the pool ceiling instead of passing every request', () => {
+    const snapshot = run(
+      topology({ capacity: 2, instances: 1, queueLimit: 4, serviceMs: 5 }),
+      30,
+    );
+    const ceiling = 2 * 1 * (1000 / 5);
+    expect(snapshot.nodes.lb.throughput).toBeLessThanOrEqual(ceiling * 1.35);
+    expect(snapshot.system.offeredRps).toBeGreaterThan(ceiling * 2);
+    expect(snapshot.nodes.lb.shedRate).toBeGreaterThan(0);
+  });
+
+  it('lets instances raise that ceiling', () => {
+    const tight = run(
+      topology({ capacity: 2, instances: 1, queueLimit: 4, serviceMs: 5 }),
+      30,
+    );
+    const wide = run(
+      topology({ capacity: 2, instances: 12, queueLimit: 4, serviceMs: 5 }),
+      30,
+    );
+    expect(wide.nodes.lb.throughput).toBeGreaterThan(tight.nodes.lb.throughput * 2);
+  });
+
+  it('queues when the pool is full, instead of keeping waiting at zero', () => {
+    const snapshot = run(
+      topology({ capacity: 2, instances: 1, queueLimit: 4096, serviceMs: 5 }),
+      10,
+    );
+    expect(snapshot.nodes.lb.queued).toBeGreaterThan(0);
+  });
+});
+
 describe('hostile topologies', () => {
   const cases: Array<[string, Topology]> = [
     ['empty', { nodes: [], edges: [] }],

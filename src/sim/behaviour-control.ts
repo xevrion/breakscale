@@ -434,7 +434,7 @@ function regionHealthy(ctx: BehaviourCtx, state: NodeStateLike, i: number): bool
  */
 const region: ComponentBehaviour = {
   kind: 'region',
-  // A pure switch, like an lb: it forwards without holding slots of its own.
+  // A pure switch: it forwards without holding slots of its own.
   servesRequests: true,
   generatesLoad: false,
   pullsFromQueues: false,

@@ -287,6 +287,11 @@ const client: ComponentBehaviour = {
 /**
  * A dispatcher. Picks exactly one downstream per request: weighted-random when
  * the edge weights differ, least-loaded when they are all equal.
+ *
+ * Its pool is real. There is no onAdmit, so the engine's default `serve` puts
+ * `capacity`, `instances` and `queueLimit` through ordinary slot and queue
+ * discipline. `passthru` skipped that, which made all three knobs inert and
+ * left an autoscaler writing `instances` with nothing to turn (#52).
  */
 const lb: ComponentBehaviour = {
   kind: 'lb',
@@ -298,7 +303,6 @@ const lb: ComponentBehaviour = {
   buffersForConsumers: false,
   pump: 'own',
   creditsJoinCompletion: true,
-  onAdmit: () => 'passthru',
   route: () => 'one',
   pickEdge: (ctx, _state, _req, out) => ctx.pickWeightedOrLeastLoaded(out),
 };
