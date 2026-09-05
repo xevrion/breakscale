@@ -31,6 +31,15 @@ const MAX_DELTA_MS = 100;
 const MAX_EVENTS_PER_ADVANCE = 60000;
 /** Hop-depth ceiling; deeper resolves as FailureReason 'depth'. */
 const MAX_HOP_DEPTH = 32;
+/**
+ * Instance-count ceiling, matching the inspector's own slider.
+ *
+ * The engine writes one array element per instance on every snapshot, so an
+ * unbounded count is an unbounded allocation. A design does not only come from
+ * the editor: a shared link, a `.breakscale` file and a restored session all
+ * carry `instances` straight through, and `isTopology` does not police it.
+ */
+const MAX_INSTANCES = 512;
 /** Trailing window for latency percentiles. */
 const LATENCY_WINDOW_MS = 5000;
 /** Capacity of each latency ring buffer. */
@@ -2202,7 +2211,10 @@ export class Engine implements BehaviourCtx {
    */
   effectiveInstances(state: NodeStateLike): number {
     const raw = state.config.instances;
-    return raw === undefined ? 1 : Math.max(1, Math.floor(raw));
+    // `Math.max(1, Math.floor(NaN))` is NaN, so the ">= 1" above was a promise
+    // this could not keep, and `units.length = NaN` throws where it is read.
+    if (raw === undefined || !Number.isFinite(raw)) return 1;
+    return Math.min(MAX_INSTANCES, Math.max(1, Math.floor(raw)));
   }
 
   countHit(state: NodeStateLike): void {
