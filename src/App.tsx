@@ -39,7 +39,7 @@ import { Palette } from './components/Palette';
 import { Glossary } from './components/Glossary';
 import { Shortcuts } from './components/Shortcuts';
 import { Examples } from './components/Examples';
-import { cloneSubgraph, isTopology, selectionSubgraph } from './clipboard';
+import { cloneSubgraph, freshId, isTopology, selectionSubgraph } from './clipboard';
 import type { ClipboardSubgraph } from './clipboard';
 import {
   NOTE_DEFAULT_WIDTH,
@@ -1478,15 +1478,14 @@ export default function App() {
 
   const handleAddNode = useCallback(
     (kind: NodeKind, x: number, y: number) => {
+      const t = topoLiveRef.current;
       const node = makeNode(kind, x, y);
+      node.id = freshId(kind, new Set(t.nodes.map((n) => n.id)));
       history.commit('add', snapRef.current);
-      applyTopology({
-        ...topology,
-        nodes: [...topology.nodes, node],
-      });
+      applyTopology({ ...t, nodes: [...t.nodes, node] });
       setSelectedIds(new Set([node.id]));
     },
-    [applyTopology, topology, history],
+    [applyTopology, history],
   );
 
   /**
