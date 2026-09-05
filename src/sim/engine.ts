@@ -833,7 +833,13 @@ export class Engine implements BehaviourCtx {
       const timeoutRate = state.timeouts.rate(now);
       const hits = state.hits.rate(now);
       const misses = state.misses.rate(now);
-      const resolved = completions + errorsPerSec + shedRate;
+      /*
+       * Timeouts belong in both halves. They were in neither, so `errorRate`
+       * answered "how many of the requests that did not time out went wrong"
+       * while the cell rendering it says "failing", and a caller losing a
+       * quarter of its traffic to a slow dependency read 0%.
+       */
+      const resolved = completions + errorsPerSec + shedRate + timeoutRate;
 
       // A fresh object per snapshot, deliberately. Mutating a reused entry in
       // place makes every memoised consumer see an unchanged reference and
@@ -871,7 +877,8 @@ export class Engine implements BehaviourCtx {
       entry.p50 = this.nodePctScratch[0];
       entry.p95 = this.nodePctScratch[1];
       entry.p99 = this.nodePctScratch[2];
-      entry.errorRate = resolved > 0 ? (errorsPerSec + shedRate) / resolved : 0;
+      entry.errorRate =
+        resolved > 0 ? (errorsPerSec + shedRate + timeoutRate) / resolved : 0;
       entry.shedRate = shedRate;
       entry.timeoutRate = timeoutRate;
       entry.hitRate = hits + misses > 0 ? hits / (hits + misses) : 0;
@@ -1914,8 +1921,14 @@ export class Engine implements BehaviourCtx {
     const parent = call.parent;
     const callerState = parent ? this.nodes.get(parent.nodeId) : null;
     if (callerState) {
+      // Giving up is what this counter means, so it belongs here and only
+      // here: this is the node whose deadline elapsed.
       callerState.timeouts.add(this.now, 1);
-      callerState.totalFailed++;
+      // The failure itself is NOT booked here. Every node already has one
+      // path that books it when the request ends there: `resolve` for the
+      // root client, and the fan-out join for everything below it, both of
+      // which fire for every reason rather than only this one. Booking it
+      // here as well is what made a node fail more often than the system did.
     }
 
     // Detach the call from its parent so its eventual completion is discarded,
@@ -1992,9 +2005,12 @@ export class Engine implements BehaviourCtx {
         this.failures[reason]++;
         if (client) {
           client.totalFailed++;
-          if (reason === 'timeout') client.timeouts.add(this.now, 1);
-          else if (reason === 'shed') client.sheds.add(this.now, 1);
-          else client.errors.add(this.now, 1);
+          // No timeout arm. `onTimeout` already attributed it to whichever
+          // node gave up, which is this client when it called its dependency
+          // directly and some node below it otherwise. Counting it again here
+          // is what made a client's timeout rate outrun the load it offered.
+          if (reason === 'shed') client.sheds.add(this.now, 1);
+          else if (reason !== 'timeout') client.errors.add(this.now, 1);
         }
       }
       this.recycle(req);
