@@ -293,3 +293,104 @@ describe('autoscaler on a kind with no fleet', () => {
     expect(stats.watchedUtil).toBeGreaterThan(0.9);
   });
 });
+
+/**
+ * Autoscaler-written scale surviving a structural hot swap (#35).
+ *
+ * `setScale` moves `instances`, but the authored-value machinery that lets
+ * reset() rewind a controller decision was built for `capacity` and
+ * `shardCapacity` and never extended to it. So an unrelated structural edit
+ * rebuilt the watched node from the shell topology's authored count, reverting
+ * the live fleet while the controller's target stayed put; and reset() replayed
+ * from the grown fleet because it never rewound `instances`.
+ *
+ * The ownership signal is divergence from the authored value: only setScale
+ * moves state.config without the authored map, so only its writes look
+ * diverged. A student edit goes through updateNodeConfig, which moves both.
+ */
+describe('autoscaler scale survives a structural hot swap', () => {
+  const preset = PRESETS.find((p) => p.id === 'autoscaling-service');
+  if (!preset) throw new Error('autoscaling-service preset missing');
+  const AUTOSCALING = preset;
+
+  /** The preset, cloned, with the client pushed to a load that forces a scale-up. */
+  function loaded(): Topology {
+    const t = structuredClone(AUTOSCALING.topology);
+    const client = t.nodes.find((n) => n.id === 'client');
+    if (client) client.config = { ...client.config, rps: 1000 };
+    return t;
+  }
+
+  /** An engine on that topology, advanced until the API has scaled past its authored 3. */
+  function scaledUp(seed = 42): Engine {
+    const engine = new Engine(loaded(), seed);
+    for (let i = 0; i < 30 * 60; i += 1) engine.advance(1000 / 60);
+    return engine;
+  }
+
+  /** `topology` plus one cache wired to nothing. */
+  function withLooseCache(topology: Topology): Topology {
+    const next = structuredClone(topology);
+    next.nodes.push({ ...makeNode('cache', 900, 400), id: 'loose-cache' });
+    return next;
+  }
+
+  it('scales the API past its authored instance count first', () => {
+    const scaled = scaledUp().scaleOf('api');
+    expect(scaled).not.toBeNull();
+    expect(scaled ?? 0).toBeGreaterThan(3);
+  });
+
+  it('keeps the live fleet size when an unrelated node is added', () => {
+    const engine = scaledUp();
+    const before = engine.scaleOf('api');
+    engine.setTopology(withLooseCache(loaded()));
+    expect(engine.scaleOf('api')).toBe(before);
+  });
+
+  it('leaves the controller and the watched node agreeing after the edit', () => {
+    const engine = scaledUp();
+    engine.setTopology(withLooseCache(loaded()));
+    const scaler = engine.snapshot().nodes.scaler;
+    expect(scaler.watchedInstances).toBe(engine.scaleOf('api'));
+    expect(scaler.targetInstances).toBe(scaler.watchedInstances);
+  });
+
+  it('lets an explicit instance edit override the live value across an edit', () => {
+    const engine = scaledUp();
+    engine.updateNodeConfig('api', { instances: 2 });
+    // A structural edit carries the student's value in from the React topology.
+    const edited = withLooseCache(loaded());
+    const api = edited.nodes.find((n) => n.id === 'api');
+    if (api) api.config.instances = 2;
+    engine.setTopology(edited);
+    expect(engine.scaleOf('api')).toBe(2);
+  });
+
+  it('restores the authored count on reset', () => {
+    const engine = scaledUp();
+    engine.reset();
+    expect(engine.scaleOf('api')).toBe(3);
+  });
+
+  it('replays byte-identically after a reset that followed a scale-up', () => {
+    const engine = new Engine(loaded(), 42);
+    const frames = 25 * 60;
+    for (let i = 0; i < frames; i += 1) engine.advance(1000 / 60);
+    const first = JSON.stringify(engine.snapshot());
+    engine.reset();
+    for (let i = 0; i < frames; i += 1) engine.advance(1000 / 60);
+    expect(JSON.stringify(engine.snapshot())).toBe(first);
+  });
+
+  it('does not carry the live count onto a node re-added at the same id', () => {
+    const engine = scaledUp();
+    // Same code path a retype (kind change) takes: the kept state is not reused.
+    engine.setTopology({
+      nodes: loaded().nodes.filter((n) => n.id !== 'api'),
+      edges: [],
+    });
+    engine.setTopology(loaded());
+    expect(engine.scaleOf('api')).toBe(3);
+  });
+});
