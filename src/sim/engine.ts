@@ -1715,7 +1715,7 @@ export class Engine implements BehaviourCtx {
     }
   }
 
-  /** lb / client style pass-through with a tiny (possibly zero) service time. */
+  /** Client-style pass-through with a tiny (possibly zero) service time. */
   private beginZeroService(state: NodeState, req: Req): void {
     const ms = this.serviceTimeFor(state);
     req.ownMs = ms;
