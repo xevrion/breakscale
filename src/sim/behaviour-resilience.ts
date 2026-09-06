@@ -244,9 +244,24 @@ const retryqueue: ComponentBehaviour = {
  * Emitting consumes no randomness; failed emits (a cut edge, a missing
  * target) are simply lost artifacts, counted nowhere upstream.
  */
+/**
+ * Longest ladder the farm will encode, the maximum the inspector offers.
+ *
+ * The cap is here rather than at the number input because the ladder is a
+ * loop that runs once per rendition per outgoing edge per finished job, and
+ * `renditions` is not one of the nine config numbers `isTopology` checks: a
+ * shared link, a `.breakscale` file and a restored session carry whatever it
+ * says straight into that loop.
+ */
+const MAX_RENDITIONS = 12;
+
 function cfgRenditions(state: NodeStateLike): number {
   const v = state.config.renditions;
-  return v !== undefined && v >= 1 ? Math.floor(v) : 3;
+  // `Infinity >= 1` is true and `Math.floor` leaves it alone, so the ladder
+  // below had no end for it. A ladder is a small number by nature: the
+  // ceiling is what the inspector already allows.
+  if (v === undefined || !Number.isFinite(v) || v < 1) return 3;
+  return Math.min(MAX_RENDITIONS, Math.floor(v));
 }
 
 const transcoder: ComponentBehaviour = {
