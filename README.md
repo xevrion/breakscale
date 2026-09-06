@@ -61,6 +61,10 @@ bun dev
 Open http://localhost:5173, pick an example from the left, and raise the traffic slider until
 something goes red.
 
+Or open it hosted, without installing Bun:
+
+[![Deploy on InstaPods](https://instapods.com/deploy-button.svg)](https://app.instapods.com/dashboard/pods/create?repo=https://github.com/xevrion/breakscale&ref=gh-breakscale)
+
 ## Features
 
 - **33 components.** Load balancers, caches, databases, queues and workers, plus CDNs, rate
