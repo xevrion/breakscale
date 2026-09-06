@@ -394,8 +394,28 @@ function asRegion(state: NodeStateLike): RegionState | null {
 
 /** How many of this node's out edges count as regions. */
 function regionCount(state: NodeStateLike): number {
-  const declared = Math.floor(state.config.regions ?? state.out.length);
-  return Math.max(1, Math.min(declared, state.out.length));
+  const declared = state.config.regions;
+  // NaN fails every comparison, so `Math.min` and `Math.max` hand it back
+  // unchanged. It is then published as the region total, while the census
+  // loop that counts healthy regions runs zero times -- and the readout is
+  // meant to be derived from the very predicate the routing uses.
+  if (!Number.isFinite(declared)) return state.out.length;
+  return Math.max(1, Math.min(Math.floor(declared as number), state.out.length));
+}
+
+/**
+ * The region the student asked for, clamped into the regions that exist.
+ *
+ * A value that is not a finite number is the first region rather than
+ * itself: `Math.floor(NaN)` is NaN, every comparison below is false for it,
+ * so it used to be adopted as the live region -- and `out[NaN]` is nothing,
+ * which makes the switch route nowhere at all.
+ */
+function configuredRegion(state: NodeStateLike, count: number): number {
+  const raw = state.config.activeRegion;
+  if (!Number.isFinite(raw)) return 0;
+  const configured = Math.floor(raw as number);
+  return configured < 0 ? 0 : configured >= count ? count - 1 : configured;
 }
 
 /**
@@ -476,8 +496,7 @@ const region: ComponentBehaviour = {
     // between it and the live region -- after a failover the two differ by
     // design, and treating that as a manual switch would drag traffic back
     // onto the region that just died.
-    const configured = Math.floor(cfg.activeRegion ?? 0);
-    const wanted = configured < 0 ? 0 : configured >= count ? count - 1 : configured;
+    const wanted = configuredRegion(state, count);
     if (st.active === -1 || wanted !== st.lastConfigured) {
       st.lastConfigured = wanted;
       st.active = wanted;
@@ -606,8 +625,7 @@ function liveRegionIndex(
   const active = st.failoverDueMs >= 0 ? st.failoverTarget : st.active;
   if (active < 0) {
     // Nothing has been adopted yet; pickEdge would take the configured region.
-    const configured = Math.floor(state.config.activeRegion ?? 0);
-    const wanted = configured < 0 ? 0 : configured >= count ? count - 1 : configured;
+    const wanted = configuredRegion(state, count);
     return regionHealthy(ctx, state, wanted) ? wanted : -1;
   }
 
