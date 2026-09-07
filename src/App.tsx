@@ -1478,7 +1478,15 @@ export default function App() {
 
   const handleAddNode = useCallback(
     (kind: NodeKind, x: number, y: number) => {
-      const node = makeNode(kind, x, y);
+      // Pass the ids already on the canvas so a fresh page load cannot
+      // mint an id a restored design is already using (see makeNode).
+      const node = makeNode(
+        kind,
+        x,
+        y,
+        undefined,
+        new Set(topology.nodes.map((n) => n.id)),
+      );
       history.commit('add', snapRef.current);
       applyTopology({
         ...topology,
