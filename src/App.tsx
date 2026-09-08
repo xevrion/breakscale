@@ -1478,23 +1478,22 @@ export default function App() {
 
   const handleAddNode = useCallback(
     (kind: NodeKind, x: number, y: number) => {
-      // Pass the ids already on the canvas so a fresh page load cannot
-      // mint an id a restored design is already using (see makeNode).
-      const node = makeNode(
-        kind,
-        x,
-        y,
-        undefined,
-        new Set(topology.nodes.map((n) => n.id)),
-      );
+      // Read the live mirror, not the React binding: two adds in quick
+      // succession both run against the closure's pre-add snapshot, so the
+      // second would build on a topology missing the first node and drop
+      // it (see topoLiveRef, and #47 which found the stale closure first).
+      // The mirror also supplies the ids already on the canvas, so a fresh
+      // page load cannot mint an id a restored design is using (makeNode).
+      const t = topoLiveRef.current;
+      const node = makeNode(kind, x, y, undefined, new Set(t.nodes.map((n) => n.id)));
       history.commit('add', snapRef.current);
       applyTopology({
-        ...topology,
-        nodes: [...topology.nodes, node],
+        ...t,
+        nodes: [...t.nodes, node],
       });
       setSelectedIds(new Set([node.id]));
     },
-    [applyTopology, topology, history],
+    [applyTopology, history],
   );
 
   /**
