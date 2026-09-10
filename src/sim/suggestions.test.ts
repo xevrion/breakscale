@@ -1,23 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfig } from './presets';
 import { suggestionFor } from './suggestions';
 import type { NodeKind } from './types';
 
+/**
+ * The bar these guard is not "some text came back". It is that the two kinds
+ * with a tempting-but-wrong obvious fix do not offer it: a db told to get
+ * bigger, and a cache told to raise its hit rate, are both advice that moves
+ * nothing for the node actually over its ceiling.
+ */
 describe('suggestionFor', () => {
-  it('points a cold cache at hit rate before capacity', () => {
-    const cfg = { ...defaultConfig('cache'), hitRate: 0.4 };
-    expect(suggestionFor('cache', cfg)).toMatch(/hit rate/i);
-  });
-
-  it('points a well-hit cache at capacity instead', () => {
-    const cfg = { ...defaultConfig('cache'), hitRate: 0.95 };
-    expect(suggestionFor('cache', cfg)).toMatch(/instances|capacity/i);
-  });
-
   it('never tells a database to just get bigger', () => {
-    const cfg = defaultConfig('db');
-    const text = suggestionFor('db', cfg)!;
+    const text = suggestionFor('db')!;
     expect(text).not.toMatch(/add (more )?(capacity|instances)/i);
+    expect(text).toMatch(/reaching it/i);
+  });
+
+  it('tells a saturated cache that hit rate is not the lever', () => {
+    // A hit and a miss both occupy a slot for serviceMs, so hit rate changes
+    // what the cache forwards, never what it has to get through.
+    const text = suggestionFor('cache')!;
+    expect(text).toMatch(/hit rate will not help/i);
   });
 
   it('offers nothing for kinds with no throughput ceiling', () => {
@@ -28,11 +30,13 @@ describe('suggestionFor', () => {
       'client',
     ];
     for (const kind of kindsWithoutCeiling) {
-      expect(suggestionFor(kind, defaultConfig(kind))).toBeNull();
+      expect(suggestionFor(kind)).toBeNull();
     }
   });
 
   it('has a suggestion for every kind with a throughput ceiling', () => {
+    // Mirrors HAS_THROUGHPUT_CEILING in Inspector.tsx: the suggestion is only
+    // ever reachable for these, because headroom is only defined for these.
     const kindsWithCeiling: NodeKind[] = [
       'lb',
       'service',
@@ -48,7 +52,7 @@ describe('suggestionFor', () => {
       'sidecar',
     ];
     for (const kind of kindsWithCeiling) {
-      expect(suggestionFor(kind, defaultConfig(kind))).toBeTruthy();
+      expect(suggestionFor(kind)).toBeTruthy();
     }
   });
 });

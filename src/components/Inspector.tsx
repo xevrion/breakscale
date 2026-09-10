@@ -2545,7 +2545,7 @@ function SingleInspector({
   // keep up -- below 1.0x headroom, same threshold the "Spare capacity"
   // reading itself is toned by.
   const suggestion =
-    headroom !== null && headroom < 1 ? suggestionFor(node.kind, cfg) : null;
+    headroom !== null && headroom < 1 ? suggestionFor(node.kind) : null;
 
   const serviceMsLabel =
     cfg.serviceMs < 10 ? cfg.serviceMs.toFixed(1) : String(Math.round(cfg.serviceMs));

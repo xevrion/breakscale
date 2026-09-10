@@ -1,4 +1,4 @@
-import type { NodeConfig, NodeKind } from './types';
+import type { NodeKind } from './types';
 
 /**
  * Kinds this applies to: exactly the ones with a throughput ceiling (see
@@ -13,15 +13,15 @@ import type { NodeConfig, NodeKind } from './types';
  * obviously right, the suggestion points at the knob that is honestly the
  * most likely lever rather than pretending certainty.
  */
-export function suggestionFor(kind: NodeKind, cfg: NodeConfig): string | null {
+export function suggestionFor(kind: NodeKind): string | null {
   switch (kind) {
     case 'cache':
-      // A cache's ceiling is served capacity, but what actually saves work
-      // downstream is the hit rate. Below a decent hit rate, raising it
-      // buys more than another instance would.
-      return cfg.hitRate < 0.8
-        ? 'Raise hit rate first -- more capacity here still forwards most requests to whatever is behind it.'
-        : 'Hit rate is already high; add instances or capacity to serve more of what is already hitting.';
+      // Deliberately NOT "raise the hit rate". The hit/miss roll happens in
+      // onServiceComplete (behaviour.ts), so a hit and a miss occupy a slot
+      // for the same serviceMs: hit rate changes what this node FORWARDS,
+      // never what arrives at it. When the cache itself is over its ceiling,
+      // raising hit rate moves nothing here -- it relieves what is behind it.
+      return 'Add instances or capacity. Hit rate will not help here -- a hit and a miss both occupy a slot for the same time, so it changes what this cache forwards, not what it has to get through.';
     case 'db':
       // Deliberately not "add capacity" -- bigger databases do not always
       // help, and a wrong-sounding suggestion is worse than none. Point at
