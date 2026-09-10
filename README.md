@@ -20,6 +20,17 @@
   <a href="https://trendshift.io/repositories/194049" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/194049/daily?language=TypeScript" alt="xevrion/breakscale | Trendshift" width="250" height="55" /></a>
 </p>
 
+<p align="center">
+  <sub>Title sponsor</sub><br>
+  <a href="https://workers.io">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/sponsors/workersio-dark.svg">
+      <img src="docs/sponsors/workersio.svg" alt="Workers IO" height="56">
+    </picture>
+  </a><br>
+  <sub><a href="https://workers.io">Workers IO</a> (YC F26) sponsors Breakscale. Simulation environments for verifying mission-critical software.</sub>
+</p>
+
 <div align="center">
   <img src="docs/retry-storm.png" alt="The Retry Storm example at 100 requests a second: the database is 99.9% busy while goodput is zero" width="100%" />
   <p align="center">
