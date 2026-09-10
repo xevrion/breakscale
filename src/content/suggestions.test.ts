@@ -7,7 +7,27 @@ import type { NodeKind } from '../sim/types';
  * with a tempting-but-wrong obvious fix do not offer it: a db told to get
  * bigger, and a cache told to raise its hit rate, are both advice that moves
  * nothing for the node actually over its ceiling.
+ *
+ * Mirrors HAS_THROUGHPUT_CEILING in Inspector.tsx. The inspector test is
+ * the one that fails if a new ceiling kind ships with no suggestion; this
+ * list is only here so the strings themselves can be asserted without
+ * rendering the panel.
  */
+const KINDS_WITH_CEILING: NodeKind[] = [
+  'lb',
+  'service',
+  'cache',
+  'db',
+  'worker',
+  'objectstore',
+  'coldstorage',
+  'retryqueue',
+  'transcoder',
+  'edgecompute',
+  'apigateway',
+  'sidecar',
+];
+
 describe('suggestionFor', () => {
   it('never tells a database to just get bigger', () => {
     const text = suggestionFor('db')!;
@@ -35,24 +55,15 @@ describe('suggestionFor', () => {
   });
 
   it('has a suggestion for every kind with a throughput ceiling', () => {
-    // Mirrors HAS_THROUGHPUT_CEILING in Inspector.tsx: the suggestion is only
-    // ever reachable for these, because headroom is only defined for these.
-    const kindsWithCeiling: NodeKind[] = [
-      'lb',
-      'service',
-      'cache',
-      'db',
-      'worker',
-      'objectstore',
-      'coldstorage',
-      'retryqueue',
-      'transcoder',
-      'edgecompute',
-      'apigateway',
-      'sidecar',
-    ];
-    for (const kind of kindsWithCeiling) {
+    for (const kind of KINDS_WITH_CEILING) {
       expect(suggestionFor(kind)).toBeTruthy();
     }
+  });
+
+  it('uses no em dashes', () => {
+    const offenders = KINDS_WITH_CEILING.filter((kind) =>
+      suggestionFor(kind)?.includes('—'),
+    );
+    expect(offenders).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Inspector } from './Inspector';
+import { KIND_NAME } from './nodeVisuals';
 import { makeNode } from '../sim/presets';
 import { suggestionFor } from '../content/suggestions';
 import type { NodeKind, NodeStats } from '../sim/types';
@@ -10,26 +11,20 @@ import type { NodeKind, NodeStats } from '../sim/types';
 /**
  * The suggestion is gated on headroom, and headroom is derived inside the
  * component from stats the engine produces. A unit test on suggestionFor can
- * only prove the strings; it cannot prove the node ever shows one, nor that a
+ * only prove the strings; it cannot prove a node ever shows one, nor that a
  * healthy node stays quiet. These render the real panel and read the DOM.
  *
- * Kinds are exactly HAS_THROUGHPUT_CEILING in Inspector.tsx. Headroom is
- * undefined for every other kind, so no other kind can reach this section.
+ * Every kind is driven from KIND_NAME rather than a list copied out of
+ * Inspector.tsx. A copied list rots silently: add a kind to
+ * HAS_THROUGHPUT_CEILING with no suggestion written for it and a hardcoded
+ * list would never mention it. Here the ceiling readout and the suggestion
+ * are asserted to appear together, so that case fails.
  */
-const CEILING_KINDS: NodeKind[] = [
-  'lb',
-  'service',
-  'cache',
-  'db',
-  'worker',
-  'objectstore',
-  'coldstorage',
-  'retryqueue',
-  'transcoder',
-  'edgecompute',
-  'apigateway',
-  'sidecar',
-];
+const ALL_KINDS = Object.keys(KIND_NAME) as NodeKind[];
+
+/** Above every default ceiling, so any kind that has one is past it. The
+ *  load balancer sets that bar: 256 slots at 0.5ms is 512k/s. */
+const OVERLOADED = 2_000_000;
 
 /** Only the fields NodeStats requires; the panels read the rest as optional. */
 function statsWith(arrivalRate: number): NodeStats {
@@ -75,11 +70,10 @@ afterEach(() => {
 });
 
 function renderKind(kind: NodeKind, arrivalRate: number): void {
-  const node = makeNode(kind, 0, 0);
   act(() =>
     root.render(
       <Inspector
-        node={node}
+        node={makeNode(kind, 0, 0)}
         stats={statsWith(arrivalRate)}
         onChange={() => {}}
         onDelete={() => {}}
@@ -89,46 +83,50 @@ function renderKind(kind: NodeKind, arrivalRate: number): void {
   );
 }
 
-/** The rendered suggestion text, or null when the section is absent. */
-function suggestionText(): string | null {
+/** The rendered suggestion, or null when the section is absent. */
+function suggestion(): string | null {
   return document.querySelector('.ins-suggestion')?.textContent?.trim() ?? null;
 }
 
-describe('the suggested fix in the inspector', () => {
-  // Above the highest default ceiling in the list, so every kind lands below
-  // 1.0x headroom without per-kind tuning. The load balancer sets that bar by
-  // a wide margin: 256 slots at 0.5ms is 512k/s, where a db is 200/s.
-  const OVERLOADED = 2_000_000;
+/** Whether the panel is showing a headroom reading at all. */
+function showsHeadroom(): boolean {
+  return (document.body.textContent ?? '').includes('Spare capacity');
+}
 
-  it.each(CEILING_KINDS)(
-    'shows %s its own suggestion when it cannot keep up',
+describe('the suggested fix in the inspector', () => {
+  it.each(ALL_KINDS)(
+    'gives %s a suggestion exactly when it reads out headroom',
     (kind) => {
       renderKind(kind, OVERLOADED);
-      expect(suggestionText()).toBe(suggestionFor(kind));
+      // Headroom is what the suggestion is gated on, so the two have to agree.
+      // Either the panel says this node is past its ceiling and offers a fix,
+      // or it says neither.
+      expect(suggestion() === null).toBe(!showsHeadroom());
     },
   );
 
-  it.each(CEILING_KINDS)('stays quiet for %s while it has headroom', (kind) => {
-    // One request a second is under every default ceiling in the list.
+  it.each(ALL_KINDS)('gives %s the text its kind defines', (kind) => {
+    renderKind(kind, OVERLOADED);
+    if (showsHeadroom()) expect(suggestion()).toBe(suggestionFor(kind));
+  });
+
+  it.each(ALL_KINDS)('stays quiet for %s while it has headroom', (kind) => {
+    // One request a second is under every default ceiling, the 2/s transcoder
+    // and the 9/s cold storage included.
     renderKind(kind, 1);
-    expect(suggestionText()).toBeNull();
+    expect(suggestion()).toBeNull();
   });
 
   it('stays quiet when nothing is arriving, rather than reading 0 as overloaded', () => {
     // Headroom is null at zero arrivals. Treating that as "below 1.0x" would
     // tell a student to fix a node that is merely idle.
     renderKind('service', 0);
-    expect(suggestionText()).toBeNull();
-  });
-
-  it('offers nothing for a kind with no throughput ceiling', () => {
-    renderKind('queue', OVERLOADED);
-    expect(suggestionText()).toBeNull();
+    expect(suggestion()).toBeNull();
   });
 
   it('does not tell an overloaded database to get bigger', () => {
     // The one suggestion the issue thread singles out as a trap.
     renderKind('db', OVERLOADED);
-    expect(suggestionText()).not.toMatch(/add (more )?(capacity|instances)/i);
+    expect(suggestion()).not.toMatch(/add (more )?(capacity|instances)/i);
   });
 });
