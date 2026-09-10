@@ -21,23 +21,23 @@ export function suggestionFor(kind: NodeKind): string | null {
       // for the same serviceMs: hit rate changes what this node FORWARDS,
       // never what arrives at it. When the cache itself is over its ceiling,
       // raising hit rate moves nothing here -- it relieves what is behind it.
-      return 'Add instances or capacity. Hit rate will not help here -- a hit and a miss both occupy a slot for the same time, so it changes what this cache forwards, not what it has to get through.';
+      return 'Add instances, or more slots per instance. Hit rate will not help here, because a hit and a miss occupy a slot for the same time. It changes what this cache forwards, not what it has to get through.';
     case 'db':
       // Deliberately not "add capacity" -- bigger databases do not always
       // help, and a wrong-sounding suggestion is worse than none. Point at
       // reducing what reaches it instead.
-      return 'A database rarely gets faster by being made bigger. Look at what is reaching it -- a cache in front of it with a higher hit rate, or fewer retries piling on load, before resizing this node itself.';
+      return 'A database rarely gets faster by being made bigger. Look at what is reaching it instead. A cache in front of it with a higher hit rate, or fewer retries piling on load, will do more than resizing this node.';
     case 'lb':
       // A load balancer being the bottleneck is unusual; its own limit is
       // rarely the real story.
-      return 'A load balancer saturating is uncommon -- check the instances behind it are not the actual limit before adding capacity here.';
+      return 'A load balancer saturating is uncommon. Check the components behind it are not the actual limit before adding capacity here.';
     case 'sidecar':
       // Every hop through a sidecar pays its tax; retries multiply it.
-      return 'Each hop pays this proxy a tax. Check retries and timeouts before adding capacity -- a retry storm here costs more than the base load does.';
+      return 'Each hop pays this proxy a tax. Check retries and timeouts before adding capacity; a retry storm here costs more than the base load does.';
     case 'apigateway':
-      return 'This is a stateless front door -- add instances to spread the load across more of them.';
+      return 'This is a stateless front door, so add instances to spread the load across more of them.';
     case 'worker':
-      return 'Workers drain a queue at their own pace -- add instances to drain it faster.';
+      return 'Workers drain a queue at their own pace. Add instances to drain it faster.';
     case 'service':
     case 'objectstore':
     case 'coldstorage':
