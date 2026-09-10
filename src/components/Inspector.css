@@ -365,6 +365,15 @@
   color: var(--text-faint);
 }
 
+/* One suggestion for what to do about a bottleneck, not a formula -- normal
+   reading weight and color, not the quiet mono of .ins-expr. */
+.ins-suggestion {
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  color: var(--text-dim);
+}
+
 /* --------------------------------------------------------------------------
    Multi-selection
    -------------------------------------------------------------------------- */

@@ -15,6 +15,7 @@ import type {
   SystemStats,
 } from '../sim/types';
 import { defaultConfig } from '../sim/presets';
+import { suggestionFor } from '../sim/suggestions';
 import { KIND_NAME, KIND_TERM } from './nodeVisuals';
 import {
   NA,
@@ -2540,6 +2541,12 @@ function SingleInspector({
   const headroom =
     showCeiling && arrivals > 0 && maxThroughput > 0 ? maxThroughput / arrivals : null;
 
+  // One suggestion, only once this node is actually the thing that cannot
+  // keep up -- below 1.0x headroom, same threshold the "Spare capacity"
+  // reading itself is toned by.
+  const suggestion =
+    headroom !== null && headroom < 1 ? suggestionFor(node.kind, cfg) : null;
+
   const serviceMsLabel =
     cfg.serviceMs < 10 ? cfg.serviceMs.toFixed(1) : String(Math.round(cfg.serviceMs));
 
@@ -2687,6 +2694,12 @@ function SingleInspector({
                 />
               )}
             </div>
+          </Section>
+        )}
+
+        {suggestion && (
+          <Section title="Suggested fix">
+            <p className="ins-suggestion">{suggestion}</p>
           </Section>
         )}
 
