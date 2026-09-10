@@ -1,8 +1,8 @@
-import type { NodeKind } from './types';
+import type { NodeKind } from '../sim/types';
 
 /**
  * Kinds this applies to: exactly the ones with a throughput ceiling (see
- * `HAS_THROUGHPUT_CEILING` in Inspector.tsx) -- headroom is only ever a
+ * `HAS_THROUGHPUT_CEILING` in ../components/Inspector.tsx) -- headroom is only ever a
  * defined concept for these, so a suggestion is only ever offered for these.
  *
  * One suggestion per kind, not several with tradeoffs. Per the issue

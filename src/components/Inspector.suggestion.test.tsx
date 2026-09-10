@@ -4,7 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Inspector } from './Inspector';
 import { makeNode } from '../sim/presets';
-import { suggestionFor } from '../sim/suggestions';
+import { suggestionFor } from '../content/suggestions';
 import type { NodeKind, NodeStats } from '../sim/types';
 
 /**

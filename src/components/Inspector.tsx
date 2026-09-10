@@ -15,7 +15,7 @@ import type {
   SystemStats,
 } from '../sim/types';
 import { defaultConfig } from '../sim/presets';
-import { suggestionFor } from '../sim/suggestions';
+import { suggestionFor } from '../content/suggestions';
 import { KIND_NAME, KIND_TERM } from './nodeVisuals';
 import {
   NA,

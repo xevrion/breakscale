@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { suggestionFor } from './suggestions';
-import type { NodeKind } from './types';
+import type { NodeKind } from '../sim/types';
 
 /**
  * The bar these guard is not "some text came back". It is that the two kinds
