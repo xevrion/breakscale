@@ -36,7 +36,7 @@
     "prettier": "^3.9.6",
     "typescript": "~7.0.2",
     "vite": "^8.2.0",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   },
   "license": "MIT",
   "description": "Build a system, load it until it breaks, and watch why",
