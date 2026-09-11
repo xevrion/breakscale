@@ -365,6 +365,16 @@
   color: var(--text-faint);
 }
 
+/* One suggestion for what to do about a bottleneck, not a formula -- the
+   same teaching prose as .ins-blurb, not the quiet mono of .ins-expr. */
+.ins-suggestion {
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-prose);
+  color: var(--text-dim);
+  text-wrap: pretty;
+}
+
 /* --------------------------------------------------------------------------
    Multi-selection
    -------------------------------------------------------------------------- */
