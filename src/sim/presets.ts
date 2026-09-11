@@ -652,15 +652,32 @@ const DEFAULT_LABEL: Record<NodeKind, string> = {
 
 let nodeCounter = 0;
 
+/**
+ * Mint a node for the canvas.
+ *
+ * `taken` is the set of ids already on the canvas. It has to be consulted:
+ * the counter above restarts at zero on every page load, while the ids it
+ * minted in earlier sessions come back through localStorage, share links
+ * and design files. Without the check the eleventh service added after a
+ * reload is `service-1` again, and two nodes then share one id: selecting
+ * either selects both, the inspector reads "2 components", edges drawn to
+ * one land on both, and a config change applies to both. The paste path
+ * already dedupes this way (clipboard.ts freshId); the add path did not.
+ */
 export function makeNode(
   kind: NodeKind,
   x: number,
   y: number,
   label?: string,
+  taken?: ReadonlySet<string>,
 ): SimNode {
-  nodeCounter += 1;
+  let id: string;
+  do {
+    nodeCounter += 1;
+    id = `${kind}-${nodeCounter}`;
+  } while (taken !== undefined && taken.has(id));
   return {
-    id: `${kind}-${nodeCounter}`,
+    id,
     kind,
     label: label ?? DEFAULT_LABEL[kind],
     x,
