@@ -17,3 +17,7 @@ scratch-*.ts
 
 # Local Claude Code permissions, per-machine and not part of the project
 .claude/settings.local.json
+
+# Playwright test artifacts and baselines
+.playwright/
+playwright-baselines/

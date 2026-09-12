@@ -14,7 +14,12 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -b --noEmit",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:visual": "bunx playwright test",
+    "test:visual:update": "bunx playwright test --update-snapshots",
+    "test:visual:ui": "bunx playwright test --ui",
+    "test:visual:bisect": "bunx playwright test --bisect",
+    "generate-baselines": "bun tests/visual/setup.ts"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
@@ -24,6 +29,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^26.4.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.7",
