@@ -373,7 +373,7 @@ const KIND_BLURB: Record<NodeKind, string> = {
   service:
     'The workhorse. How many it handles at once, divided by how long each takes, is the ceiling everything else queues behind.',
   cache:
-    'Answers hits without touching downstream. The hit rate is the knob that matters here.',
+    'Answers hits without touching downstream. Each cache rolls its own hit chance, independently of the others, so stacking them multiplies misses rather than treating later caches as filters on earlier misses.',
   db: 'Slots and service time. It does not retry for you, so its queue is where pressure shows.',
   queue:
     'A buffer. Depth is the whole story: it absorbs bursts up to the limit, then sheds.',
@@ -387,7 +387,7 @@ const KIND_BLURB: Record<NodeKind, string> = {
     'Watches one node and adds capacity when it runs hot. New capacity takes warmup time to arrive, so load always leads it.',
   region:
     'Sends traffic to one region at a time. If that region dies, failover costs you a full outage window before the next one takes over.',
-  cdn: 'An edge cache in front of everything. At a 0.9 hit rate your origin sees a tenth of the traffic. It is the cheapest capacity you will ever add.',
+  cdn: 'An edge cache in front of everything. At a 0.9 hit rate one CDN leaves a tenth of the traffic for the origin, and that chance is rolled independently of every other cache on the path. It is still the cheapest capacity you will ever add.',
   ratelimiter:
     'A token bucket. Refuses excess traffic instantly instead of queueing it, which is what stops a busy system turning into a dead one.',
   breaker:
@@ -563,6 +563,7 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     term: 'hit-rate',
     label: 'Hit rate you set',
     unit: 'percent',
+    hint: 'Each cache or CDN rolls this chance on its own. Two at 80% leave about 4% of traffic for whatever is behind them, because the chances multiply.',
     min: 0,
     max: 1,
     step: 0.01,
