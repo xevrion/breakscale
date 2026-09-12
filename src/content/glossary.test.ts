@@ -47,6 +47,14 @@ describe('glossary data', () => {
     ).map((e) => e.id);
     expect(offenders).toEqual([]);
   });
+
+  it('says stacked cache hit rates are independent rolls', () => {
+    // The engine is a per-hop coin flip (issue #31). The glossary has to say
+    // so, or stacking caches reads as a hierarchy the numbers do not model.
+    expect(GLOSSARY_BY_ID.get('cache')?.why).toMatch(/independently/);
+    expect(GLOSSARY_BY_ID.get('hit-rate')?.why).toMatch(/independently/);
+    expect(GLOSSARY_BY_ID.get('cdn')?.why).toMatch(/independently/);
+  });
 });
 
 describe('glossary search', () => {

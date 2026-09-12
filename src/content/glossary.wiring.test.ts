@@ -77,4 +77,23 @@ describe('glossary wiring', () => {
     );
     expect(broken).toEqual([]);
   });
+
+  it('states independent hit-rate rolls on the cache and CDN inspector copy', () => {
+    // Issue #31: the engine is a per-hop coin flip. The inspector blurbs
+    // and the hit-rate hint have to say so, or stacking caches reads as a
+    // hierarchy the numbers do not model.
+    const inspector = Object.entries(SOURCES).find(([path]) =>
+      path.endsWith('/Inspector.tsx'),
+    )?.[1];
+    expect(inspector, 'Inspector.tsx not in the glob').toBeTruthy();
+    expect(inspector).toMatch(
+      /Each cache rolls its own hit chance, independently of the others/,
+    );
+    expect(inspector).toMatch(/treating later caches as filters on earlier misses/);
+    expect(inspector).toMatch(/rolled independently of every other cache on the path/);
+    expect(inspector).toMatch(/Each cache or CDN rolls this chance on its own/);
+    expect(inspector).toMatch(
+      /Two at 80% leave about 4% of traffic for whatever is behind them/,
+    );
+  });
 });
