@@ -69,7 +69,12 @@ import { applyTheme } from './theme/applyTheme';
 import { usePresence } from './components/presence';
 import { SessionHistory, syncEngine } from './history';
 import type { HistoryEntry, HistorySnapshot } from './history';
-import { buildShareUrl, decodeTopology, hasShareHash } from './share';
+import {
+  ShareLinkTooLargeError,
+  buildShareUrl,
+  decodeTopology,
+  hasShareHash,
+} from './share';
 import { DESIGN_FILE_ACCEPT, downloadDesign, readDesignFile } from './designFile';
 import { downloadBlob, svgToPng } from './imageExport';
 import './App.css';
@@ -2250,6 +2255,21 @@ export default function App() {
       let text: string;
       try {
         text = await buildShareUrl(topology, window.location.href);
+      } catch (e) {
+        // A design that does not fit is told about, never trimmed to fit.
+        // There is no server to hand it to; the file export carries any
+        // size.
+        toastSeq.current += 1;
+        setToast({
+          text:
+            e instanceof ShareLinkTooLargeError
+              ? `This design is too big for a link (${e.chars} characters; links stop working past ${e.limit}). Save it to a file to share it.`
+              : 'Could not build the link.',
+          id: toastSeq.current,
+        });
+        return;
+      }
+      try {
         await navigator.clipboard.writeText(text);
       } catch {
         toastSeq.current += 1;

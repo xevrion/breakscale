@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   MAX_DECODED_BYTES,
+  MAX_SHARE_URL_CHARS,
   SHARE_VERSION,
+  ShareLinkTooLargeError,
   buildShareUrl,
   decodeTopology,
   encodeTopology,
   hasShareHash,
 } from './share';
-import { PRESETS } from './sim/presets';
+import { PRESETS, defaultConfig } from './sim/presets';
 import type { NodeConfig, Topology } from './sim/types';
 
 /* ------------------------------------------------------------------ *
@@ -84,6 +86,84 @@ const ANNOTATED: Topology = {
 
 const NETFLIX = PRESETS.find((p) => p.id === 'netflix')!.topology;
 
+/** The production origin; what a copied link actually starts with. */
+const ORIGIN = 'https://breakscale.vercel.app/';
+
+/**
+ * A link regenerates ids, so two designs are the same design when they
+ * agree on everything else and their edges join the same node positions.
+ */
+function essence(t: Topology): unknown {
+  const at = new Map(t.nodes.map((n, i) => [n.id, i]));
+  return {
+    nodes: t.nodes.map(({ id: _id, ...n }) => n),
+    edges: t.edges.map(({ id: _id, from, to, ...e }) => ({
+      ...e,
+      from: at.get(from),
+      to: at.get(to),
+    })),
+    annotations: (t.annotations ?? []).map(({ id: _id, ...a }) => a),
+  };
+}
+
+function toBase64Url(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** A generation-2 link body: flag byte 0 (raw) then JSON text. */
+function legacyRawLink(doc: string, prefix = 'd2'): string {
+  const bytes = new TextEncoder().encode(doc);
+  const body = new Uint8Array(bytes.length + 1);
+  body[0] = 0;
+  body.set(bytes, 1);
+  return `#${prefix}.${toBase64Url(body)}`;
+}
+
+async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
+  const cs = new CompressionStream('deflate-raw');
+  const writer = cs.writable.getWriter();
+  void writer.write(bytes as Uint8Array<ArrayBuffer>);
+  void writer.close();
+  const chunks: Uint8Array[] = [];
+  const reader = cs.readable.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) chunks.push(value);
+  }
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+}
+
+/** A generation-2 link body exactly as that encoder wrote it: deflated, defaults stripped. */
+async function legacyDeflatedLink(topology: Topology): Promise<string> {
+  const nodes = topology.nodes.map((node) => {
+    const def = defaultConfig(node.kind) as unknown as Record<string, unknown>;
+    const config: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node.config)) if (v !== def[k]) config[k] = v;
+    return { ...node, config };
+  });
+  const json = JSON.stringify({
+    nodes,
+    edges: topology.edges,
+    ...(topology.annotations ? { annotations: topology.annotations } : {}),
+  });
+  const packed = await deflateRaw(new TextEncoder().encode(json));
+  const body = new Uint8Array(packed.length + 1);
+  body[0] = 1;
+  body.set(packed, 1);
+  return `#d2.${toBase64Url(body)}`;
+}
+
 /* ------------------------------------------------------------------ *
  * Running the same suite down BOTH encodings.
  *
@@ -126,30 +206,43 @@ describe('round trip, compressed', () => {
     const out = await decodeTopology(hash);
     expect(out.status).toBe('ok');
     if (out.status !== 'ok') return;
-    expect(out.topology.nodes).toEqual(SIMPLE.nodes);
-    expect(out.topology.edges).toEqual(SIMPLE.edges);
+    expect(essence(out.topology)).toEqual(essence(SIMPLE));
+  });
+
+  it('mints ids the editor would have, so a later add cannot collide', async () => {
+    const out = await decodeTopology(await encodeTopology(SIMPLE));
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') return;
+    expect(out.topology.nodes.map((n) => n.id)).toEqual(['client-1', 'service-1']);
+    expect(out.topology.edges[0]?.id).toBe('client-1->service-1');
   });
 
   it('carries annotations through', async () => {
     const out = await decodeTopology(await encodeTopology(ANNOTATED));
     expect(out.status).toBe('ok');
     if (out.status !== 'ok') return;
-    expect(out.topology.annotations).toEqual(ANNOTATED.annotations);
+    expect(essence(out.topology)).toEqual(essence(ANNOTATED));
   });
 
-  it('round trips the largest worked example unchanged', async () => {
-    const out = await decodeTopology(await encodeTopology(NETFLIX));
-    expect(out.status).toBe('ok');
-    if (out.status !== 'ok') return;
-    expect(out.topology.nodes).toEqual(NETFLIX.nodes);
-    expect(out.topology.edges).toEqual(NETFLIX.edges);
-    expect(out.topology.annotations?.length).toBe(NETFLIX.annotations?.length);
+  it('round trips every worked example unchanged', async () => {
+    for (const p of PRESETS) {
+      const out = await decodeTopology(await encodeTopology(p.topology));
+      expect(out.status, p.id).toBe('ok');
+      if (out.status !== 'ok') return;
+      expect(essence(out.topology), p.id).toEqual(essence(p.topology));
+    }
   });
 
-  it('is markedly shorter than the raw JSON it carries', async () => {
+  it('is a fraction of the raw JSON it carries', async () => {
     const hash = await encodeTopology(NETFLIX);
     const raw = JSON.stringify(NETFLIX).length;
-    expect(hash.length).toBeLessThan(raw / 2);
+    expect(hash.length).toBeLessThan(raw / 6);
+  });
+
+  it('is deterministic: the same design gives the same link', async () => {
+    expect(await encodeTopology(NETFLIX)).toBe(
+      await encodeTopology(structuredClone(NETFLIX)),
+    );
   });
 });
 
@@ -160,8 +253,7 @@ describe('round trip, uncompressed fallback', () => {
     const out = await decodeTopology(hash);
     expect(out.status).toBe('ok');
     if (out.status !== 'ok') return;
-    expect(out.topology.nodes).toEqual(ANNOTATED.nodes);
-    expect(out.topology.annotations).toEqual(ANNOTATED.annotations);
+    expect(essence(out.topology)).toEqual(essence(ANNOTATED));
   });
 
   it('produces a longer payload than the compressed one, as expected', async () => {
@@ -173,17 +265,26 @@ describe('round trip, uncompressed fallback', () => {
 
   it('reads an uncompressed link on a machine that CAN compress', async () => {
     suppressCompression();
-    const hash = await encodeTopology(SIMPLE);
+    const hash = await encodeTopology(NETFLIX);
     restoreCompression();
     const out = await decodeTopology(hash);
     expect(out.status).toBe('ok');
   });
 
   it('reports a compressed link it cannot inflate instead of showing nothing', async () => {
-    const hash = await encodeTopology(SIMPLE);
+    const hash = await encodeTopology(NETFLIX);
     suppressCompression();
     const out = await decodeTopology(hash);
     expect(out.status).toBe('invalid');
+  });
+
+  it('leaves a design uncompressed when deflate would only add bytes', async () => {
+    // Two nodes and one edge pack to a few dozen bytes; deflate cannot
+    // beat that, so the link is the same with or without it.
+    const packed = await encodeTopology(SIMPLE);
+    suppressCompression();
+    const plain = await encodeTopology(SIMPLE);
+    expect(packed).toBe(plain);
   });
 });
 
@@ -203,11 +304,107 @@ describe('shape of the encoded link', () => {
     expect(url).not.toContain('#old');
   });
 
-  it('recognises its own hash and nothing else', async () => {
+  it('recognises its own hash, and the two older ones, and nothing else', async () => {
     expect(hasShareHash(await encodeTopology(SIMPLE))).toBe(true);
     expect(hasShareHash(`#${await encodeTopology(SIMPLE)}`)).toBe(true);
+    expect(hasShareHash('#d1.abc')).toBe(true);
+    expect(hasShareHash('#d2.abc')).toBe(true);
+    expect(hasShareHash('#d4.abc')).toBe(false);
     expect(hasShareHash('#section-two')).toBe(false);
     expect(hasShareHash('')).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The size promise. A link is only useful where it can be pasted, and
+ * the worked examples are the designs people will paste most.
+ * ------------------------------------------------------------------ */
+
+describe('size', () => {
+  it('fits every worked example in a URL under the limit', async () => {
+    for (const p of PRESETS) {
+      const url = await buildShareUrl(p.topology, ORIGIN);
+      expect(url.length, p.id).toBeLessThanOrEqual(MAX_SHARE_URL_CHARS);
+    }
+  });
+
+  it('refuses to build a link that would not survive being pasted', async () => {
+    // Forty copies of the largest example: a design no link can carry.
+    const nodes = [];
+    const edges = [];
+    for (let k = 0; k < 40; k++) {
+      for (const n of NETFLIX.nodes) nodes.push({ ...n, id: `${k}-${n.id}` });
+      for (const e of NETFLIX.edges) {
+        edges.push({
+          ...e,
+          id: `${k}-${e.id}`,
+          from: `${k}-${e.from}`,
+          to: `${k}-${e.to}`,
+        });
+      }
+    }
+    const big: Topology = { nodes, edges };
+    await expect(buildShareUrl(big, ORIGIN)).rejects.toBeInstanceOf(
+      ShareLinkTooLargeError,
+    );
+    try {
+      await buildShareUrl(big, ORIGIN);
+    } catch (e) {
+      const err = e as ShareLinkTooLargeError;
+      expect(err.chars).toBeGreaterThan(MAX_SHARE_URL_CHARS);
+      expect(err.limit).toBe(MAX_SHARE_URL_CHARS);
+    }
+  });
+
+  it('counts the base URL against the limit, not only the fragment', async () => {
+    const hash = await encodeTopology(SIMPLE);
+    const room = MAX_SHARE_URL_CHARS - hash.length - 1;
+    const base = `https://x.test/${'p'.repeat(room - 'https://x.test/'.length)}`;
+    await expect(buildShareUrl(SIMPLE, base)).resolves.toHaveLength(
+      MAX_SHARE_URL_CHARS,
+    );
+    await expect(buildShareUrl(SIMPLE, `${base}p`)).rejects.toBeInstanceOf(
+      ShareLinkTooLargeError,
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Older links keep opening. A link someone pasted last month is a
+ * document, and a format bump must not make it a broken one.
+ * ------------------------------------------------------------------ */
+
+describe('older links', () => {
+  it('opens a generation-2 link exactly as that generation wrote it', async () => {
+    const out = await decodeTopology(await legacyDeflatedLink(NETFLIX));
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') return;
+    // Generation 2 carried ids, so these come back verbatim.
+    expect(out.topology.nodes).toEqual(NETFLIX.nodes);
+    expect(out.topology.edges).toEqual(NETFLIX.edges);
+    expect(out.topology.annotations).toEqual(NETFLIX.annotations);
+  });
+
+  it('restores the defaults a generation-2 link stripped', async () => {
+    const stripped = JSON.stringify({
+      nodes: [{ ...SIMPLE.nodes[1], config: { capacity: 99 } }],
+      edges: [],
+    });
+    const out = await decodeTopology(legacyRawLink(stripped));
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') return;
+    expect(out.topology.nodes[0]?.config).toEqual({
+      ...defaultConfig('service'),
+      capacity: 99,
+    });
+  });
+
+  it('opens a generation-1 link, which carried every field', async () => {
+    const out = await decodeTopology(legacyRawLink(JSON.stringify(ANNOTATED), 'd1'));
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') return;
+    expect(out.topology.nodes).toEqual(ANNOTATED.nodes);
+    expect(out.topology.annotations).toEqual(ANNOTATED.annotations);
   });
 });
 
@@ -222,7 +419,12 @@ describe('hostile input', () => {
     expect((await decodeTopology('')).status).toBe('absent');
     expect((await decodeTopology('#')).status).toBe('absent');
     expect((await decodeTopology('#about')).status).toBe('absent');
-    expect((await decodeTopology('#d3.abcdef')).status).toBe('absent');
+    expect((await decodeTopology('#d4.abcdef')).status).toBe('absent');
+  });
+
+  it('reports a link from a generation it knows that did not survive', async () => {
+    expect((await decodeTopology('#d3.abcdef')).status).toBe('invalid');
+    expect((await decodeTopology('#d2.abcdef')).status).toBe('invalid');
   });
 
   it('rejects a truncated hash', async () => {
@@ -237,18 +439,23 @@ describe('hostile input', () => {
     }
   });
 
+  it('rejects an uncompressed hash cut anywhere', async () => {
+    suppressCompression();
+    const hash = await encodeTopology(ANNOTATED);
+    for (let len = SHARE_VERSION.length + 1; len < hash.length; len++) {
+      const out = await decodeTopology(hash.slice(0, len));
+      expect(out.status, `cut at ${len}`).not.toBe('ok');
+    }
+  });
+
   it('rejects valid base64 wrapped around garbage', async () => {
     const garbage = new Uint8Array(400);
     for (let i = 0; i < garbage.length; i++) garbage[i] = (i * 37 + 11) & 0xff;
-    const b64 = btoa(String.fromCharCode(...garbage))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-    const out = await decodeTopology(`#${SHARE_VERSION}.${b64}`);
+    const out = await decodeTopology(`#${SHARE_VERSION}.${toBase64Url(garbage)}`);
     expect(out.status).toBe('invalid');
   });
 
-  it('rejects well-formed JSON that is not a topology', async () => {
+  it('rejects well-formed JSON that is not a topology, in an older link', async () => {
     for (const doc of [
       '{}',
       '[]',
@@ -257,15 +464,7 @@ describe('hostile input', () => {
       '{"nodes":[],"edges":[{"id":"e","from":"nope","to":"nope","weight":1}]}',
       '{"nodes":[{"id":"x","kind":"not-a-kind","label":"","x":0,"y":0,"config":{}}],"edges":[]}',
     ]) {
-      const bytes = new TextEncoder().encode(doc);
-      const body = new Uint8Array(bytes.length + 1);
-      body[0] = 0; // the uncompressed flag
-      body.set(bytes, 1);
-      const b64 = btoa(String.fromCharCode(...body))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-      const out = await decodeTopology(`#${SHARE_VERSION}.${b64}`);
+      const out = await decodeTopology(legacyRawLink(doc));
       expect(out.status, doc).toBe('invalid');
     }
   });
@@ -283,33 +482,16 @@ describe('hostile input', () => {
     // allocate the output, so the assertion is really about what did NOT
     // happen to memory here.
     const huge = new Uint8Array(64 * 1024 * 1024);
-    const cs = new CompressionStream('deflate-raw');
-    const writer = cs.writable.getWriter();
-    void writer.write(huge);
-    void writer.close();
-    const chunks: Uint8Array[] = [];
-    const reader = cs.readable.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) chunks.push(value);
-    }
-    let total = 0;
-    for (const c of chunks) total += c.length;
-    const packed = new Uint8Array(total + 1);
-    packed[0] = 1; // the deflated flag
-    let at = 1;
-    for (const c of chunks) {
-      packed.set(c, at);
-      at += c.length;
-    }
+    const packed = await deflateRaw(huge);
     // The bomb really is small on the wire; that is what makes it one.
-    expect(total).toBeLessThan(MAX_DECODED_BYTES);
-
+    expect(packed.length).toBeLessThan(MAX_DECODED_BYTES);
+    const body = new Uint8Array(packed.length + 1);
+    body[0] = 1; // the deflated flag
+    body.set(packed, 1);
     let b64 = '';
     const CHUNK = 0x8000;
-    for (let i = 0; i < packed.length; i += CHUNK) {
-      b64 += String.fromCharCode(...packed.subarray(i, i + CHUNK));
+    for (let i = 0; i < body.length; i += CHUNK) {
+      b64 += String.fromCharCode(...body.subarray(i, i + CHUNK));
     }
     const url = btoa(b64).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -371,26 +553,33 @@ describe('hostile input', () => {
     expect(anns[0]!.id).toBe('note-1');
   });
 
-  it('drops a malformed annotation without losing the design', async () => {
-    const bytes = new TextEncoder().encode(
-      JSON.stringify({
-        nodes: SIMPLE.nodes,
-        edges: SIMPLE.edges,
-        annotations: [
-          { id: 'note-1', kind: 'note', text: 'kept', x: 0, y: 0, width: 220 },
-          { id: 'broken', kind: 'note', text: 'no coordinates' },
-          'not an object',
-          null,
-        ],
-      }),
-    );
-    const body = new Uint8Array(bytes.length + 1);
-    body[0] = 0;
-    body.set(bytes, 1);
-    let bin = '';
-    for (let i = 0; i < body.length; i++) bin += String.fromCharCode(body[i]!);
-    const b64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    const out = await decodeTopology(`#${SHARE_VERSION}.${b64}`);
+  it('drops an empty note on the way in, the way every other input does', async () => {
+    const t: Topology = {
+      ...SIMPLE,
+      annotations: [
+        { id: 'a', kind: 'note', text: 'kept', x: 0, y: 0, width: 220, size: 'md' },
+        { id: 'b', kind: 'note', text: '   ', x: 0, y: 0, width: 220, size: 'md' },
+      ],
+    };
+    const out = await decodeTopology(await encodeTopology(t));
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') return;
+    expect(out.topology.annotations).toHaveLength(1);
+    expect(out.topology.nodes).toHaveLength(2);
+  });
+
+  it('drops a malformed annotation from an older link without losing the design', async () => {
+    const doc = JSON.stringify({
+      nodes: SIMPLE.nodes,
+      edges: SIMPLE.edges,
+      annotations: [
+        { id: 'note-1', kind: 'note', text: 'kept', x: 0, y: 0, width: 220 },
+        { id: 'broken', kind: 'note', text: 'no coordinates' },
+        'not an object',
+        null,
+      ],
+    });
+    const out = await decodeTopology(legacyRawLink(doc));
     expect(out.status).toBe('ok');
     if (out.status !== 'ok') return;
     expect(out.topology.annotations).toHaveLength(1);

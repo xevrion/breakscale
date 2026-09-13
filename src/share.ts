@@ -2,6 +2,7 @@ import { isTopology } from './clipboard';
 import { sanitizeAnnotations } from './sim/annotations';
 import type { Topology, NodeKind } from './sim/types';
 import { defaultConfig } from './sim/presets';
+import { packTopology, unpackTopology } from './share/wire';
 
 /* ------------------------------------------------------------------ *
  * Share links.
@@ -11,7 +12,7 @@ import { defaultConfig } from './sim/presets';
  * (everything after `#`) is never sent to a server by the browser, which
  * is why the design goes there rather than in a query string.
  *
- * The payload is `d1.` followed by base64url text. Two facts drive that
+ * The payload is `d3.` followed by base64url text. Two facts drive that
  * shape:
  *
  *   - The version prefix. A future format has to be DETECTED, not
@@ -24,13 +25,26 @@ import { defaultConfig } from './sim/presets';
  *     is routinely eaten by chat apps and mail clients that guess where a
  *     link ends. The URL-safe alphabet has none of those characters.
  *
- * A raw topology is large (a twenty-node example with annotations is
- * several kilobytes of JSON), so it is deflated first WHERE THE BROWSER
- * OFFERS IT. `CompressionStream` is not universal and is missing from
- * some test environments, so the encoder falls back to uncompressed text
- * and marks which of the two it produced in a single leading byte. The
- * decoder reads that flag rather than sniffing, so neither path can ever
- * be mistaken for the other.
+ * WHAT TRAVELS. The link has to fit inside the ~2000 characters that
+ * chat apps and mail clients reliably carry, and the readable `Topology`
+ * JSON does not: it spends most of its bytes on property names, string
+ * ids and default values both ends already know. So the design goes
+ * through a separate compact wire representation first (share/wire.ts),
+ * then deflate, then base64url. Compression is the LAST step, not the
+ * plan: deflate cannot recover the bytes a verbose layout wastes, it can
+ * only shrink what it is given.
+ *
+ *   Topology  ->  packTopology  ->  deflate  ->  base64url  ->  #d3.…
+ *
+ * Deflate is applied only where the browser offers it and only when it
+ * actually helps: for a three-node design the stream overhead can exceed
+ * the saving, so the encoder keeps whichever of the two is shorter and
+ * marks its choice in a single leading byte. The decoder reads that flag
+ * rather than sniffing, so neither path can ever be mistaken for the
+ * other.
+ *
+ * Older links (`d1.`, `d2.`) carried JSON and still open: their readers
+ * are kept, unchanged, behind the prefix that names them.
  *
  * Everything arriving through here came from someone else's URL and is
  * untrusted exactly the way the clipboard is. It is validated by the SAME
@@ -44,20 +58,51 @@ import { defaultConfig } from './sim/presets';
  * which point an old reader reports an unreadable link instead of showing
  * a wrong one.
  */
-export const SHARE_VERSION = 'd2';
+export const SHARE_VERSION = 'd3';
 
 const PREFIX = `${SHARE_VERSION}.`;
 
+/** Every prefix this build can read. */
+const KNOWN_PREFIXES = ['d1.', 'd2.', 'd3.'] as const;
+
+/**
+ * Longest share URL we will hand out, in characters, including the origin
+ * and the fragment. Internet Explorer's old 2083-character ceiling is
+ * gone, but Discord, Slack, Teams and several mail clients still cut or
+ * refuse to linkify longer URLs, and a link that arrives in two pieces is
+ * a link that does not open. 2000 leaves a margin under every one of
+ * those.
+ */
+export const MAX_SHARE_URL_CHARS = 2000;
+
+/**
+ * Thrown by `buildShareUrl` when a design does not fit. Nothing is
+ * truncated, dropped or rounded to make it fit: a link that opens a
+ * different design from the one that was shared is worse than no link.
+ * The caller tells the reader and offers the file export, which has no
+ * size limit.
+ */
+export class ShareLinkTooLargeError extends Error {
+  readonly chars: number;
+  readonly limit: number;
+  constructor(chars: number, limit: number) {
+    super(`share link is ${chars} characters; the limit is ${limit}`);
+    this.name = 'ShareLinkTooLargeError';
+    this.chars = chars;
+    this.limit = limit;
+  }
+}
+
 /**
  * First byte of the decoded payload: which of the two encodings follows.
- * A flag rather than a sniff, so a JSON document that happens to begin
- * with a deflate-looking byte cannot be mistaken for a compressed one.
+ * A flag rather than a sniff, so a document that happens to begin with a
+ * deflate-looking byte cannot be mistaken for a compressed one.
  */
 const RAW = 0;
 const DEFLATED = 1;
 
 /**
- * Largest JSON document we will accept out of a link, in bytes.
+ * Largest document we will accept out of a link, in bytes.
  *
  * This is the decompression bomb guard. Deflate happily turns a few
  * hundred bytes of URL into hundreds of megabytes of output, and a
@@ -222,75 +267,68 @@ function concat(chunks: Bytes[], limit: number): Bytes {
 
 /* ---------------- encode ---------------- */
 
-/**
- * What actually travels: the two fields the engine reads plus the
- * annotations that explain them. Nothing else. The offered-load slider
- * value is derived from the client nodes on the other side, and the
- * preset id is a fact about the SENDER's session rather than about the
- * design, so neither is worth the characters.
- */
-function payloadOf(topology: Topology): string {
-  const annotations = topology.annotations ?? [];
-
-  const optimizedNodes = topology.nodes.map((node) => {
-    const def = defaultConfig(node.kind);
-    const optimizedConfig: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(node.config)) {
-      if (v !== (def as unknown as Record<string, unknown>)[k]) {
-        optimizedConfig[k] = v;
-      }
-    }
-    return {
-      ...node,
-      x: Math.round(node.x),
-      y: Math.round(node.y),
-      config: optimizedConfig,
-    };
-  });
-
-  return JSON.stringify({
-    nodes: optimizedNodes,
-    edges: topology.edges,
-    ...(annotations.length > 0 ? { annotations } : {}),
-  });
+/** One flag byte in front of a body. */
+function framed(flag: number, body: Bytes): Bytes {
+  const out = new Uint8Array(body.length + 1);
+  out[0] = flag;
+  out.set(body, 1);
+  return out;
 }
 
 /**
- * Encode a topology as the fragment text of a share link, without the
- * leading `#`. Compressed when the browser can, plain when it cannot;
- * either way the result is URL-safe text a decoder on the far side reads
- * the same way.
+ * The bytes behind the prefix: a flag byte, then the packed design either
+ * as is or deflated, whichever is shorter. Exposed for the size benchmark
+ * so it can measure exactly what a link carries.
  */
-export async function encodeTopology(topology: Topology): Promise<string> {
-  const json = new TextEncoder().encode(payloadOf(topology));
+export async function encodeBytes(topology: Topology): Promise<Bytes> {
+  const packed = packTopology(topology);
   if (hasCompression()) {
     try {
-      const packed = await deflate(json);
-      const body = new Uint8Array(packed.length + 1);
-      body[0] = DEFLATED;
-      body.set(packed, 1);
-      return PREFIX + toBase64Url(body);
+      const deflated = await deflate(packed);
+      if (deflated.length < packed.length) return framed(DEFLATED, deflated);
     } catch {
       // Fall through to the plain encoding. A link that is longer than
       // it needed to be still opens; a link that failed to build does
       // not.
     }
   }
-  const body = new Uint8Array(json.length + 1);
-  body[0] = RAW;
-  body.set(json, 1);
-  return PREFIX + toBase64Url(body);
+  return framed(RAW, packed);
+}
+
+/**
+ * Encode a topology as the fragment text of a share link, without the
+ * leading `#`. Compressed when the browser can and it helps, plain
+ * otherwise; either way the result is URL-safe text a decoder on the far
+ * side reads the same way.
+ *
+ * Only the design travels: the offered-load slider value is derived from
+ * the client nodes on the other side, and the preset id is a fact about
+ * the SENDER's session rather than about the design, so neither is worth
+ * the characters. Simulation state (queues, percentiles, injected
+ * failures) is not design and is never sent.
+ */
+export async function encodeTopology(topology: Topology): Promise<string> {
+  return PREFIX + toBase64Url(await encodeBytes(topology));
 }
 
 /**
  * The whole shareable URL for a design, built from a base URL so the
  * function stays testable without a DOM. Query string and path are kept;
  * only the fragment is replaced.
+ *
+ * Throws `ShareLinkTooLargeError` when the result would not survive the
+ * places links get pasted. There is no server to fall back to: the app
+ * is a static site and promises that a design never leaves the browser,
+ * so a design that does not fit in a link is shared as a file instead.
  */
 export async function buildShareUrl(topology: Topology, base: string): Promise<string> {
   const hash = await encodeTopology(topology);
   const hashless = base.split('#')[0] ?? base;
-  return `${hashless}#${hash}`;
+  const url = `${hashless}#${hash}`;
+  if (url.length > MAX_SHARE_URL_CHARS) {
+    throw new ShareLinkTooLargeError(url.length, MAX_SHARE_URL_CHARS);
+  }
+  return url;
 }
 
 /* ---------------- decode ---------------- */
@@ -321,7 +359,7 @@ const BAD_LINK =
  */
 export function hasShareHash(hash: string): boolean {
   const norm = normalize(hash);
-  return norm.startsWith('d1.') || norm.startsWith('d2.');
+  return KNOWN_PREFIXES.some((p) => norm.startsWith(p));
 }
 
 function normalize(hash: string): string {
@@ -341,10 +379,8 @@ export async function decodeTopology(hash: string): Promise<ShareResult> {
   const text = normalize(hash);
   if (!text) return { status: 'absent' };
 
-  const isD1 = text.startsWith('d1.');
-  const isD2 = text.startsWith('d2.');
-
-  if (!isD1 && !isD2) {
+  const prefix = KNOWN_PREFIXES.find((p) => text.startsWith(p));
+  if (!prefix) {
     // Some other fragment: a deep link, a scroll anchor, a router path.
     // Not ours, so not an error.
     return { status: 'absent' };
@@ -353,41 +389,76 @@ export async function decodeTopology(hash: string): Promise<ShareResult> {
     return { status: 'invalid', message: BAD_LINK };
   }
 
-  const prefixLen = 3;
-  const body = fromBase64Url(text.slice(prefixLen));
+  const body = fromBase64Url(text.slice(prefix.length));
   if (!body || body.length < 2) return { status: 'invalid', message: BAD_LINK };
 
   const flag = body[0];
   const rest = body.subarray(1);
-  let json: Bytes | null;
+  let payload: Bytes | null;
   if (flag === DEFLATED) {
     if (!hasCompression()) {
       // A compressed link opened where nothing can inflate it. Say so
       // rather than showing an empty canvas.
       return { status: 'invalid', message: BAD_LINK };
     }
-    json = await inflate(rest, MAX_DECODED_BYTES);
+    payload = await inflate(rest, MAX_DECODED_BYTES);
   } else if (flag === RAW) {
-    json = rest.length > MAX_DECODED_BYTES ? null : rest;
+    payload = rest.length > MAX_DECODED_BYTES ? null : rest;
   } else {
     // A flag from a format this build does not know.
-    json = null;
+    payload = null;
   }
-  if (!json) return { status: 'invalid', message: BAD_LINK };
+  if (!payload) return { status: 'invalid', message: BAD_LINK };
 
+  const parsed =
+    prefix === 'd3.' ? unpackTopology(payload) : parseLegacy(payload, prefix);
+  if (!parsed) return { status: 'invalid', message: BAD_LINK };
+
+  const candidate = { nodes: parsed.nodes, edges: parsed.edges };
+  // The SAME structural gate the clipboard and the saved session use. A
+  // dangling edge, an unknown kind or a non-finite coordinate is rejected
+  // here, before the engine is ever handed the graph.
+  if (!isTopology(candidate)) return { status: 'invalid', message: BAD_LINK };
+
+  // Annotations are presentation data the engine never sees, so they
+  // cross the boundary through their own sanitizer, which is also what
+  // strips a colour crafted to break out of a style attribute.
+  const annotations = sanitizeAnnotations(parsed.annotations);
+
+  return {
+    status: 'ok',
+    topology: {
+      nodes: candidate.nodes,
+      edges: candidate.edges,
+      ...(annotations.length > 0 ? { annotations } : {}),
+    },
+  };
+}
+
+/** The loose shape a link yields before validation. */
+interface Parsed {
+  nodes?: unknown;
+  edges?: unknown;
+  annotations?: unknown;
+}
+
+/**
+ * The JSON readers for generation 1 and 2 links, kept so an old link
+ * still opens. A d2 payload has its default config fields stripped, so
+ * they are put back before validation, exactly as that generation's
+ * encoder expected its reader to.
+ */
+function parseLegacy(payload: Bytes, prefix: string): Parsed | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder().decode(json));
+    parsed = JSON.parse(new TextDecoder().decode(payload));
   } catch {
-    return { status: 'invalid', message: BAD_LINK };
+    return null;
   }
-  if (typeof parsed !== 'object' || parsed === null) {
-    return { status: 'invalid', message: BAD_LINK };
-  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const p = parsed as Parsed;
 
-  const p = parsed as { nodes?: unknown[]; edges?: unknown; annotations?: unknown };
-
-  if (isD2 && Array.isArray(p.nodes)) {
+  if (prefix === 'd2.' && Array.isArray(p.nodes)) {
     for (const node of p.nodes) {
       if (
         node &&
@@ -399,24 +470,5 @@ export async function decodeTopology(hash: string): Promise<ShareResult> {
       }
     }
   }
-
-  const candidate = { nodes: p.nodes, edges: p.edges };
-  // The SAME structural gate the clipboard and the saved session use. A
-  // dangling edge, an unknown kind or a non-finite coordinate is rejected
-  // here, before the engine is ever handed the graph.
-  if (!isTopology(candidate)) return { status: 'invalid', message: BAD_LINK };
-
-  // Annotations are presentation data the engine never sees, so they
-  // cross the boundary through their own sanitizer, which is also what
-  // strips a colour crafted to break out of a style attribute.
-  const annotations = sanitizeAnnotations(p.annotations);
-
-  return {
-    status: 'ok',
-    topology: {
-      nodes: candidate.nodes,
-      edges: candidate.edges,
-      ...(annotations.length > 0 ? { annotations } : {}),
-    },
-  };
+  return p;
 }
