@@ -144,6 +144,16 @@ export interface NoteLayout {
   lineH: number;
   weight: number;
   /**
+   * The box the note occupies, in world px. A fixed-width note is its wrap
+   * width, the width the reader set. An auto-sized note (wrap width
+   * Infinity) is its widest line: every piece of chrome (the hit area, the
+   * selection ring, the editing frame) hugs the text the way Excalidraw's
+   * and Eraser's text boxes do, growing as text is typed and shrinking as
+   * it is deleted. Empty text keeps half an em so the frame never collapses
+   * to a hairline.
+   */
+  width: number;
+  /**
    * Total height in world px. DERIVED from the text on every call, never
    * stored: the model deliberately holds no height, so it can never go
    * stale against edited content.
@@ -166,11 +176,19 @@ export function layoutNote(
   const style = noteStyle(size, font, bold, italic, scale);
   const lines = wrapText(text, width, style);
   const baseline = baselineIn(spec.line, style);
+  let widest = 0;
+  if (!Number.isFinite(width)) {
+    for (const line of lines) {
+      const w = measureText(line, style);
+      if (w > widest) widest = w;
+    }
+  }
   return {
     lines,
     font: spec.font,
     lineH: spec.line,
     weight: style.weight,
+    width: Number.isFinite(width) ? width : Math.max(widest, spec.font / 2),
     // The box has to hold the LAST line's descender, not just its line box.
     // A face whose baseline sits low in the box (Caveat's does) paints past
     // lines * lineH, which left the selection ring cutting through the final
@@ -186,6 +204,37 @@ export function layoutNote(
     // of an em shallower, which is a visible drop at the `lg` size.
     baseline,
   };
+}
+
+/**
+ * The wrap width a note lays out against: its own width, or none at all
+ * while it sizes itself to its text.
+ */
+export function noteWrapWidth(note: Pick<Note, 'width' | 'autoResize'>): number {
+  return note.autoResize ? Infinity : note.width;
+}
+
+/**
+ * layoutNote for a note as it is, with the draft text substituted while it
+ * is being edited. Every place that draws, hits or frames a note goes
+ * through here, so the autoResize rule lives in exactly one line.
+ */
+export function layoutNoteOf(
+  note: Pick<
+    Note,
+    'width' | 'autoResize' | 'size' | 'font' | 'bold' | 'italic' | 'scale'
+  >,
+  text: string,
+): NoteLayout {
+  return layoutNote(
+    text,
+    noteWrapWidth(note),
+    note.size,
+    note.font,
+    note.bold,
+    note.italic,
+    note.scale,
+  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -239,6 +288,58 @@ export function applyTab(state: TextEditState, outdent: boolean): TextEditState 
     start: start - drop,
     end: end - drop,
   };
+}
+
+/**
+ * Excalidraw's `normalizeEOL`: every line ending becomes \n.
+ *
+ * The textarea's own API value already does this for typed and pasted
+ * text; it is repeated so text arriving by any other route is laid out by
+ * the same wrapText that splits on \n alone.
+ */
+export function normalizeEOL(str: string): string {
+  return str.replace(/\r?\n|\r/g, '\n');
+}
+
+/**
+ * Excalidraw's `normalizeText`, with this app's tab width.
+ *
+ * A literal tab becomes TAB. A textarea renders \t to an eight-column stop,
+ * SVG text collapses it to one space, and the Tab key inserts TAB: left
+ * alone, a pasted tab shows one width in the editor and another once
+ * committed. Idempotent, so a caller can compare the result to the input
+ * and skip the write (and the caret repair it needs) when nothing changed.
+ */
+export function normalizeText(text: string): string {
+  return (
+    normalizeEOL(text)
+      // replace tabs with spaces so they render and measure correctly
+      .replace(/\t/g, TAB)
+  );
+}
+
+/**
+ * Offset in `text` where each wrapped line begins: the `start` of
+ * Excalidraw's `getWrappedTextLines`, recovered from wrapText's output.
+ *
+ * wrapText consumes exactly one separator (the space or newline it broke
+ * on) between two lines, and none at all where it split a single word
+ * that was wider than the note, so walking the lines and skipping one
+ * separator wherever the source has one recovers every start. This is
+ * what lets a point on the painted note map back to a caret position.
+ */
+export function lineStartOffsets(text: string, lines: readonly string[]): number[] {
+  const starts: number[] = [];
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    starts.push(offset);
+    offset += lines[i]!.length;
+    if (i < lines.length - 1) {
+      const sep = text[offset];
+      if (sep === ' ' || sep === '\n') offset += 1;
+    }
+  }
+  return starts;
 }
 
 /* ------------------------------------------------------------------ *

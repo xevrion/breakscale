@@ -2010,12 +2010,16 @@ h4 {
 
 /* --------------------------------------------------------------------------
    Inputs
+
+   The canvas note editor (.cv-note-editor, see textWysiwyg.ts) is a textarea
+   that must look like nothing at all, so it is excluded here the way
+   Excalidraw excludes its own `.excalidraw-wysiwyg` from its form styling.
    -------------------------------------------------------------------------- */
 
 input[type='text'],
 input[type='number'],
 select,
-textarea {
+textarea:not(.cv-note-editor) {
   height: 36px;
   padding: 0 var(--sp-3);
   border: var(--bw) solid var(--border-strong);
@@ -2030,7 +2034,7 @@ textarea {
     box-shadow var(--dur-fast) var(--ease);
 }
 
-textarea {
+textarea:not(.cv-note-editor) {
   height: auto;
   min-height: 72px;
   padding: var(--sp-2) var(--sp-3);
@@ -2068,14 +2072,14 @@ select option {
 input[type='text']:hover:not(:disabled),
 input[type='number']:hover:not(:disabled),
 select:hover:not(:disabled),
-textarea:hover:not(:disabled) {
+textarea:not(.cv-note-editor):hover:not(:disabled) {
   border-color: var(--line-2);
 }
 
 input[type='text']:focus,
 input[type='number']:focus,
 select:focus,
-textarea:focus {
+textarea:not(.cv-note-editor):focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
@@ -2084,7 +2088,7 @@ textarea:focus {
 input[type='text']:focus-visible,
 input[type='number']:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
+textarea:not(.cv-note-editor):focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);

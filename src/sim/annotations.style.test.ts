@@ -97,3 +97,14 @@ describe('annotation font', () => {
     expect(firstNote(noteWith({ font: 42 }))).not.toHaveProperty('font');
   });
 });
+
+describe('note autoResize', () => {
+  it('keeps an explicit true and drops everything else', () => {
+    const on = sanitizeAnnotations(noteWith({ autoResize: true }));
+    expect(on[0]).toMatchObject({ autoResize: true });
+    for (const v of [false, 1, 'true', null, undefined]) {
+      const out = sanitizeAnnotations(noteWith({ autoResize: v }));
+      expect(out[0]).not.toHaveProperty('autoResize');
+    }
+  });
+});

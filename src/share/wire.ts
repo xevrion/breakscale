@@ -326,7 +326,8 @@ const NOTE_BOLD = 1 << 8;
 const NOTE_ITALIC = 1 << 9;
 const NOTE_UNDERLINE = 1 << 10;
 const NOTE_SCALE = 1 << 11;
-const NOTE_KNOWN = (1 << 12) - 1;
+const NOTE_AUTO = 1 << 12;
+const NOTE_KNOWN = (1 << 13) - 1;
 
 const NOTE_SIZES = ['sm', 'md', 'lg'] as const;
 
@@ -678,6 +679,7 @@ function packNote(w: Writer, n: Note): void {
   if (n.italic === true) h |= NOTE_ITALIC;
   if (n.underline === true) h |= NOTE_UNDERLINE;
   if (finite(n.scale) && n.scale !== 1) h |= NOTE_SCALE;
+  if (n.autoResize === true) h |= NOTE_AUTO;
   w.varint(h);
   w.str(n.text);
   w.num(n.x);
@@ -890,5 +892,6 @@ function unpackAnnotation(r: Reader): Annotation {
   if (h & NOTE_BOLD) n.bold = true;
   if (h & NOTE_ITALIC) n.italic = true;
   if (h & NOTE_UNDERLINE) n.underline = true;
+  if (h & NOTE_AUTO) n.autoResize = true;
   return n;
 }

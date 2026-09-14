@@ -343,6 +343,7 @@ describe('round trip', () => {
       bold: true,
       italic: true,
       underline: true,
+      autoResize: true,
     };
     const section: Section = {
       id: 's',

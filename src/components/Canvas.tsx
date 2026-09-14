@@ -70,15 +70,13 @@ import {
   NEW_NOTE_TEXT,
   NEW_SECTION_H,
   NEW_SECTION_W,
-  NOTE_BOLD_WEIGHT,
-  NOTE_SIZES,
-  scaledSpec,
   RESIZE_DIRS,
   handleAnchor,
-  applyTab,
-  layoutNote,
+  layoutNoteOf,
   resizeRect,
 } from './annotationLayout';
+import { textWysiwyg } from './textWysiwyg';
+import type { TextWysiwyg } from './textWysiwyg';
 import type { ResizeDir } from './annotationLayout';
 import {
   SECTION_MIN_HEIGHT,
@@ -1873,6 +1871,14 @@ const FONT_LABEL: Record<AnnotationFont, string> = {
  * A note's handles: two sides that reflow the text, four corners that scale
  * it. Listed once so the chrome and the cursor rules cannot disagree.
  */
+/**
+ * Inset of the rectangle drawn around a note, in world px: the hit rect,
+ * the selection ring and the editing frame all use it, so a note is the
+ * same box whether it is pointed at, selected or being edited.
+ */
+const NOTE_RING_PAD_X = 6;
+const NOTE_RING_PAD_Y = 4;
+
 const NOTE_HANDLES = [
   { dir: 'w', corner: false },
   { dir: 'e', corner: false },
@@ -1929,6 +1935,8 @@ interface SectionViewProps {
   editingLabel: boolean;
   /** A node is being dragged over this section and will land inside it. */
   dropTarget: boolean;
+  /** See NoteViewProps.metricsEpoch. */
+  metricsEpoch: number;
 }
 
 /**
@@ -1941,6 +1949,9 @@ const SectionView = memo(function SectionView({
   selected,
   editingLabel,
   dropTarget,
+  // Read for nothing but the re-render its change forces: the label is
+  // truncated against a measurement, and this is what invalidates it.
+  metricsEpoch: _metricsEpoch,
 }: SectionViewProps) {
   return (
     <g
@@ -2033,6 +2044,16 @@ interface NoteViewProps {
   selected: boolean;
   /** Hide the SVG text while the in-place textarea floats over it. */
   editing: boolean;
+  /**
+   * Bumped by the canvas when the text measurement cache is dropped (the
+   * webfont stack has finished loading). A layout memoised on the note's
+   * own fields alone would keep the widths measured against the fallback
+   * face forever: a hand-font note wrapped a word early on every line, and
+   * its editor, a real textarea in the real face, wrapped differently, so
+   * the text jumped the moment editing started. Part of the memo key, so
+   * the wrap is redone once in the face that is actually painted.
+   */
+  metricsEpoch: number;
 }
 
 /**
@@ -2041,19 +2062,26 @@ interface NoteViewProps {
  * layout is memoised on exactly the fields it reads, so a note re-wraps
  * only when its own text, width or size changes.
  */
-const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewProps) {
+const NoteView = memo(function NoteView({
+  note,
+  selected,
+  editing,
+  metricsEpoch,
+}: NoteViewProps) {
   const layout = useMemo(
-    () =>
-      layoutNote(
-        note.text,
-        note.width,
-        note.size,
-        note.font,
-        note.bold,
-        note.italic,
-        note.scale,
-      ),
-    [note.text, note.width, note.size, note.font, note.bold, note.italic, note.scale],
+    () => layoutNoteOf(note, note.text),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      note.text,
+      note.width,
+      note.autoResize,
+      note.size,
+      note.font,
+      note.bold,
+      note.italic,
+      note.scale,
+      metricsEpoch,
+    ],
   );
   return (
     <g
@@ -2072,10 +2100,10 @@ const NoteView = memo(function NoteView({ note, selected, editing }: NoteViewPro
         className="cv-note-hit"
         data-hit="note"
         data-id={note.id}
-        x={-6}
-        y={-4}
-        width={note.width + 12}
-        height={layout.height + 8}
+        x={-NOTE_RING_PAD_X}
+        y={-NOTE_RING_PAD_Y}
+        width={layout.width + NOTE_RING_PAD_X * 2}
+        height={layout.height + NOTE_RING_PAD_Y * 2}
       />
       {!editing && (
         <text
@@ -2198,74 +2226,96 @@ function SectionChrome({
  * switch floats above the note's top-left in screen-constant units, the
  * same reasoning as the section handles.
  */
-function NoteChrome({ note, ui }: { note: Note; ui: number }) {
+function NoteChrome({
+  note,
+  ui,
+  metricsEpoch,
+}: {
+  note: Note;
+  ui: number;
+  /** See NoteViewProps.metricsEpoch: the ring is sized from the same wrap. */
+  metricsEpoch: number;
+}) {
   const layout = useMemo(
-    () =>
-      layoutNote(
-        note.text,
-        note.width,
-        note.size,
-        note.font,
-        note.bold,
-        note.italic,
-        note.scale,
-      ),
-    [note.text, note.width, note.size, note.font, note.bold, note.italic, note.scale],
+    () => layoutNoteOf(note, note.text),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      note.text,
+      note.width,
+      note.autoResize,
+      note.size,
+      note.font,
+      note.bold,
+      note.italic,
+      note.scale,
+      metricsEpoch,
+    ],
   );
-  // The ring, plus two width handles. Everything that STYLES the note lives
-  // in the floating bar above the charts strip: a toolbar anchored to the
-  // note is wider than a default note, so it clipped against the viewport
-  // edge and moved under the reader's hand on every pan.
-  const hs = 9 * ui;
+  // The frame, four corner squares, and two invisible edge strips.
+  // Everything that STYLES the note lives in the floating bar above the
+  // charts strip: a toolbar anchored to the note is wider than a default
+  // note, so it clipped against the viewport edge and moved under the
+  // reader's hand on every pan.
+  //
+  // The frame is the same rectangle the editor draws (NoteTextBox), so
+  // selected and editing differ only by the handles and the caret: a
+  // hairline at the ring inset, square corners, screen-constant. The look
+  // is Eraser's text box.
+  const hs = 8 * ui;
   const hit = 36 * ui;
-  const midY = note.y + layout.height / 2;
+  const x0 = note.x - NOTE_RING_PAD_X;
+  const y0 = note.y - NOTE_RING_PAD_Y;
+  const w = layout.width + NOTE_RING_PAD_X * 2;
+  const h = layout.height + NOTE_RING_PAD_Y * 2;
   return (
     <g className="cv-ann-sel">
-      <rect
-        className="cv-ann-ring"
-        x={note.x - 6}
-        y={note.y - 4}
-        width={note.width + 12}
-        height={layout.height + 8}
-        rx={4}
-      />
+      <rect className="cv-ann-ring is-note" x={x0} y={y0} width={w} height={h} />
 
       {/* Two kinds of handle, because a note has two things worth changing.
-          A SIDE handle reflows the text at its current size: the wrap width
-          moves and the words rearrange. A CORNER scales the type and the
-          width together, so the line breaks stay where they are and the
-          whole note simply gets bigger.
+          An EDGE reflows the text at its current size: the wrap width moves
+          and the words rearrange. It is drawn as nothing, the way Eraser's
+          is; the cursor changes over the strip. A CORNER scales the type and
+          the width together, so the line breaks stay where they are and the
+          whole note simply gets bigger; it is the visible square.
 
           There is no bottom or top handle. A note's height is DERIVED from
           its wrapped text on every layout and never stored, so a vertical
           drag would set a number the next render throws away and the gesture
           would appear to work and then snap back. */}
       {NOTE_HANDLES.map(({ dir, corner }) => {
-        const x = dir.includes('w')
-          ? note.x - 6
-          : dir.includes('e')
-            ? note.x + note.width + 6
-            : 0;
-        const y = corner
-          ? dir.startsWith('n')
-            ? note.y - 4
-            : note.y + layout.height + 4
-          : midY;
+        const x = dir.includes('w') ? x0 : x0 + w;
+        if (!corner) {
+          // The whole edge, a fingertip wide, so the strip can be found
+          // without hunting for a midpoint.
+          return (
+            <rect
+              key={dir}
+              className="cv-handle-hit"
+              data-hit="note-resize"
+              data-id={note.id}
+              data-dir={dir}
+              x={x - hit / 2}
+              y={y0}
+              width={hit}
+              height={h}
+            />
+          );
+        }
+        const y = dir.startsWith('n') ? y0 : y0 + h;
         return (
           <g key={dir}>
             <rect
-              className={`cv-handle${corner ? ' is-corner' : ''}`}
+              className="cv-handle is-corner"
               x={x - hs / 2}
               y={y - hs / 2}
               width={hs}
               height={hs}
-              rx={2 * ui}
             />
             {/* The generous invisible target ON TOP of the visible square,
                 sized for a fingertip, matching the section handles. */}
             <rect
               className="cv-handle-hit"
-              data-hit={corner ? 'note-scale' : 'note-resize'}
+              data-hit="note-scale"
               data-id={note.id}
               data-dir={dir}
               x={x - hit / 2}
@@ -2281,6 +2331,29 @@ function NoteChrome({ note, ui }: { note: Note; ui: number }) {
 }
 
 const EMPTY_ANNOTATIONS: readonly Annotation[] = [];
+
+/** The S/M/L steps the editor's Ctrl+Shift+> and < walk. */
+const NOTE_SIZE_ORDER: readonly Note['size'][] = ['sm', 'md', 'lg'];
+
+/**
+ * The frame around a note being edited: Excalidraw's renderTextBox in role,
+ * Eraser's in look. The selection ring's exact rectangle (same inset, same
+ * hairline, square corners) drawn from the DRAFT so it grows with the
+ * typing, without the handles. Entering and leaving the editor then changes
+ * nothing about the frame, only whether the corners and the caret are there.
+ */
+function NoteTextBox({ note, draft }: { note: Note; draft: string }) {
+  const layout = layoutNoteOf(note, draft || ' ');
+  return (
+    <rect
+      className="cv-text-box"
+      x={note.x - NOTE_RING_PAD_X}
+      y={note.y - NOTE_RING_PAD_Y}
+      width={layout.width + NOTE_RING_PAD_X * 2}
+      height={layout.height + NOTE_RING_PAD_Y * 2}
+    />
+  );
+}
 
 /* ================================================================== *
  * What a node is MADE OF
@@ -3220,6 +3293,12 @@ interface Pending {
   groupAnnOrigins: Map<string, { x: number; y: number }>;
   /** Section rect at promotion, for an 'ann-resize' drag. */
   annRect: { x: number; y: number; w: number; h: number } | null;
+  /**
+   * A note's WRAP width at grab time, for a corner scale. `annRect.w` holds
+   * the box the text occupies, which is where the handle was and what the
+   * drag is measured from; the wrap width is what the scale multiplies.
+   */
+  noteWrap: number;
   /** The armed annotation tool latched at press time, if any. */
   tool: 'note' | 'section' | null;
 }
@@ -3403,9 +3482,18 @@ export default function Canvas({
    */
   const [dropSection, setDropSection] = useState<string | null>(null);
 
-  /** In-place note text editor: which note, and the live draft. */
-  const [noteEdit, setNoteEdit] = useState<{ id: string; draft: string } | null>(null);
-  const noteEditDoneRef = useRef(false);
+  /**
+   * In-place note text editor: which note, the live draft, and the scene
+   * point that was double-clicked (null selects everything, for a note that
+   * was just placed). The draft is the ONLY copy of the text being typed:
+   * nothing reaches the topology until the editor submits, which it does
+   * exactly once (see textWysiwyg).
+   */
+  const [noteEdit, setNoteEdit] = useState<{
+    id: string;
+    draft: string;
+    caret: { x: number; y: number } | null;
+  } | null>(null);
   /** In-place section label editor. */
   const [labelEdit, setLabelEdit] = useState<{ id: string; draft: string } | null>(
     null,
@@ -3515,16 +3603,16 @@ export default function Canvas({
         // A note's height is derived from its wrapped text, so it has to be
         // laid out to be measured. Taking zero here cropped every note that
         // ran past the lowest node, which is most of them.
-        const h = isSection(a)
-          ? a.height
-          : layoutNote(a.text, a.width, a.size, a.font, a.bold, a.italic, a.scale)
-              .height;
+        const box = isSection(a)
+          ? { width: a.width, height: a.height }
+          : layoutNoteOf(a, a.text);
+        const h = box.height;
         if (a.x < minX) minX = a.x;
         // A section's label plate paints ABOVE its frame.
         if ((isSection(a) ? a.y - 28 : a.y) < minY) {
           minY = isSection(a) ? a.y - 28 : a.y;
         }
-        if (a.x + a.width > maxX) maxX = a.x + a.width;
+        if (a.x + box.width > maxX) maxX = a.x + box.width;
         if (a.y + h > maxY) maxY = a.y + h;
       }
       const bg = getComputedStyle(document.documentElement)
@@ -3865,6 +3953,7 @@ export default function Canvas({
         groupAnnIds: [],
         groupAnnOrigins: new Map(),
         annRect: null,
+        noteWrap: 0,
         tool: armedTool,
       };
 
@@ -4076,10 +4165,15 @@ export default function Canvas({
           }
           p.mode = p.hit.kind === 'note-scale' ? 'note-scale' : 'note-resize';
           onMoveStart?.('resize');
-          // h carries the note's scale at grab time rather than a height:
-          // the height is derived from the text and is not ours to set, and
-          // a scale drag needs its starting multiplier to work from.
-          p.annRect = { x: ann.x, y: ann.y, w: ann.width, h: ann.scale ?? 1 };
+          // w is the box the text occupies, not the wrap width: that is
+          // where the handle sat, and a drag has to continue from the edge
+          // under the pointer rather than jump to a wrap width the reader
+          // never saw. h carries the note's scale at grab time rather than
+          // a height: the height is derived from the text and is not ours
+          // to set, and a scale drag needs its starting multiplier.
+          const box = layoutNoteOf(ann, ann.text).width;
+          p.annRect = { x: ann.x, y: ann.y, w: box, h: ann.scale ?? 1 };
+          p.noteWrap = ann.width;
           break;
         }
 
@@ -4336,15 +4430,11 @@ export default function Canvas({
         // The width tracks the SAME clamped factor, so a note pinned at the
         // scale limit stops growing rather than stretching its box on alone.
         const applied = scale / p.annRect.h;
-        const width = clamp(
-          snap(p.annRect.w * applied),
-          NOTE_MIN_WIDTH,
-          NOTE_MAX_WIDTH,
-        );
-        // A west-side corner keeps the east edge still, exactly as the side
-        // handle does.
+        const width = clamp(snap(p.noteWrap * applied), NOTE_MIN_WIDTH, NOTE_MAX_WIDTH);
+        // A west-side corner keeps the east edge of the BOX still, exactly
+        // as the side handle does: the box grows by the same factor.
         const x = p.hit.dir?.includes('w')
-          ? p.annRect.x + p.annRect.w - width
+          ? p.annRect.x + p.annRect.w - p.annRect.w * applied
           : p.annRect.x;
         onScaleNote?.(p.hit.id!, x, width, scale);
         return;
@@ -4427,10 +4517,7 @@ export default function Canvas({
           if (p.tool === 'note') {
             const id = onCreateNote?.(snap(p.worldX), snap(p.worldY)) ?? null;
             setTool(null);
-            if (id) {
-              noteEditDoneRef.current = false;
-              setNoteEdit({ id, draft: NEW_NOTE_TEXT });
-            }
+            if (id) setNoteEdit({ id, draft: NEW_NOTE_TEXT, caret: null });
           } else {
             onCreateSection?.(
               snap(p.worldX - NEW_SECTION_W / 2),
@@ -4593,8 +4680,13 @@ export default function Canvas({
               next.add(a.id);
             }
           } else {
-            const h = layoutNote(a.text, a.width, a.size).height;
-            if (a.x <= x1 && a.x + a.width >= x0 && a.y <= y1 && a.y + h >= y0) {
+            const box = layoutNoteOf(a, a.text);
+            if (
+              a.x <= x1 &&
+              a.x + box.width >= x0 &&
+              a.y <= y1 &&
+              a.y + box.height >= y0
+            ) {
               next.add(a.id);
             }
           }
@@ -4680,13 +4772,19 @@ export default function Canvas({
   /* Text measurements taken before the font stack settles are measured
      against whatever face the browser had at the time, so every cached width
      is wrong once the real one arrives. Drop the cache and repaint. */
-  const [, forceRemeasure] = useState(0);
+  const [metricsEpoch, forceRemeasure] = useState(0);
   useEffect(() => {
     if (!document.fonts?.ready) return;
     let live = true;
     void document.fonts.ready.then(() => {
       if (!live) return;
       resetTextMetrics();
+      // The counter is threaded into every memoised text layout below, so
+      // this is not only a repaint: the annotation views are React.memo
+      // and would otherwise keep both their render and their memoised
+      // wrap through it. Measured before the fix: a 340px hand-font note
+      // painted five lines against the fallback face's widths where the
+      // loaded face fits four.
       forceRemeasure((n) => n + 1);
     });
     return () => {
@@ -4709,6 +4807,11 @@ export default function Canvas({
     },
     [zoomAt, visibleRect],
   );
+  /** For the note editor's zoom chords, which are bound once per edit. */
+  const zoomCenteredRef = useRef(zoomCentered);
+  useLayoutEffect(() => {
+    zoomCenteredRef.current = zoomCentered;
+  }, [zoomCentered]);
 
   useEffect(() => {
     const el = surfaceRef.current;
@@ -4904,15 +5007,26 @@ export default function Canvas({
       const hit = hitTest(e.target);
       if (!hit.id) return;
 
-      // Double-click a note: edit its text in place. Double-click a section
-      // border, label or handle: edit its label. Same editor contract as the
-      // node rename: Enter/blur commits, Escape cancels.
-      if (hit.kind === 'note') {
+      // Double-click a note: edit its text in place, with the caret on the
+      // character that was double-clicked (Excalidraw's
+      // initialCaretSceneCoords). Double-click a section border, label or
+      // handle: edit its label, with the rename editor's contract.
+      // A handle counts as the note: the first click of the double-click
+      // selects the note and grows its handles under the pointer, so a
+      // double-click near an edge lands its second click on a handle.
+      if (
+        hit.kind === 'note' ||
+        hit.kind === 'note-resize' ||
+        hit.kind === 'note-scale'
+      ) {
         const ann = (topoRef.current.annotations ?? []).find((a) => a.id === hit.id);
         if (!ann || !isNote(ann)) return;
         e.preventDefault();
-        noteEditDoneRef.current = false;
-        setNoteEdit({ id: ann.id, draft: ann.text });
+        setNoteEdit({
+          id: ann.id,
+          draft: ann.text,
+          caret: toWorld(e.clientX, e.clientY),
+        });
         return;
       }
       if (hit.kind === 'section' || hit.kind === 'section-resize') {
@@ -4932,7 +5046,7 @@ export default function Canvas({
       setRenameDraft(node.label);
       setRenaming(node.id);
     },
-    [hitTest],
+    [hitTest, toWorld],
   );
 
   const commitRename = useCallback(() => {
@@ -4956,24 +5070,122 @@ export default function Canvas({
 
   /* ---------------- annotation editors ----------------
    *
-   * The note editor is a real focused TEXTAREA, so Enter inserts a newline
-   * natively; commit is blur (clicking away) with Escape as the cancel, and
-   * the shell removes a note whose committed text is empty. The label editor
-   * is a single-line input with the rename editor's exact contract. Both are
-   * siblings of the surface, so the pointer router never sees them.
+   * The note editor is Excalidraw's textWysiwyg (see textWysiwyg.ts): a
+   * textarea created imperatively when an edit starts, appended to the
+   * editor container below (a sibling of the surface, so the pointer router
+   * never sees it), updated from the live note and view on every render,
+   * and torn down by its own submit. Enter inserts a newline; Escape,
+   * Ctrl+Enter and blur submit; a press on the format bar or the zoom
+   * control disarms the blur submit until the following pointerup, so
+   * restyling while typing keeps the caret where it was. The shell removes
+   * a note whose submitted text is empty. There is no cancel: undo is the
+   * way back, and a silent revert would throw typing away.
+   *
+   * The label editor is a single-line input with the rename editor's exact
+   * contract.
    */
 
-  const commitNoteEdit = useCallback(() => {
-    if (noteEditDoneRef.current) return;
-    noteEditDoneRef.current = true;
-    const edit = noteEdit;
-    setNoteEdit(null);
-    if (!edit || !onEditNote) return;
-    const ann = (topoRef.current.annotations ?? []).find((a) => a.id === edit.id);
-    if (!ann || !isNote(ann)) return;
-    if (edit.draft === ann.text) return;
-    onEditNote(edit.id, edit.draft);
-  }, [noteEdit, onEditNote]);
+  const editorHostRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<TextWysiwyg | null>(null);
+  /** Live mirror, read once when an edit starts. */
+  const noteEditRef = useRef(noteEdit);
+  useLayoutEffect(() => {
+    noteEditRef.current = noteEdit;
+  }, [noteEdit]);
+
+  const editingNoteId = noteEdit?.id ?? null;
+  useLayoutEffect(() => {
+    if (!editingNoteId) return;
+    const host = editorHostRef.current;
+    const surface = surfaceRef.current;
+    const start = noteEditRef.current;
+    if (!host || !surface || !start || start.id !== editingNoteId) return;
+    const id = editingNoteId;
+    const findNote = () => {
+      const ann = (topoRef.current.annotations ?? []).find((a) => a.id === id);
+      return ann && isNote(ann) ? ann : null;
+    };
+    if (!findNote()) return;
+
+    // deselect all other elements when inserting text
+    setSelection(EMPTY_SELECTION);
+
+    const editor = textWysiwyg({
+      getNote: findNote,
+      initialText: start.draft,
+      getViewportCoords: (x, y) => {
+        const v = viewRef.current;
+        return [x * v.k + v.x, y * v.k + v.y];
+      },
+      getZoom: () => viewRef.current.k,
+      container: host,
+      surface,
+      chromeSelector: '[data-chrome="format"], [data-chrome="zoom"]',
+      autoSelect: !coarsePointerRef.current,
+      initialCaretSceneCoords: start.caret,
+      onChange: (text) => {
+        setNoteEdit((cur) => (cur && cur.id === id ? { ...cur, draft: text } : cur));
+      },
+      onSubmit: ({ viaKeyboard, nextText }) => {
+        editorRef.current = null;
+        setNoteEdit((cur) => (cur && cur.id === id ? null : cur));
+        const ann = findNote();
+        if (ann && nextText !== ann.text) onEditNote?.(id, nextText);
+        // keyboard-submit keeps focus on the edited object. Only while it
+        // survives: an emptied note is removed by the shell.
+        if (viaKeyboard && nextText.trim()) setSelection(new Set([id]));
+      },
+      actions: {
+        zoomIn: () => zoomCenteredRef.current((k) => k * ZOOM_STEP),
+        zoomOut: () => zoomCenteredRef.current((k) => k / ZOOM_STEP),
+        resetZoom: () => zoomCenteredRef.current(() => 1),
+        increaseFontSize: () => {
+          const ann = findNote();
+          if (!ann) return;
+          const next = NOTE_SIZE_ORDER[NOTE_SIZE_ORDER.indexOf(ann.size) + 1];
+          if (next) onSetNoteSize?.(id, next);
+        },
+        decreaseFontSize: () => {
+          const ann = findNote();
+          if (!ann) return;
+          const next = NOTE_SIZE_ORDER[NOTE_SIZE_ORDER.indexOf(ann.size) - 1];
+          if (next) onSetNoteSize?.(id, next);
+        },
+      },
+    });
+    editorRef.current = editor;
+    return () => {
+      // The note was deleted or replaced under the editor (a preset load),
+      // or the canvas unmounted: submit, which is a no-op once destroyed
+      // and finds no note to write to otherwise.
+      editor.submit();
+      if (editorRef.current === editor) editorRef.current = null;
+    };
+    // The editor's getters read refs; only the identity of the edit matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingNoteId]);
+
+  /* The editor follows the element: Excalidraw's scene.onUpdate and
+     onScrollChange, which recompute the style from the live element and, on
+     an element update, put focus back in the editor. */
+  const editNoteLive = editingNoteId
+    ? (annotations.find((a) => a.id === editingNoteId) ?? null)
+    : null;
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (!editNoteLive) {
+      // The note was deleted or replaced under the editor (a preset load).
+      // Submit finds nothing to write to, and tears the textarea down.
+      editor.submit();
+      return;
+    }
+    editor.update();
+    editor.focus();
+  }, [editNoteLive]);
+  useLayoutEffect(() => {
+    editorRef.current?.update();
+  }, [view]);
 
   const commitLabelEdit = useCallback(() => {
     if (labelEditDoneRef.current) return;
@@ -5109,10 +5321,7 @@ export default function Canvas({
         const w = toWorld(e.clientX, e.clientY);
         if (ann === 'note') {
           const id = onCreateNote?.(snap(w.x), snap(w.y)) ?? null;
-          if (id) {
-            noteEditDoneRef.current = false;
-            setNoteEdit({ id, draft: NEW_NOTE_TEXT });
-          }
+          if (id) setNoteEdit({ id, draft: NEW_NOTE_TEXT, caret: null });
         } else {
           onCreateSection?.(
             snap(w.x - NEW_SECTION_W / 2),
@@ -5219,16 +5428,21 @@ export default function Canvas({
    * gave would be wrong about one of them.
    */
   const formatNote = useMemo(() => {
-    if (selectedIds.size !== 1) return null;
-    const [id] = selectedIds;
+    // The note being edited first: editing deselects everything (as
+    // Excalidraw does), and its shape actions stay up for the element
+    // being edited.
+    const id = editingNoteId ?? (selectedIds.size === 1 ? [...selectedIds][0] : null);
+    if (!id) return null;
     const ann = (topology.annotations ?? []).find((a) => a.id === id);
     return ann && isNote(ann) ? ann : null;
-  }, [selectedIds, topology.annotations]);
+  }, [editingNoteId, selectedIds, topology.annotations]);
 
   /* Instruction copy names the gesture the reader can actually perform: a
      hint telling a phone to "click" and press "Esc" describes an app they do
      not have. */
   const coarsePointer = useCoarsePointer();
+  const coarsePointerRef = useRef(coarsePointer);
+  coarsePointerRef.current = coarsePointer;
 
   const fitToContent = useCallback(
     () => fitTo(topology.nodes),
@@ -5646,16 +5860,6 @@ export default function Canvas({
   const editSection =
     editSectionRaw && isSection(editSectionRaw) ? editSectionRaw : null;
 
-  /** Auto-grow the note editor to its content, so what the student types is
-   *  laid out exactly where the committed note will paint. */
-  const noteAreaRef = useRef<HTMLTextAreaElement | null>(null);
-  useLayoutEffect(() => {
-    const el = noteAreaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  });
-
   /** Snapped drop target of the live drag-link, if the drop would be legal. */
   const snapTarget =
     link && link.over && canLink(link.from, link.over) ? link.over : null;
@@ -5739,6 +5943,7 @@ export default function Canvas({
                     selected={selectedIds.has(s.id)}
                     editingLabel={labelEdit?.id === s.id}
                     dropTarget={dropSection === s.id}
+                    metricsEpoch={metricsEpoch}
                   />
                 ))}
               </g>
@@ -5808,6 +6013,7 @@ export default function Canvas({
                     note={n}
                     selected={selectedIds.has(n.id)}
                     editing={noteEdit?.id === n.id}
+                    metricsEpoch={metricsEpoch}
                   />
                 ))}
               </g>
@@ -5833,10 +6039,23 @@ export default function Canvas({
                         flipTones={toneRowWouldClip(a)}
                       />
                     ) : (
-                      <NoteChrome key={a.id} note={a} ui={1 / view.k} />
+                      <NoteChrome
+                        key={a.id}
+                        note={a}
+                        ui={1 / view.k}
+                        metricsEpoch={metricsEpoch}
+                      />
                     ),
                   )}
               </g>
+            )}
+
+            {/* Excalidraw's renderTextBox: the one piece of chrome a text
+                being edited gets, a dashed hairline at a small screen-constant
+                padding around the box the draft wraps in. Sized from the
+                DRAFT, so it grows with the typing. */}
+            {editNote && noteEdit && (
+              <NoteTextBox note={editNote} draft={noteEdit.draft} />
             )}
 
             {/* Live section-draw preview. */}
@@ -5909,117 +6128,15 @@ export default function Canvas({
       )}
 
       {/*
-        In-place note editor: a real focused textarea positioned and scaled
-        over the note it edits, in the note's own face and metrics, so what
-        is typed wraps exactly where the painted text will. Enter is a
-        newline, Ctrl+Enter and Escape commit, blur commits, Tab indents.
+        Where the note editor's textarea is appended (Excalidraw's
+        .excalidraw-textEditorContainer). A sibling of the surface, so the
+        pointer router never sees it; empty until an edit starts.
       */}
-      {editNote && noteEdit && (
-        <textarea
-          ref={noteAreaRef}
-          className={`cv-note-editor is-${editNote.size}`}
-          data-chrome="note-edit"
-          style={{
-            left: editNote.x * view.k + view.x,
-            top: editNote.y * view.k + view.y,
-            width: editNote.width * view.k + 4,
-            // Height follows the DRAFT, not the committed note, so the box
-            // grows with the text as it wraps instead of scrolling inside a
-            // fixed frame. Derived from the same layoutNote the canvas paints
-            // with, so the editor and the result wrap identically rather than
-            // from scrollHeight, which would measure the browser's own
-            // wrapping and disagree with the painted line breaks.
-            height:
-              layoutNote(
-                noteEdit.draft || ' ',
-                editNote.width,
-                editNote.size,
-                editNote.font,
-                editNote.bold,
-                editNote.italic,
-                editNote.scale,
-              ).height *
-                view.k +
-              4,
-            fontSize: scaledSpec(editNote.size, editNote.scale).font * view.k,
-            lineHeight: `${scaledSpec(editNote.size, editNote.scale).line * view.k}px`,
-            // EVERY style the note carries is mirrored here, not just the
-            // family. Editing is meant to feel like typing into the note that
-            // is already there, and an editor that drops the colour, the
-            // weight or the slant turns a coloured bold note into plain black
-            // text for as long as the caret is in it. The bold and italic
-            // also have to match because they change glyph widths: a lighter
-            // editor wraps to different lines than the paint will.
-            fontWeight: editNote.bold
-              ? NOTE_BOLD_WEIGHT
-              : NOTE_SIZES[editNote.size].weight,
-            fontStyle: editNote.italic ? 'italic' : undefined,
-            textDecoration: editNote.underline ? 'underline' : undefined,
-            fontFamily: `var(--${editNote.font ?? 'sans'})`,
-            color:
-              editNote.tone !== undefined
-                ? `var(--ann-${editNote.tone}-ink)`
-                : undefined,
-          }}
-          value={noteEdit.draft}
-          onChange={(e) =>
-            setNoteEdit((cur) =>
-              cur ? { ...cur, draft: e.target.value.slice(0, 2000) } : cur,
-            )
-          }
-          onFocus={(e) => e.currentTarget.select()}
-          onBlur={commitNoteEdit}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            // An IME candidate window swallows Enter and Escape to choose a
-            // character. Committing on those would end the edit in the middle
-            // of composing a word, so composition wins until it is done.
-            // keyCode 229 is the pre-composition signal older WebKit sends
-            // without setting isComposing.
-            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              // Commits rather than reverts, matching every other editor on
-              // this canvas and Excalidraw's own contract. Escape here means
-              // "I am done", and undo is the way back; a silent revert would
-              // throw away typing with no way to recover it.
-              commitNoteEdit();
-              return;
-            }
-            // Ctrl/Cmd+Enter commits, because plain Enter has to stay a
-            // newline: a note is a paragraph, and the whole point of a
-            // textarea is that it wraps to more than one line.
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault();
-              commitNoteEdit();
-              return;
-            }
-            if (e.key === 'Tab') {
-              // Never move focus. Tabbing out mid-sentence commits the note
-              // and throws the caret onto a toolbar button, which loses the
-              // writer's place for a keystroke they meant as formatting.
-              e.preventDefault();
-              const el = e.currentTarget;
-              const next = applyTab(
-                { value: el.value, start: el.selectionStart, end: el.selectionEnd },
-                e.shiftKey,
-              );
-              if (next.value === el.value) return;
-              el.value = next.value;
-              el.setSelectionRange(next.start, next.end);
-              // React never saw the programmatic write, so the draft is
-              // pushed by hand; without this the indent is lost on commit.
-              setNoteEdit((cur) =>
-                cur ? { ...cur, draft: el.value.slice(0, 2000) } : cur,
-              );
-            }
-          }}
-          aria-label="Note text"
-          spellCheck={false}
-          autoFocus
-        />
-      )}
+      <div
+        ref={editorHostRef}
+        className="cv-text-editor-container"
+        data-chrome="note-edit"
+      />
 
       {/* In-place section label editor: the rename editor's contract. */}
       {editSection && labelEdit && (

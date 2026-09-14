@@ -279,11 +279,17 @@ describe('round trip, uncompressed fallback', () => {
   });
 
   it('leaves a design uncompressed when deflate would only add bytes', async () => {
-    // Two nodes and one edge pack to a few dozen bytes; deflate cannot
+    // A single node packs to a dozen bytes; deflate cannot
     // beat that, so the link is the same with or without it.
-    const packed = await encodeTopology(SIMPLE);
+    const tiny: Topology = {
+      nodes: [
+        { id: 'n', kind: 'service', label: 'b', x: 0, y: 0, config: { ...CONFIG } },
+      ],
+      edges: [],
+    };
+    const packed = await encodeTopology(tiny);
     suppressCompression();
-    const plain = await encodeTopology(SIMPLE);
+    const plain = await encodeTopology(tiny);
     expect(packed).toBe(plain);
   });
 });

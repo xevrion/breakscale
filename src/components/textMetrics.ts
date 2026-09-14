@@ -127,7 +127,7 @@ export interface TextStyle {
  * a shorthand assembled differently in two places is how a measurement ends
  * up describing a face the browser never paints.
  */
-function fontString(style: TextStyle): string {
+export function fontString(style: TextStyle): string {
   const slant = style.italic ? 'italic ' : '';
   return `${slant}${style.weight} ${style.size}px ${stack(style.family)}`;
 }

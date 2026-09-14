@@ -17,6 +17,11 @@ import {
   TAB,
   TAB_SIZE,
   applyTab,
+  layoutNoteOf,
+  lineStartOffsets,
+  normalizeEOL,
+  noteWrapWidth,
+  normalizeText,
   scaledSpec,
   layoutNote,
   noteStyle,
@@ -76,6 +81,38 @@ describe('layoutNote', () => {
   it('uses the size-specific metrics', () => {
     expect(layoutNote('a', 100, 'sm').font).toBe(NOTE_SIZES.sm.font);
     expect(layoutNote('a', 100, 'lg').lineH).toBe(NOTE_SIZES.lg.line);
+  });
+});
+
+describe('layoutNote box width', () => {
+  it('a fixed-width note occupies its wrap width, however short the text', () => {
+    expect(layoutNote('Note', 220, 'md').width).toBe(220);
+  });
+
+  it('an auto-sized note (no wrap width) hugs its widest line and never wraps', () => {
+    const l = layoutNote('Note', Infinity, 'md');
+    expect(l.width).toBe(measureText('Note', style));
+    const long = layoutNote(
+      'one two three four five six seven eight nine ten',
+      Infinity,
+      'md',
+    );
+    expect(long.lines.length).toBe(1);
+    expect(long.width).toBe(measureText(long.lines[0]!, style));
+    const multi = layoutNote('a\nlonger line\nb', Infinity, 'md');
+    expect(multi.width).toBe(measureText('longer line', style));
+  });
+
+  it('keeps half an em for empty auto-sized text so a frame never collapses', () => {
+    expect(layoutNote('', Infinity, 'md').width).toBe(NOTE_SIZES.md.font / 2);
+  });
+
+  it('layoutNoteOf applies the autoResize rule', () => {
+    const base = { width: 220, size: 'md' as const };
+    expect(layoutNoteOf({ ...base, autoResize: true }, 'Note').width).toBeLessThan(220);
+    expect(layoutNoteOf(base, 'Note').width).toBe(220);
+    expect(noteWrapWidth({ width: 220, autoResize: true })).toBe(Infinity);
+    expect(noteWrapWidth({ width: 220 })).toBe(220);
   });
 });
 
@@ -288,5 +325,58 @@ describe('scaledSpec', () => {
     const s = scaledSpec('sm', 1.37);
     expect(Number.isInteger(s.font)).toBe(true);
     expect(Number.isInteger(s.line)).toBe(true);
+  });
+});
+
+describe('normalizeText', () => {
+  it('folds every line ending to \\n', () => {
+    expect(normalizeEOL('a\r\nb\rc\nd')).toBe('a\nb\nc\nd');
+    expect(normalizeText('a\r\nb\rc\nd')).toBe('a\nb\nc\nd');
+  });
+
+  it('turns a literal tab into the same spaces the Tab key inserts', () => {
+    expect(normalizeText('\ta\tb')).toBe(`${TAB}a${TAB}b`);
+  });
+
+  it('leaves already-normal text identical and is idempotent', () => {
+    const text = `plain\n${TAB}indented\n\nunicode: naïve 日本語 🙂`;
+    expect(normalizeText(text)).toBe(text);
+    const once = normalizeText('x\r\n\ty');
+    expect(normalizeText(once)).toBe(once);
+  });
+
+  it('lays out the same as the text the paint will see', () => {
+    // The whole reason for the function: what the editor holds after a
+    // paste wraps to the lines the SVG will paint, tabs included.
+    const kept = normalizeText('one\ttwo\r\nthree');
+    expect(wrapText(kept, 10_000, style)).toEqual([`one${TAB}two`, 'three']);
+  });
+});
+
+describe('lineStartOffsets', () => {
+  it('skips the one separator a wrap consumed', () => {
+    expect(lineStartOffsets('one two three', ['one', 'two', 'three'])).toEqual([
+      0, 4, 8,
+    ]);
+  });
+
+  it('skips a newline the same way, including an empty line', () => {
+    expect(lineStartOffsets('a\n\nb', ['a', '', 'b'])).toEqual([0, 2, 3]);
+  });
+
+  it('skips nothing where a single word was character-broken', () => {
+    expect(lineStartOffsets('abcdef', ['abc', 'def'])).toEqual([0, 3]);
+  });
+
+  it('agrees with wrapText on real wrapped text', () => {
+    const text = 'one two three four five six seven eight nine ten\nnext para';
+    const width = measureText('one two three', style) + 1;
+    const lines = wrapText(text, width, style);
+    const starts = lineStartOffsets(text, lines);
+    // Every line is exactly the slice of the source that starts at its
+    // offset, which is the property the caret placement relies on.
+    lines.forEach((line, i) => {
+      expect(text.slice(starts[i]!, starts[i]! + line.length)).toBe(line);
+    });
   });
 });

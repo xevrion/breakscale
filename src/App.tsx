@@ -43,6 +43,7 @@ import { cloneSubgraph, isTopology, selectionSubgraph } from './clipboard';
 import type { ClipboardSubgraph } from './clipboard';
 import {
   NOTE_DEFAULT_WIDTH,
+  NOTE_MAX_CHARS,
   SECTION_MIN_HEIGHT,
   SECTION_MIN_WIDTH,
   NOTE_MAX_SCALE,
@@ -1259,19 +1260,24 @@ export default function App() {
     (id: string, x: number, width: number) => {
       if (!history.inGesture) history.touch('resize', snapRef.current);
       setAnnotations(
-        (topoLiveRef.current.annotations ?? []).map((a) =>
-          a.id === id && isNote(a)
-            ? {
-                ...a,
-                x,
-                // Clamped here as well as in the canvas, because this is the
-                // boundary the model is written through: a width that only
-                // the gesture bounded could still arrive out of range from a
-                // future caller.
-                width: Math.min(Math.max(width, NOTE_MIN_WIDTH), NOTE_MAX_WIDTH),
-              }
-            : a,
-        ),
+        (topoLiveRef.current.annotations ?? []).map((a) => {
+          if (a.id !== id || !isNote(a)) return a;
+          const next: Note = {
+            ...a,
+            x,
+            // Clamped here as well as in the canvas, because this is the
+            // boundary the model is written through: a width that only
+            // the gesture bounded could still arrive out of range from a
+            // future caller.
+            width: Math.min(Math.max(width, NOTE_MIN_WIDTH), NOTE_MAX_WIDTH),
+          };
+          // Dragging a side is what pins a note's width: from here on it
+          // wraps there, as Eraser's text does once resized. Deleted rather
+          // than set false, so the field stays absent from share links and
+          // history compares it as absent.
+          delete next.autoResize;
+          return next;
+        }),
       );
     },
     [history, setAnnotations],
@@ -1334,6 +1340,8 @@ export default function App() {
           y,
           width: NOTE_DEFAULT_WIDTH,
           size: 'md',
+          // Born hugging its text; a side drag pins the width.
+          autoResize: true,
         },
       ]);
       setSelectedIds(new Set([id]));
@@ -1371,7 +1379,7 @@ export default function App() {
       const anns = topoLiveRef.current.annotations ?? [];
       const cur = anns.find((a) => a.id === id);
       if (!cur || cur.kind !== 'note') return;
-      const next = text.slice(0, 2000);
+      const next = text.slice(0, NOTE_MAX_CHARS);
       if (!next.trim()) {
         // An emptied note is removed outright: invisible and unselectable,
         // it would otherwise be litter the reader cannot find to delete.

@@ -22,8 +22,19 @@ export interface Note {
   /**
    * Wrap width in world units. Height follows from the text, so a note never
    * has a stale height stored against content that has since changed.
+   *
+   * Ignored while `autoResize` is set: an auto-sized note never wraps.
    */
   width: number;
+  /**
+   * The note sizes itself to its text: no wrapping, the box is as wide as
+   * the widest line, and typing grows it. What Excalidraw calls autoResize
+   * and what Eraser's text does until a side is dragged. A freshly placed
+   * note is born this way; dragging an edge clears it and the dragged width
+   * becomes the wrap width. Absent means fixed width, which is what every
+   * note that existed before this flag was, so an old link opens unchanged.
+   */
+  autoResize?: boolean;
   /**
    * Relative size. Notes serve two different jobs: a heading that titles a
    * whole diagram, and a small aside next to one component. One scale would
@@ -150,6 +161,17 @@ export function isNote(a: Annotation): a is Note {
 
 export const NOTE_DEFAULT_WIDTH = 220;
 /**
+ * Longest text a note will hold, in UTF-16 units (what a textarea counts).
+ *
+ * A bound, not a design choice: it is what sanitizeAnnotations applies to
+ * text arriving from a link or a file, so the editor enforces the same
+ * number and a note can never be typed longer than it would survive a
+ * round trip. The value dates from when a whole design had to fit inside a
+ * ~2000 character URL; with the link store that pressure is gone, but a
+ * note is an annotation, and two thousand characters is already an essay.
+ */
+export const NOTE_MAX_CHARS = 2000;
+/**
  * Wrap-width bounds for a note.
  *
  * Only the WIDTH is resizable: a note's height is derived from its wrapped
@@ -195,6 +217,7 @@ export function makeNote(x: number, y: number, text = 'Note'): Note {
     y,
     width: NOTE_DEFAULT_WIDTH,
     size: 'md',
+    autoResize: true,
   };
 }
 
@@ -251,7 +274,7 @@ export function sanitizeAnnotations(input: unknown): Annotation[] {
       out.push({
         id,
         kind: 'note',
-        text: text.slice(0, 2000),
+        text: text.slice(0, NOTE_MAX_CHARS),
         x,
         y,
         width: clamp(width ?? NOTE_DEFAULT_WIDTH, NOTE_MIN_WIDTH, NOTE_MAX_WIDTH),
@@ -263,6 +286,7 @@ export function sanitizeAnnotations(input: unknown): Annotation[] {
         ...(a.italic === true ? { italic: true } : {}),
         ...noteScale(a.scale),
         ...(a.underline === true ? { underline: true } : {}),
+        ...(a.autoResize === true ? { autoResize: true } : {}),
       });
       seen.add(id);
     } else if (a.kind === 'section') {

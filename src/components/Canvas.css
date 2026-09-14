@@ -1752,12 +1752,16 @@
   cursor: nwse-resize;
 }
 
-/* A note's corners SCALE its type rather than reflowing it, so they are
-   drawn as circles against the squares of every other handle in the app.
-   The two gestures produce different results and must not look identical. */
-.cv-handle.is-corner {
-  rx: 50%;
-  ry: 50%;
+/* A note's frame is a hairline with square corners, Eraser's text box: its
+   corner handles are the only visible ones (the edges are cursor-only
+   strips), so nothing here needs a second shape to tell two handle kinds
+   apart. */
+.cv-ann-ring.is-note,
+.cv-ann-sel .cv-handle.is-corner {
+  stroke-width: 1;
+  /* A hairline lands on a half pixel at most zooms and antialiases into a
+     two-pixel smear; snapping it to the grid is what keeps it a line. */
+  shape-rendering: crispEdges;
 }
 
 .cv-handle-hit[data-dir='ne'],
@@ -1853,55 +1857,68 @@
 /* A note's text colour, when it has been given one. Indices resolve through
    the same --ann-* aliases the sections use, so a colour picked in the light
    theme is the dark theme's version of that colour after a switch. */
-.cv-note[data-tone='0'] .cv-note-text {
+.cv-note[data-tone='0'] .cv-note-text,
+.cv-note-editor[data-tone='0'] {
   color: var(--ann-0-ink);
 }
 
-.cv-note[data-tone='1'] .cv-note-text {
+.cv-note[data-tone='1'] .cv-note-text,
+.cv-note-editor[data-tone='1'] {
   color: var(--ann-1-ink);
 }
 
-.cv-note[data-tone='2'] .cv-note-text {
+.cv-note[data-tone='2'] .cv-note-text,
+.cv-note-editor[data-tone='2'] {
   color: var(--ann-2-ink);
 }
 
-.cv-note[data-tone='3'] .cv-note-text {
+.cv-note[data-tone='3'] .cv-note-text,
+.cv-note-editor[data-tone='3'] {
   color: var(--ann-3-ink);
 }
 
-.cv-note[data-tone='4'] .cv-note-text {
+.cv-note[data-tone='4'] .cv-note-text,
+.cv-note-editor[data-tone='4'] {
   color: var(--ann-4-ink);
 }
 
-.cv-note[data-tone='5'] .cv-note-text {
+.cv-note[data-tone='5'] .cv-note-text,
+.cv-note-editor[data-tone='5'] {
   color: var(--ann-5-ink);
 }
 
-.cv-note[data-tone='6'] .cv-note-text {
+.cv-note[data-tone='6'] .cv-note-text,
+.cv-note-editor[data-tone='6'] {
   color: var(--ann-6-ink);
 }
 
-.cv-note[data-tone='7'] .cv-note-text {
+.cv-note[data-tone='7'] .cv-note-text,
+.cv-note-editor[data-tone='7'] {
   color: var(--ann-7-ink);
 }
 
-.cv-note[data-tone='8'] .cv-note-text {
+.cv-note[data-tone='8'] .cv-note-text,
+.cv-note-editor[data-tone='8'] {
   color: var(--ann-8-ink);
 }
 
-.cv-note[data-tone='9'] .cv-note-text {
+.cv-note[data-tone='9'] .cv-note-text,
+.cv-note-editor[data-tone='9'] {
   color: var(--ann-9-ink);
 }
 
-.cv-note[data-tone='10'] .cv-note-text {
+.cv-note[data-tone='10'] .cv-note-text,
+.cv-note-editor[data-tone='10'] {
   color: var(--ann-10-ink);
 }
 
-.cv-note[data-tone='11'] .cv-note-text {
+.cv-note[data-tone='11'] .cv-note-text,
+.cv-note-editor[data-tone='11'] {
   color: var(--ann-11-ink);
 }
 
-.cv-note[data-tone='12'] .cv-note-text {
+.cv-note[data-tone='12'] .cv-note-text,
+.cv-note-editor[data-tone='12'] {
   color: var(--ann-12-ink);
 }
 
@@ -1985,33 +2002,83 @@
 
 /* --------------------------------------------------------------------------
    In-place annotation editors. Siblings of the surface, like the rename
-   input, so the pointer router never sees them. The note editor mirrors the
-   note's own metrics exactly (font, weight, line-height all arrive inline,
-   scaled by the zoom) so the draft is laid out precisely where the
-   committed text will paint.
+   input, so the pointer router never sees them.
+
+   The note editor is Excalidraw's textWysiwyg (textWysiwyg.ts): a textarea
+   the editor creates and styles inline to nothing at all, no border, no
+   background, no padding, no outline, no resize grip, laid out in scene px
+   and scaled to the zoom with a transform. What the stylesheet adds is only
+   what the painted note also takes from the stylesheet: face, weight, slant,
+   underline and colour, through the same attribute and class rules
+   .cv-note-text uses (they share selectors below), so the editor and the
+   paint cannot drift apart.
    -------------------------------------------------------------------------- */
 
+.cv-text-editor-container {
+  /* Nothing of its own; the textarea inside is absolutely positioned
+     against the host, exactly as Excalidraw's container is. */
+  display: contents;
+}
+
 .cv-note-editor {
-  position: absolute;
-  z-index: 4;
-  box-sizing: content-box;
-  display: block;
-  margin: 0;
-  padding: 0;
-  border: none;
-  outline: 1px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 2px;
-  /* Transparent, so the note is edited where it sits rather than replaced by
-     a white box the same shape. The painted text is hidden underneath while
-     the editor is open, so nothing shows through and doubles. */
-  background: transparent;
   color: var(--text);
+  caret-color: currentcolor;
   font-family: var(--sans);
-  resize: none;
-  overflow: hidden;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
+  /* The browser's own stylesheet resets these on a textarea (letter-spacing
+     and word-spacing to normal, text-rendering to auto), while the SVG text
+     inherits the body's tracking and optimizeLegibility. Inherit them here
+     too, or the editor kerns and tracks its glyphs a fraction of a pixel
+     differently from the paint, which reads as a slightly different font. */
+  letter-spacing: inherit;
+  word-spacing: inherit;
+  text-rendering: inherit;
+  text-transform: inherit;
+  text-indent: inherit;
+}
+
+.cv-note-editor::selection {
+  background: var(--accent-ring);
+}
+
+.cv-note-editor[data-font='hand'] {
+  font-family: var(--hand);
+}
+
+.cv-note-editor[data-font='serif'] {
+  font-family: var(--serif);
+}
+
+.cv-note-editor[data-font='mono'] {
+  font-family: var(--mono);
+}
+
+/* Mirrors .cv-note.is-sm .cv-note-text: a small note is dimmed, and the
+   editor must be too, or the note brightens for as long as the caret is in
+   it. Guarded on the tone attribute rather than relying on source order
+   (the tone rules sit above this one) so a coloured small note keeps its
+   colour, as it does on the painted note. */
+.cv-note-editor.is-sm:not([data-tone]) {
+  color: var(--text-dim);
+}
+
+.cv-note-editor.is-italic {
+  font-style: italic;
+}
+
+.cv-note-editor.is-underline {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* The frame around a note being edited: the selection ring's hairline,
+   square corners, no handles. */
+.cv-text-box {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: crispEdges;
+  pointer-events: none;
 }
 
 .cv-label-editor {

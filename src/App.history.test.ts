@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Topology } from './sim/types';
 import { Engine } from './sim/engine';
 import { makeNode } from './sim/presets';
+import { makeNote } from './sim/annotations';
 import { HISTORY_LIMIT, SessionHistory, syncEngine } from './history';
 import type { HistorySnapshot } from './history';
 
@@ -217,6 +218,62 @@ describe('SessionHistory', () => {
 
     const entry = h.undo(snap(moved(t0, t0.nodes[1]!.id, 50, 0)));
     expect(entry!.topology.nodes[1]!.x).toBe(t0.nodes[1]!.x);
+  });
+});
+
+describe('note text edits', () => {
+  /*
+   * The exact sequence App.handleEditNote drives: the editor holds the
+   * draft until it submits, then ONE commit lands the finished text (or
+   * removes an emptied note). Undo restores the text as it was before the
+   * edit began, however many keystrokes it took; redo brings the edit back.
+   */
+  function withNote(text: string): Topology {
+    return { ...makeTopology(), annotations: [makeNote(0, 0, text)] };
+  }
+  const noteText = (t: Topology) => {
+    const a = t.annotations?.[0];
+    return a && a.kind === 'note' ? a.text : null;
+  };
+
+  it('one edit is one entry, whatever was typed on the way', () => {
+    const h = new SessionHistory();
+    const t0 = withNote('before');
+    const id = t0.annotations![0]!.id;
+    // Keystrokes never reach history: the draft lives in the editor.
+    h.commit('note edit', snap(t0, [id]));
+    const t1 = {
+      ...t0,
+      annotations: [{ ...t0.annotations![0]!, text: 'after\nmore' }],
+    };
+
+    expect(h.undoDepth).toBe(1);
+    const back = h.undo(snap(t1, [id]));
+    expect(noteText(back!.topology)).toBe('before');
+    expect(back!.label).toBe('note edit');
+    const fwd = h.redo(back!);
+    expect(noteText(fwd!.topology)).toBe('after\nmore');
+  });
+
+  it('an emptied note is a delete entry, and undo brings the note back', () => {
+    const h = new SessionHistory();
+    const t0 = withNote('before');
+    const id = t0.annotations![0]!.id;
+    h.commit('delete', snap(t0, [id]));
+    const t1 = { ...t0, annotations: [] };
+
+    const back = h.undo(snap(t1));
+    expect(noteText(back!.topology)).toBe('before');
+    expect(back!.selectedIds.has(id)).toBe(true);
+  });
+
+  it('a commit with identical text would be a no-op entry', () => {
+    // The canvas never calls it (Canvas.noteEdit.test.tsx pins that); if
+    // it ever did, snapshotEqual would still refuse to store the entry.
+    const h = new SessionHistory();
+    const t0 = withNote('same');
+    h.commit('note edit', snap(t0));
+    expect(h.undo(snap(t0))).toBeNull();
   });
 });
 
