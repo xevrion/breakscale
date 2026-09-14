@@ -18,9 +18,28 @@ import type { AdmitAction, ComponentBehaviour } from './behaviour';
 /** Keyspace the engine draws request keys from; mirrored here for sizing. */
 const KEYSPACE = 64;
 
-function clampInt(v: number, min: number): number {
+/* Fleet ceilings, each the maximum the inspector already offers for the
+ * field, so nothing a reader can build is affected by them. They exist for
+ * the designs a reader cannot build: `isTopology` checks the nine core
+ * config numbers and none of these, so a shared link, a `.breakscale` file
+ * and a restored session all carry whatever they say straight to the
+ * structures below, which are sized from it. */
+const MAX_SHARDS = 64;
+const MAX_REPLICAS = 64;
+const MAX_SHARD_CAPACITY = 512;
+
+/**
+ * A count from config: floored, held at `min`, and capped at `max`.
+ *
+ * NaN fails every comparison, so `n < min` was false for it and a value that
+ * is not a number used to pass through and size an array. Nothing here can
+ * absorb that: `new Array(NaN)` throws outright, and a count in the billions
+ * allocates until the tab stops rather than merely running slowly.
+ */
+function clampInt(v: number, min: number, max = Number.MAX_SAFE_INTEGER): number {
+  if (!Number.isFinite(v)) return min;
   const n = Math.floor(v);
-  return n < min ? min : n;
+  return n < min ? min : n > max ? max : n;
 }
 
 function clamp01(v: number): number {
@@ -80,7 +99,10 @@ function replicaExt(state: NodeStateLike): ReplicaExt {
 
 /** Total read slots: every replica serves reads in parallel. */
 function readCapacity(state: NodeStateLike): number {
-  return clampInt(state.config.capacity, 1) * clampInt(state.config.replicaCount, 1);
+  return (
+    clampInt(state.config.capacity, 1) *
+    clampInt(state.config.replicaCount, 1, MAX_REPLICAS)
+  );
 }
 
 /** Write slots: the primary alone, which is why writes do not scale. */
@@ -156,7 +178,7 @@ const replica: ComponentBehaviour = {
    */
   reportInstances(ctx: BehaviourCtx, state: NodeStateLike): void {
     const ext = replicaExt(state);
-    const replicas = clampInt(state.config.replicaCount, 1);
+    const replicas = clampInt(state.config.replicaCount, 1, MAX_REPLICAS);
     const out = instanceScratch(replicas + 1);
 
     const writeCap = writeCapacity(state);
@@ -339,7 +361,7 @@ function makeShardExt(count: number): ShardExt {
  * the shard their key now maps to, rather than being silently dropped.
  */
 function ensureSized(state: NodeStateLike, ext: ShardExt): ShardExt {
-  const want = clampInt(state.config.shardCount, 1);
+  const want = clampInt(state.config.shardCount, 1, MAX_SHARDS);
   if (ext.sized === want) return ext;
 
   const orphans: ReqLike[] = [];
@@ -408,14 +430,14 @@ const shard: ComponentBehaviour = {
   },
 
   initState(state: NodeStateLike): ShardExt {
-    return makeShardExt(clampInt(state.config.shardCount, 1));
+    return makeShardExt(clampInt(state.config.shardCount, 1, MAX_SHARDS));
   },
 
   onAdmit(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): AdmitAction {
     const ext = ensureSized(state, shardExt(state));
     const count = ext.sized;
     const idx = shardIndexFor(ctx, state, req, count);
-    const capacity = clampInt(state.config.shardCapacity, 1);
+    const capacity = clampInt(state.config.shardCapacity, 1, MAX_SHARD_CAPACITY);
 
     if (ext.busy[idx] < capacity) {
       startShardService(ctx, state, ext, idx, req);
@@ -438,7 +460,7 @@ const shard: ComponentBehaviour = {
     const dt = ctx.now - ext.lastIntegrateMs;
     ext.lastIntegrateMs = ctx.now;
     if (dt <= 0) return;
-    const capacity = clampInt(state.config.shardCapacity, 1);
+    const capacity = clampInt(state.config.shardCapacity, 1, MAX_SHARD_CAPACITY);
     const alpha = 1 - Math.exp(-dt / 500);
     let busy = 0;
     for (let i = 0; i < ext.sized; i++) {
@@ -504,7 +526,7 @@ function onShardDrained(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): 
   if (idx === undefined || idx >= ext.sized) return;
   if (ext.busy[idx] > 0) ext.busy[idx]--;
 
-  const capacity = clampInt(state.config.shardCapacity, 1);
+  const capacity = clampInt(state.config.shardCapacity, 1, MAX_SHARD_CAPACITY);
   const q = ext.queues[idx];
   while (ext.busy[idx] < capacity && ext.heads[idx] < q.length) {
     const next = q[ext.heads[idx]];
