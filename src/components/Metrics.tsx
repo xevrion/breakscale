@@ -706,6 +706,7 @@ const REASON_ORDER: FailureReason[] = [
   'conn-refused',
   'unauthorized',
   'bulkhead-full',
+  'acquire-timeout',
   'deprioritized',
 ];
 
@@ -723,6 +724,7 @@ const REASON_LABEL: Record<FailureReason, string> = {
   'conn-refused': 'conn refused',
   unauthorized: 'unauthorized',
   'bulkhead-full': 'bulkhead full',
+  'acquire-timeout': 'acquire timeout',
   deprioritized: 'deprioritized',
 };
 
@@ -753,6 +755,7 @@ const REASON_TERM: Record<FailureReason, string> = {
   'conn-refused': 'conn-refused',
   unauthorized: 'unauthorized',
   'bulkhead-full': 'bulkhead-full',
+  'acquire-timeout': 'bulkhead-full',
   deprioritized: 'deprioritized',
 };
 

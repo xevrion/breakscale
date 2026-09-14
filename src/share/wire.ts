@@ -199,6 +199,9 @@ const FIELDS = [
   'intervalMs',
   'batchSize',
   'bulkheadMax',
+  'bulkheadMode',
+  'acquireQueueMax',
+  'acquireTimeoutMs',
   'flushDelayMs',
   'edgeShare',
   'lowPriorityShare',
@@ -287,7 +290,13 @@ const SCHEMA: Record<NodeKind, readonly ConfigField[]> = {
   sidecar: ['outlierAfter', 'openMs', ...COMMON],
   lambda: ['coldStartMs', 'keepWarmMs', 'maxConcurrency', ...COMMON],
   cron: ['intervalMs', 'batchSize', ...COMMON],
-  bulkhead: ['bulkheadMax', ...COMMON],
+  bulkhead: [
+    'bulkheadMax',
+    'bulkheadMode',
+    'acquireQueueMax',
+    'acquireTimeoutMs',
+    ...COMMON,
+  ],
   retryqueue: COMMON,
   transcoder: ['renditions', ...COMMON],
   edgecompute: ['edgeShare', 'cpuMsCap', ...COMMON],
@@ -590,10 +599,12 @@ function overrides(kind: NodeKind, config: NodeConfig): Map<ConfigField, ConfigV
   for (const field of FIELDS) {
     const v = (config as unknown as Record<string, unknown>)[field];
     if (v === undefined || v === def[field]) continue;
-    if (field === 'traffic') {
+    if (field === 'traffic' || field === 'bulkheadMode') {
       if (
         typeof v === 'string' &&
-        (TRAFFIC_PATTERNS as readonly string[]).includes(v)
+        (field === 'traffic'
+          ? (TRAFFIC_PATTERNS as readonly string[]).includes(v)
+          : v === 'reject' || v === 'wait')
       ) {
         out.set(field, v);
       }
@@ -607,6 +618,8 @@ function overrides(kind: NodeKind, config: NodeConfig): Map<ConfigField, ConfigV
 function packValue(w: Writer, field: ConfigField, v: ConfigValue): void {
   if (field === 'traffic') {
     w.varint(TRAFFIC_PATTERNS.indexOf(v as (typeof TRAFFIC_PATTERNS)[number]));
+  } else if (field === 'bulkheadMode') {
+    w.varint(v === 'wait' ? 1 : 0);
   } else {
     w.num(v as number);
   }
@@ -796,6 +809,11 @@ function unpackValue(r: Reader, field: ConfigField): ConfigValue {
     const t = TRAFFIC_PATTERNS[r.varint()];
     if (t === undefined) throw new WireError('unknown traffic pattern');
     return t;
+  }
+  if (field === 'bulkheadMode') {
+    const mode = r.varint();
+    if (mode > 1) throw new WireError('unknown bulkhead mode');
+    return mode === 1 ? 'wait' : 'reject';
   }
   return r.num();
 }

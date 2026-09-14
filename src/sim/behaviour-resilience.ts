@@ -32,15 +32,47 @@ import { clamp01 } from './behaviour';
  * bulkhead -- an isolated concurrency pool around one dependency
  * ================================================================== */
 
-/** Bulkhead scratch state: the one number the component is about. */
+interface BulkheadWaiter {
+  readonly req: ReqLike;
+  readonly enteredAt: number;
+}
+
+/** Bulkhead scratch state: slots plus an optional acquire queue. */
 interface BulkheadState {
   /** Downstream calls currently outstanding through this pool. */
   inFlight: number;
+  /** Requests waiting to acquire a pool slot, in arrival order. */
+  waiters: BulkheadWaiter[];
+  /** The measured wait of the most recently acquired request. */
+  lastAcquireLatencyMs: number | null;
 }
 
 function cfgBulkheadMax(state: NodeStateLike): number {
   const v = state.config.bulkheadMax;
   return v !== undefined && v >= 1 ? Math.floor(v) : 8;
+}
+
+function cfgAcquireQueueMax(state: NodeStateLike): number {
+  const v = state.config.acquireQueueMax;
+  return v !== undefined && v >= 0 ? Math.floor(v) : 100;
+}
+
+function cfgAcquireTimeoutMs(state: NodeStateLike): number {
+  const v = state.config.acquireTimeoutMs;
+  return v !== undefined && v >= 0 ? v : 1000;
+}
+
+function isWaiting(b: BulkheadState, req: ReqLike): number {
+  return b.waiters.findIndex((waiter) => waiter.req === req);
+}
+
+function admitWaiter(ctx: BehaviourCtx, state: NodeStateLike, b: BulkheadState): void {
+  const waiter = b.waiters.shift();
+  if (!waiter) return;
+  b.inFlight++;
+  b.lastAcquireLatencyMs = ctx.now - waiter.enteredAt;
+  ctx.countCustom(state, 'admitted', 1);
+  ctx.resumeAdmission(state, waiter.req);
 }
 
 /**
@@ -87,7 +119,11 @@ const bulkhead: ComponentBehaviour = {
   // The whole component is a count of downstream outcomes.
   observesOutcome: true,
 
-  initState: (): BulkheadState => ({ inFlight: 0 }),
+  initState: (): BulkheadState => ({
+    inFlight: 0,
+    waiters: [],
+    lastAcquireLatencyMs: null,
+  }),
 
   onAdmit: (ctx, state, req): AdmitAction => {
     // Nothing wired behind it: there is no pool to guard, so pass through
@@ -97,6 +133,14 @@ const bulkhead: ComponentBehaviour = {
 
     const b = state.ext as BulkheadState;
     if (b.inFlight >= cfgBulkheadMax(state)) {
+      if (
+        state.config.bulkheadMode === 'wait' &&
+        b.waiters.length < cfgAcquireQueueMax(state)
+      ) {
+        b.waiters.push({ req, enteredAt: ctx.now });
+        ctx.wakeAfter(state, req, cfgAcquireTimeoutMs(state));
+        return 'handled';
+      }
       ctx.countCustom(state, 'bulkheadRejected', 1);
       ctx.reject(state, req, 'bulkhead-full');
       return 'handled';
@@ -119,9 +163,19 @@ const bulkhead: ComponentBehaviour = {
     return edge;
   },
 
-  onDownstreamResult: (_ctx, state, _req, _ok, _reason) => {
+  onDownstreamResult: (ctx, state, _req, _ok, _reason) => {
     const b = state.ext as BulkheadState;
     if (b.inFlight > 0) b.inFlight--;
+    if (b.inFlight < cfgBulkheadMax(state)) admitWaiter(ctx, state, b);
+  },
+
+  onWake: (ctx, state, req) => {
+    const b = state.ext as BulkheadState;
+    const idx = isWaiting(b, req);
+    if (idx < 0) return;
+    b.waiters.splice(idx, 1);
+    ctx.countCustom(state, 'bulkheadAcquireTimeout', 1);
+    ctx.reject(state, req, 'acquire-timeout');
   },
 
   decorateStats: (ctx, state, stats: NodeStats) => {
@@ -129,6 +183,9 @@ const bulkhead: ComponentBehaviour = {
     stats.bulkheadInFlight = b ? b.inFlight : 0;
     stats.bulkheadLimit = cfgBulkheadMax(state);
     stats.bulkheadRejectedRate = ctx.counterRate(state, 'bulkheadRejected');
+    stats.bulkheadWaiting = b ? b.waiters.length : 0;
+    stats.bulkheadAcquireLatencyMs = b?.lastAcquireLatencyMs ?? undefined;
+    stats.bulkheadAcquireTimeoutRate = ctx.counterRate(state, 'bulkheadAcquireTimeout');
     // Show the pool as this node's occupancy so the canvas meter means
     // "how full is the bulkhead" rather than sitting at zero forever.
     stats.inFlight = b ? b.inFlight : 0;

@@ -96,6 +96,9 @@ type Field =
   | 'intervalMs'
   | 'batchSize'
   | 'bulkheadMax'
+  | 'bulkheadMode'
+  | 'acquireQueueMax'
+  | 'acquireTimeoutMs'
   | 'flushDelayMs'
   | 'edgeShare'
   | 'lowPriorityShare'
@@ -288,7 +291,7 @@ const FIELDS_BY_KIND: Record<NodeKind, Field[]> = {
   // One knob, and it IS the component: how many calls may be outstanding
   // to the dependency behind it. errorRate and retries are deliberately
   // not offered here; both would make the pool count drift.
-  bulkhead: ['bulkheadMax'],
+  bulkhead: ['bulkheadMax', 'bulkheadMode', 'acquireQueueMax', 'acquireTimeoutMs'],
   // Delivery concurrency, dispatch cost, buffer depth, and the redrive
   // policy: attempts and the per-attempt deadline.
   retryqueue: [
@@ -496,7 +499,15 @@ interface NumberSpec {
   step: number;
 }
 
-type FieldSpec = SliderSpec | NumberSpec;
+interface ChoiceSpec {
+  control: 'choice';
+  label: string;
+  unit: string;
+  hint?: FieldHint;
+  options: readonly { value: 'reject' | 'wait'; label: string }[];
+}
+
+type FieldSpec = SliderSpec | NumberSpec | ChoiceSpec;
 
 const FIELD_SPECS: Record<Field, FieldSpec> = {
   rps: {
@@ -973,6 +984,33 @@ const FIELD_SPECS: Record<Field, FieldSpec> = {
     max: 512,
     step: 1,
   },
+  bulkheadMode: {
+    control: 'choice',
+    label: 'When the pool is full',
+    unit: 'admission behavior',
+    hint: 'Reject fails immediately. Wait holds a request until a connection opens, or its acquire timeout expires.',
+    options: [
+      { value: 'reject', label: 'Reject' },
+      { value: 'wait', label: 'Wait' },
+    ],
+  },
+  acquireQueueMax: {
+    control: 'number',
+    label: 'Waiting acquires, at most',
+    unit: 'requests',
+    min: 0,
+    max: 10000,
+    step: 1,
+  },
+  acquireTimeoutMs: {
+    control: 'slider',
+    label: 'Acquire timeout',
+    unit: 'milliseconds',
+    min: 0,
+    max: 30000,
+    step: 50,
+    display: (v) => formatMs(v),
+  },
   flushDelayMs: {
     control: 'slider',
     term: 'dirty-write',
@@ -1174,6 +1212,9 @@ const FIELD_GROUPS: { title: string; fields: ReadonlySet<Field> }[] = [
       'intervalMs',
       'batchSize',
       'bulkheadMax',
+      'bulkheadMode',
+      'acquireQueueMax',
+      'acquireTimeoutMs',
       'flushDelayMs',
       'edgeShare',
       'lowPriorityShare',
@@ -1364,6 +1405,41 @@ function NumberRow({
   );
 }
 
+function ChoiceRow({
+  spec,
+  value,
+  locked,
+  onChange,
+}: {
+  spec: ChoiceSpec;
+  value: 'reject' | 'wait';
+  locked?: boolean;
+  onChange: (v: 'reject' | 'wait') => void;
+}) {
+  const id = useId();
+  return (
+    <div className={locked ? 'ins-field-row is-locked' : 'ins-field-row'}>
+      <label className="row-k" htmlFor={id}>
+        {spec.label}
+      </label>
+      <select
+        id={id}
+        className="ins-number"
+        value={value}
+        disabled={locked}
+        onChange={(e) => onChange(e.currentTarget.value as 'reject' | 'wait')}
+      >
+        {spec.options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {spec.hint ? <p className="ins-hint">{spec.hint}</p> : null}
+    </div>
+  );
+}
+
 /**
  * One live readout. `tone` is a health class or undefined — at 'ok' the value
  * stays neutral, so a healthy panel carries no colour at all and --warn /
@@ -1512,7 +1588,8 @@ function VitalsMeter({
       const used = stats.bulkheadInFlight ?? 0;
       const fill = limit > 0 ? Math.min(1, used / limit) : 0;
       const rejecting = (stats.bulkheadRejectedRate ?? 0) > 0;
-      const tone = rejecting ? 'is-danger' : toneClass(healthOfLoad(fill));
+      const timingOut = (stats.bulkheadAcquireTimeoutRate ?? 0) > 0;
+      const tone = rejecting || timingOut ? 'is-danger' : toneClass(healthOfLoad(fill));
       return (
         <div className="ins-util">
           <div className="ins-util-head">
@@ -1659,7 +1736,15 @@ function RegionPanel({ stats }: { stats: NodeStats }) {
  * NOTHING breaker-specific while the node was failing fast at 93 rps.
  * A row appears only for the kinds it applies to.
  */
-function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
+function KindStatRows({
+  kind,
+  config,
+  stats,
+}: {
+  kind: NodeKind;
+  config: NodeConfig;
+  stats: NodeStats;
+}) {
   switch (kind) {
     case 'cache':
       return (
@@ -1976,6 +2061,29 @@ function KindStatRows({ kind, stats }: { kind: NodeKind; stats: NodeStats }) {
             value={formatRate(stats.bulkheadRejectedRate)}
             tone={(stats.bulkheadRejectedRate ?? 0) > 0 ? 'is-danger' : undefined}
           />
+          {config.bulkheadMode === 'wait' && (
+            <>
+              <StatRow
+                label="Waiting to acquire"
+                value={formatCount(stats.bulkheadWaiting ?? 0)}
+              />
+              <StatRow
+                label="Last acquire wait, measured"
+                value={
+                  stats.bulkheadAcquireLatencyMs === undefined
+                    ? NA
+                    : formatMs(stats.bulkheadAcquireLatencyMs)
+                }
+              />
+              <StatRow
+                label="Acquire timeouts"
+                value={formatRate(stats.bulkheadAcquireTimeoutRate)}
+                tone={
+                  (stats.bulkheadAcquireTimeoutRate ?? 0) > 0 ? 'is-danger' : undefined
+                }
+              />
+            </>
+          )}
         </>
       );
 
@@ -2659,6 +2767,14 @@ function SingleInspector({
                     locked={locked}
                     onChange={(v) => onChange(node.id, { [field]: v })}
                   />
+                ) : spec.control === 'choice' ? (
+                  <ChoiceRow
+                    key={field}
+                    spec={spec}
+                    value={node.config.bulkheadMode ?? 'reject'}
+                    locked={locked}
+                    onChange={(v) => onChange(node.id, { bulkheadMode: v })}
+                  />
                 ) : (
                   <NumberRow
                     key={field}
@@ -2738,7 +2854,7 @@ function SingleInspector({
                   term="offered"
                   value={formatRate(stats.arrivalRate)}
                 />
-                <KindStatRows kind={node.kind} stats={stats} />
+                <KindStatRows kind={node.kind} config={node.config} stats={stats} />
                 <StatRow
                   label="Typical request"
                   term="p50"
@@ -2956,6 +3072,13 @@ function MultiInspector({
                         value={value}
                         mixed={mixed}
                         onChange={(v) => applyAll({ [field]: v })}
+                      />
+                    ) : spec.control === 'choice' ? (
+                      <ChoiceRow
+                        key={field}
+                        spec={spec}
+                        value={nodes[0]!.config.bulkheadMode ?? 'reject'}
+                        onChange={(v) => applyAll({ bulkheadMode: v })}
                       />
                     ) : (
                       <NumberRow

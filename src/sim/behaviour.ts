@@ -203,6 +203,8 @@ export interface ComponentBehaviour {
     ok: boolean,
     reason: FailureReason,
   ): void;
+  /** A behaviour-owned timer for a request it held during admission. */
+  onWake?(ctx: BehaviourCtx, state: NodeStateLike, req: ReqLike): void;
 
   /**
    * Publish this kind's own readouts onto its NodeStats entry at snapshot
