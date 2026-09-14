@@ -922,6 +922,15 @@ export const GLOSSARY: GlossaryEntry[] = [
     see: ['bulkhead'],
   },
   {
+    id: 'acquire-timeout',
+    term: 'Acquire timeout',
+    short: 'A request waited too long for a connection slot',
+    why: 'The downstream calls still hold every slot, so this request never got to start one. Shortening downstream work, adding slots, or reducing retry pressure can clear it.',
+    category: 'failure',
+    aliases: ['acquire-timeout'],
+    see: ['bulkhead'],
+  },
+  {
     id: 'deprioritized',
     term: 'Deprioritized',
     short: 'Dropped by a load shedder protecting higher priority',

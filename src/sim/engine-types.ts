@@ -122,6 +122,15 @@ export interface BehaviourCtx {
   reject(state: NodeStateLike, req: ReqLike, reason: FailureReason): void;
 
   /**
+   * Resume a request a behaviour deliberately held at admission. This routes
+   * it through a zero-service dispatcher without counting a second arrival.
+   */
+  resumeAdmission(state: NodeStateLike, req: ReqLike): void;
+
+  /** Schedule a behaviour-owned wakeup for a held request. */
+  wakeAfter(state: NodeStateLike, req: ReqLike, delayMs: number): void;
+
+  /**
    * Book a behaviour-defined counter against a node, in events per second
    * over the engine's standard rate window. Counter names are namespaced per
    * node, so two behaviours can never collide. Read back with counterRate().

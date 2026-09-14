@@ -509,6 +509,9 @@ function baseConfig(kind: NodeKind): Omit<NodeConfig, keyof typeof EXTRA_DEFAULT
         retries: 0,
         rps: 0,
         bulkheadMax: 8,
+        bulkheadMode: 'reject',
+        acquireQueueMax: 100,
+        acquireTimeoutMs: 1000,
       };
     case 'retryqueue':
       // Delivery concurrency of 8 at ~3ms dispatch cost. Each failed

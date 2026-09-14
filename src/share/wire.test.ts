@@ -101,6 +101,9 @@ describe('protocol tables', () => {
       timeoutMs: true,
       retries: true,
       rps: true,
+      bulkheadMode: true,
+      acquireQueueMax: true,
+      acquireTimeoutMs: true,
       traffic: true,
       trafficPeriodS: true,
       targetUtil: true,
@@ -251,6 +254,7 @@ describe('round trip', () => {
       const overrides: Record<string, unknown> = {};
       for (const field of WIRE_FIELDS) {
         if (field === 'traffic') overrides[field] = 'spike';
+        else if (field === 'bulkheadMode') overrides[field] = 'wait';
         else overrides[field] = 7 + i + WIRE_FIELDS.indexOf(field) / 1000;
       }
       return node(`${kind}-1`, kind, 0, 0, overrides as Partial<NodeConfig>);

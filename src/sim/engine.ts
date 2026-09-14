@@ -99,6 +99,8 @@ const EV_WORKER_POLL = 3;
 const EV_RETRY = 4;
 /** A request finished traversing an edge with a latencyMs and is now offered. */
 const EV_LINK_ARRIVE = 5;
+/** A timer owned by a behaviour for a request it held at admission. */
+const EV_BEHAVIOUR_WAKE = 6;
 
 interface Ev extends Timed {
   time: number;
@@ -542,6 +544,7 @@ export class Engine implements BehaviourCtx {
     'conn-refused': 0,
     unauthorized: 0,
     'bulkhead-full': 0,
+    'acquire-timeout': 0,
     deprioritized: 0,
   };
 
@@ -1070,6 +1073,7 @@ export class Engine implements BehaviourCtx {
       'conn-refused': 0,
       unauthorized: 0,
       'bulkhead-full': 0,
+      'acquire-timeout': 0,
       deprioritized: 0,
     };
     this.history = [];
@@ -1267,6 +1271,11 @@ export class Engine implements BehaviourCtx {
         // crossing leaves a resolved request, which is dropped here.
         if (ev.req && ev.req.token === ev.token && !ev.req.resolved) {
           this.admit(state, ev.req);
+        }
+        break;
+      case EV_BEHAVIOUR_WAKE:
+        if (ev.req && ev.req.token === ev.token && !ev.req.resolved) {
+          state.behaviour.onWake?.(this, state, ev.req);
         }
         break;
       default:
@@ -2256,6 +2265,26 @@ export class Engine implements BehaviourCtx {
     state.errors.add(this.now, 1);
     state.totalFailed++;
     this.resolve(req as Req, false, reason, 0);
+  }
+
+  resumeAdmission(stateLike: NodeStateLike, reqLike: ReqLike): void {
+    const state = stateLike as NodeState;
+    const req = reqLike as Req;
+    if (req.resolved) return;
+    req.ownMs = 0;
+    this.beginZeroService(state, req);
+  }
+
+  wakeAfter(stateLike: NodeStateLike, reqLike: ReqLike, delayMs: number): void {
+    const state = stateLike as NodeState;
+    const req = reqLike as Req;
+    this.push(
+      this.now + Math.max(0, delayMs),
+      EV_BEHAVIOUR_WAKE,
+      state.id,
+      req,
+      req.token,
+    );
   }
 
   countCustom(stateLike: NodeStateLike, name: string, n: number): void {
