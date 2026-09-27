@@ -7,7 +7,7 @@
   "homepage": "https://breakscale.tech",
   "repository": {
     "type": "git",
-    "url": "https://github.com/xevrion/breakscale.git",
+    "url": "git+https://github.com/xevrion/breakscale.git",
     "directory": "mcp"
   },
   "bugs": {
