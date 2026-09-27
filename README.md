@@ -72,6 +72,42 @@ bun dev
 Open http://localhost:5173, pick an example from the left, and raise the traffic slider until
 something goes red.
 
+## In VS Code
+
+The whole simulator also runs inside VS Code. Install
+[Breakscale from the Marketplace](https://marketplace.visualstudio.com/items?itemName=xevrion.breakscale),
+run **Open Breakscale** from the command palette, and it opens in a panel beside your editor, with
+the same engine and examples as the website and no network needed. Designs you save there live in
+VS Code's own storage, separate from breakscale.tech, so to move one between the two use a share
+link or a design file. The source is in [`extension/`](extension/).
+
+## With an AI assistant
+
+Breakscale also comes as an MCP server, which lets an assistant like Claude Code, Copilot, Cursor
+or Codex work with it for you. Ask it to draw a rate limiter, or to read your code and turn the
+architecture into a design, and it builds the design, runs it through the same engine, tells you
+where it breaks with real numbers, and hands you a breakscale.tech link that opens it. In clients
+that support [MCP Apps](https://modelcontextprotocol.io/docs/extensions/apps), like VS Code and
+Cursor, the design also opens as a live canvas right in the chat, and whatever you change there
+goes back to the assistant so its next edit starts from what you see.
+
+All it needs is Node 20 or newer. In Claude Code:
+
+```bash
+claude mcp add --scope user breakscale -- npx -y breakscale-mcp --stdio
+```
+
+and in VS Code:
+
+```bash
+code --add-mcp '{"name":"breakscale","type":"stdio","command":"npx","args":["-y","breakscale-mcp","--stdio"]}'
+```
+
+Every other assistant runs the same `npx -y breakscale-mcp --stdio`.
+[mcp/README.md](mcp/README.md) has the setup for Cursor, Claude Desktop, Codex, Gemini CLI,
+Windsurf, Goose and Zed, which of them show the canvas, and some things to try once it is
+connected. The source is in [`mcp/`](mcp/).
+
 ## Features
 
 - **33 components.** Load balancers, caches, databases, queues and workers, plus CDNs, rate
@@ -144,6 +180,8 @@ src/sim/         the simulation engine. No React, no DOM, no I/O
 src/components/  canvas, inspector, metrics, palette
 src/content/     glossary text
 src/App.tsx      shell: layout, the animation loop, persistence
+extension/       the VS Code extension that runs the simulator in an editor panel
+mcp/             the MCP server that lets an AI assistant draw and run designs
 ```
 
 The engine has no UI dependency, so you can drive it from a script:

@@ -1,0 +1,27 @@
+/*
+ * Sizing inside a chat.
+ *
+ * The app fills its viewport, and a host sizes the iframe from the page's
+ * own height, so left alone each waits on the other and the view settles
+ * at whatever height the host started with. Inline, the page gets a
+ * height of its own; in fullscreen the host decides and the app fills it.
+ *
+ * On body, not html: the SDK measures by setting html to max-content for
+ * a frame, which would override a height set there.
+ */
+html body {
+  height: 620px;
+}
+
+html[data-display='fullscreen'] body {
+  height: 100vh;
+}
+
+#root > .app {
+  height: 100%;
+}
+
+.view-error {
+  padding: var(--sp-4);
+  color: var(--danger);
+}

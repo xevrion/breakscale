@@ -1,0 +1,57 @@
+{
+  "name": "breakscale-mcp",
+  "version": "0.1.0",
+  "description": "Breakscale as an MCP server: an AI assistant builds a system design, runs it through a real simulation, and shows it on a live canvas",
+  "license": "MIT",
+  "author": "xevrion",
+  "homepage": "https://breakscale.tech",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xevrion/breakscale.git",
+    "directory": "mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/xevrion/breakscale/issues"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-app",
+    "model-context-protocol",
+    "system-design",
+    "simulator",
+    "architecture",
+    "distributed-systems"
+  ],
+  "type": "module",
+  "bin": {
+    "breakscale-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/index.js"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "vite build && bun scripts/readme.ts && bun build src/main.ts --outfile dist/index.js --target node --banner \"#!/usr/bin/env node\" --define 'import.meta.env={\"VITE_SHARE_API\":\"https://links.breakscale.tech\"}'",
+    "serve": "node dist/index.js",
+    "serve:stdio": "node dist/index.js --stdio",
+    "typecheck": "tsc --noEmit -p .",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.1.0",
+    "@modelcontextprotocol/express": "^2.0.1",
+    "@modelcontextprotocol/ext-apps": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.1.0",
+    "@modelcontextprotocol/server": "^2.1.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "zod": "^4.6.5",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.2.2",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}

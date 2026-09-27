@@ -9,7 +9,9 @@ export default defineConfig({
     // Repairs localStorage for the files that opt into jsdom. See the
     // comment in vitest.setup.ts for what Node broke and why.
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // mcp/src too: its tests import only the engine and this repo's own
+    // modules, so they run on a clean checkout without mcp's dependencies.
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'mcp/src/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/sim/**', 'src/content/**', 'src/components/format.ts'],

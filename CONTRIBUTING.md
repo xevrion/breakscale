@@ -87,6 +87,8 @@ src/content/     glossary text
 src/share/       share links: the wire format, encryption, the store client
 src/App.tsx      shell: layout, the animation loop, persistence
 worker/          the Cloudflare Worker behind short share links
+extension/       the VS Code extension that runs the simulator in an editor panel
+mcp/             the MCP server that lets an AI assistant draw and run designs
 ```
 
 The important boundary is that `src/sim` knows nothing about the UI. It is a pure discrete-event
