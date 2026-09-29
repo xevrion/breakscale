@@ -18,6 +18,11 @@ scratch-*.ts
 # Local Claude Code permissions, per-machine and not part of the project
 .claude/settings.local.json
 
+# Playwright artifacts. Baselines are NOT ignored: they are committed, per
+# platform, and tests/visual/README.md is the contract for refreshing them.
+test-results/
+playwright-report/
+
 # Wrangler's local state. The cache under it records the machine that ran
 # it, down to the city and the ISP, so it is per-machine and private.
 .wrangler/
