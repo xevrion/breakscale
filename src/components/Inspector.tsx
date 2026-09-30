@@ -2572,7 +2572,6 @@ function QueuePanel({ stats }: { stats: NodeStats }) {
   const limit = stats.queueLimit > 0 ? stats.queueLimit : 1;
   const depth = stats.queued;
   const fill = Math.min(1, depth / limit);
-  const shedding = stats.shedRate > 0;
   return (
     <Section title="The line">
       <div className="ins-util">
@@ -2586,17 +2585,10 @@ function QueuePanel({ stats }: { stats: NodeStats }) {
         </div>
         <Meter value={fill} tone={toneClass(healthOfLoad(fill))} />
       </div>
-      {shedding ? (
-        <p className="ins-hint is-danger">
-          Full. It is turning away {formatRate(stats.shedRate)}. Work arriving now is
-          being destroyed, not delayed. The consumers cannot keep up.
-        </p>
-      ) : depth > 0 ? (
-        <p className="ins-hint">
-          Work is waiting here because the consumers are slower than the producers. It
-          drains once they catch up.
-        </p>
-      ) : null}
+      <p className="ins-hint">
+        Work is processed when consumers keep up, waits when they fall behind and is
+        turned away when the queue is full.
+      </p>
     </Section>
   );
 }
